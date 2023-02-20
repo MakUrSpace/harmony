@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 MAX_CAM_ID = int(os.getenv("OBS_MAX_CAM_ID", '6'))
 CAPTURE_TIME = float(os.getenv("OBS_CAPTURE_TIME", '5'))
-EXPECTED_CAMS = [int(camNum) for camNum in os.getenv("OBS_EXPECTED_CAMS", '0').split(',')]
+EXPECTED_CAMS = [int(camNum) for camNum in os.getenv("OBS_EXPECTED_CAMS", '0').split(',') if camNum != '']
 
 
 def capture_camera(cam_num):
@@ -74,7 +74,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     CAMERAS = identify_cameras()
     for eC in EXPECTED_CAMS:
-        assert eC in CAMERAS, f"Expected to find Camera: {ec}"
+        assert eC in CAMERAS, f"Expected to find Camera: {eC}"
     print(f"Supporting Cameras: {CAMERAS}")
     collectFromCameras()
 
