@@ -23,8 +23,8 @@
 </div>
 <div class="container">
     {% for cam in cameras %}
-        <div class="row">
-            <div class="col-lg-8  offset-lg-2">
+        <div class="row align-items-center">
+            <div class="col  offset-1">
                 <h3 class="mt-5">Live Streaming</h3>
                 <img src="{{ url_for('video_feed', camera_idx=cam) }}" width="100%">
             </div>

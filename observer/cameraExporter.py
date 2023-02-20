@@ -13,9 +13,9 @@ CAMERAS = []
 app = Flask(__name__)
 
 
-EXPORT_URL = os.getenv("OT_EXPORT_URL", "localhost:7000/observer")
-EXPECTED_CAMS = [int(camNum) for camNum in os.getenv("OT_EXPECTED_CAMS", "0").split(",")]
-EXPORT_SLEEP = min(float(os.getenv("OT_EXPORT_SLEEP", "10")), 5)
+EXPORT_URL = os.getenv("OBS_EXPORT_URL", "localhost:7000/observer")
+EXPECTED_CAMS = [int(camNum) for camNum in os.getenv("OBS_EXPECTED_CAMS", "0").split(",")]
+EXPORT_SLEEP = min(float(os.getenv("OBS_EXPORT_SLEEP", "10")), 5)
 
 
 def identify_cameras():

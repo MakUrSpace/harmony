@@ -17,9 +17,9 @@ CAMERA_FRAMES = {}
 app = Flask(__name__)
 
 
-MAX_CAM_ID = int(os.getenv("OT_MAX_CAM_ID", '6'))
-CAPTURE_TIME = float(os.getenv("OT_CAPTURE_TIME", '5'))
-EXPECTED_CAMS = [int(camNum) for camNum in os.getenv("OT_EXPECTED_CAMS", '0').split(',')]
+MAX_CAM_ID = int(os.getenv("OBS_MAX_CAM_ID", '6'))
+CAPTURE_TIME = float(os.getenv("OBS_CAPTURE_TIME", '5'))
+EXPECTED_CAMS = [int(camNum) for camNum in os.getenv("OBS_EXPECTED_CAMS", '0').split(',')]
 
 
 def capture_camera(cam_num):
