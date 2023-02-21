@@ -21,7 +21,7 @@ def identify_cameras():
 
 def gen_frames(camera_idx):
     while True:
-        with open(f"output/cam{camera_idx}.jpg", "rb") as f:
+        with open(f"output/cam{camera_idx}_frame0.jpg", "rb") as f:
             jpg = f.read()
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n')
