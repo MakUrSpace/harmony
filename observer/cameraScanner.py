@@ -47,7 +47,7 @@ def identify_cameras(device_numbers=list(range(MAX_CAM_ID))):
 
 def collectFromCameras():
     global CAMERA_FRAMES
-    sleep_time = (CAPTURE_TIME / (CAPTURE_FRAMES * 1.1)) * 0.2
+    sleep_time = (CAPTURE_TIME / (CAPTURE_FRAMES * 1.1))
     while True:
         for camNum in CAMERAS:
             print(f"Capturing {CAPTURE_FRAMES} frames off of {camNum}; sleeping for {sleep_time}")

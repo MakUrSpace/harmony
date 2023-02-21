@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 EXPORT_URL = os.getenv("OBS_EXPORT_URL", "http://localhost:7000/observer/foobar")
 EXPECTED_CAMS = os.getenv("OBS_EXPECTED_CAMS", "0").split(",")
-EXPORT_SLEEP = min(float(os.getenv("OBS_EXPORT_SLEEP", "30")), 5)
+EXPORT_SLEEP = max(float(os.getenv("OBS_EXPORT_SLEEP", "30")), 5)
 
 
 def identify_cameras():
