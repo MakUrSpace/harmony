@@ -23,10 +23,11 @@ def identify_cameras():
 @app.route('/observer/<observer_name>', methods=['POST'])
 def receive_images(observer_name):
     imported_images = request.get_json()
-    for cam, image in imported_images.items():
-        imageBin = base64.b64decode(image)
-        with open(f"imported/{observer_name}_cam{cam}_{datetime.utcnow().strftime('%Y-%m-%dT%H_%M')}.jpg", "wb") as f:
-           f.write(imageBin) 
+    for cam, frames in imported_images.items():
+        for idx, image in enumerate(frames):
+            imageBin = base64.b64decode(image)
+            with open(f"imported/{observer_name}_cam{cam}_frame{idx}_{datetime.utcnow().strftime('%Y-%m-%dT%H_%M')}.jpg", "wb") as f:
+               f.write(imageBin) 
 
     return "Success!!"
 

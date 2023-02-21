@@ -17,8 +17,9 @@ CAMERA_FRAMES = {}
 app = Flask(__name__)
 
 
-MAX_CAM_ID = int(os.getenv("OBS_MAX_CAM_ID", '6'))
+MAX_CAM_ID = int(os.getenv("OBS_MAX_CAM_ID", '10'))
 CAPTURE_TIME = float(os.getenv("OBS_CAPTURE_TIME", '5'))
+CAPTURE_FRAMES = int(os.getenv("OBS_CAPTURE_FRAMES", '5'))
 EXPECTED_CAMS = [int(camNum) for camNum in os.getenv("OBS_EXPECTED_CAMS", '0').split(',') if camNum != '']
 
 
@@ -46,23 +47,23 @@ def identify_cameras(device_numbers=list(range(MAX_CAM_ID))):
 
 def collectFromCameras():
     global CAMERA_FRAMES
+    sleep_time = (CAPTURE_TIME / (CAPTURE_FRAMES * 1.1)) * 0.2
     while True:
         for camNum in CAMERAS:
-            print(f"Capturing {camNum}")
+            print(f"Capturing {CAPTURE_FRAMES} frames off of {camNum}; sleeping for {sleep_time}")
             start = datetime.utcnow()
             try:
                 cap = cv2.VideoCapture(camNum)
                 print("capture created")
-                while (datetime.utcnow() - start).total_seconds() < CAPTURE_TIME:
+                for frame in range(CAPTURE_FRAMES):
                     ret, cv2_im = cap.read()
-
                     retval, buff = cv2.imencode('.jpg', cv2_im)
                     with open(f"output/cam{camNum}_new.jpg", "wb") as f:
                         f.write(buff)
-                    os.rename(f"output/cam{camNum}_new.jpg", f"output/cam{camNum}.jpg")
+                    os.rename(f"output/cam{camNum}_new.jpg", f"output/cam{camNum}_frame{frame}.jpg")
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
-                    sleep(0.05)
+                    sleep(sleep_time)
             except Exception as e:
                 print(f"Failed to capture {camNum}: {e}")
             finally:
@@ -74,7 +75,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     CAMERAS = identify_cameras()
     for eC in EXPECTED_CAMS:
-        assert eC in CAMERAS, f"Expected to find Camera: {eC}"
+        assert eC in CAMERAS, f"Expected to find Camera: {eC} in {CAMERAS}"
     print(f"Supporting Cameras: {CAMERAS}")
     collectFromCameras()
 
