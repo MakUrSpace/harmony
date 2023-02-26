@@ -69,17 +69,16 @@ def frameDifferences(image0, image1):
 
 def collectFromCamera(camNum, frames=CAPTURE_FRAMES, delay=0.5):
     cap = cv2.VideoCapture(camNum)
+    sleep(delay)
     try:
-        sleep(delay)
-        for f in range(CAPTURE_FRAMES):
-            for frame in range(CAPTURE_FRAMES):
-                ret, cv2_im = cap.read()
-                sleep(delay)
-            retval, buff = cv2.imencode('.jpg', cv2_im)
-            with open(f"output/cam{camNum}_f{f}_new.jpg", "wb") as f:
-                f.write(buff)
-            os.rename(f"output/cam{camNum}_f{f}_new.jpg", f"output/cam{camNum}_f{frame}.jpg")
+        for frame in range(CAPTURE_FRAMES):
+            ret, cv2_im = cap.read()
             sleep(delay)
+        retval, buff = cv2.imencode('.jpg', cv2_im)
+        with open(f"output/cam{camNum}_f{frame}_new.jpg", "wb") as f:
+            f.write(buff)
+        os.rename(f"output/cam{camNum}_f{frame}_new.jpg", f"output/cam{camNum}_f{frame}.jpg")
+        sleep(delay)
     finally:
         cap.release()
 
