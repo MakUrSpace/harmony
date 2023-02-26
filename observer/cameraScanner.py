@@ -64,23 +64,24 @@ def frameDifferences(image0, image1):
                 cv2.rectangle(image1, (x, y), (x+w, y+h), (0,0,255), 2)
                 cv2.putText(coreImage, f'{x}-{x+w}, {y}-{y+w}', (x, y), cv2.FONT_HERSHEY_SIMPLEX, 
                        1, (255, 0, 0), 2, cv2.LINE_AA)
-	return image1
+    return image1
 
 
 def collectFromCamera(camNum, frames=CAPTURE_FRAMES, delay=0.5):
     cap = cv2.VideoCapture(camNum)
-	try:
-		sleep(delay)
-		for f in range(CAPTURE_FRAMES):
-			for frame in range(CAPTURE_FRAMES):
-				ret, cv2_im = cap.read()
-			retval, buff = cv2.imencode('.jpg', cv2_im)
-			with open(f"output/cam{camNum}_f{f}_new.jpg", "wb") as f:
-				f.write(buff)
-			os.rename(f"output/cam{camNum}_f{f}_new.jpg", f"output/cam{camNum}_f{frame}.jpg")
-			sleep(delay)
-	finally:
-		cap.release()
+    try:
+        sleep(delay)
+        for f in range(CAPTURE_FRAMES):
+            for frame in range(CAPTURE_FRAMES):
+                ret, cv2_im = cap.read()
+                sleep(delay)
+            retval, buff = cv2.imencode('.jpg', cv2_im)
+            with open(f"output/cam{camNum}_f{f}_new.jpg", "wb") as f:
+                f.write(buff)
+            os.rename(f"output/cam{camNum}_f{f}_new.jpg", f"output/cam{camNum}_f{frame}.jpg")
+            sleep(delay)
+    finally:
+        cap.release()
 
 
 def collectFromCameras():
@@ -88,7 +89,7 @@ def collectFromCameras():
     lastFrames = {camNum: None for camNum in CAMERAS}
     while True:
         for camNum in CAMERAS:
-			collectFromCamera(camNum, CAPTURE_FRAMES) 
+            collectFromCamera(camNum, CAPTURE_FRAMES) 
         sleep(5)
 
 
@@ -100,4 +101,3 @@ if __name__ == '__main__':
         assert eC in CAMERAS, f"Expected to find Camera: {eC} in {CAMERAS}"
     print(f"Supporting Cameras: {CAMERAS}")
     collectFromCameras()
-
