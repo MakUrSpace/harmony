@@ -41,8 +41,9 @@ def exportLoop():
     while True:
         imagePacket = {}
         for cam in CAMERAS:
-            print(f"{datetime.utcnow()}: Exporting {cam}")
+            print(f"{datetime.utcnow()}: Capturing Cam {cam}")
             imagePacket[cam] = getCameraImages(cam)
+        print(f"{datetime.utcnow()}: Sending Image Packet...")
         resp = req.post(EXPORT_URL, json=imagePacket)
         assert resp.status_code == 200, f"Failed to export images: {resp.text}"
         print(f"{datetime.utcnow()}: Resting...")

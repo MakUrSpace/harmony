@@ -15,7 +15,7 @@ app = Flask(__name__)
 
 def identify_cameras():
     cameraOutputs = os.listdir("output")
-    cameras = [fn.split(".")[0][3:] for fn in cameraOutputs]
+    cameras = list(set([fn[3:4] for fn in cameraOutputs]))
     return cameras
 
 
