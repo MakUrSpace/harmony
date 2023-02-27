@@ -88,6 +88,7 @@ def collectFromCameras():
     lastFrames = {camNum: None for camNum in CAMERAS}
     while True:
         for camNum in CAMERAS:
+            print(f"Collecting from: {camNum}")
             collectFromCamera(camNum, CAPTURE_FRAMES) 
         sleep(5)
 

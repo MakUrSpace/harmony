@@ -21,7 +21,7 @@ def identify_cameras():
 
 def gen_frames(camera_idx):
     while True:
-        camImage = sorted([path for path in os.listdir("output") if f"cam{camera_idx}_" in path])[0]
+        camImage = sorted([path for path in os.listdir("output") if f"changeTracked_c{camera_idx}" in path])[0]
         with open(f"output/{camImage}", "rb") as f:
             jpg = f.read()
         yield (b'--frame\r\n'

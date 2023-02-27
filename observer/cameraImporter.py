@@ -23,12 +23,18 @@ def identify_cameras():
 @app.route('/observer/<observer_name>', methods=['POST'])
 def receive_images(observer_name):
     imported_images = request.get_json()
+    deltas = imported_images.pop("DELTAS")
     for cam, frames in imported_images.items():
         os.makedirs(f"imported/{observer_name}", exist_ok=True)
         for idx, image in enumerate(frames):
             imageBin = base64.b64decode(image)
             with open(f"imported/{observer_name}/{observer_name}_cam{cam}_frame{idx}_{datetime.utcnow().strftime('%Y-%m-%dT%H_%M')}.jpg", "wb") as f:
-               f.write(imageBin) 
+               f.write(imageBin)
+    for cam, deltaImages in deltas.items():
+        for idx, image in enumerate(deltaImages):
+            imageBin = base64.b64decode(image)
+            with open(f"imported/{observer_name}/deltas_cam{cam}_{datetime.utcnow().strftime('%Y-%m-%dT%H_%M')}.jpg", "wb") as f:
+               f.write(imageBin)
 
     return "Success!!"
 
