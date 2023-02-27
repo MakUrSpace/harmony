@@ -52,8 +52,10 @@ def drawBoxesOnImage(image, boxes):
 
 
 def identify_cameras():
-    cameraOutputs camera_idx= os.listdir("output")
+    cameraOutputs = os.listdir("output")
     cameras = list(set([int(fn[3:4]) for fn in cameraOutputs]))
+    LAST_IMAGE = {c:None for c in cameras}
+    DELTAS = {c:[] for c in cameras}
     return cameras
 
 
