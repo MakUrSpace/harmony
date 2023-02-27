@@ -64,13 +64,16 @@ def getCameraImagePaths(camera_idx):
 
 
 def getCameraImages(camera_idx):
+    camImages = []
     for image in getCameraImagePaths(camera_idx):
         if f"cam{camera_idx}" in image:
-            with open(f"output/{image}", "rb") as f:
+            with open(image, "rb") as f:
                 jpg = f.read()
             camImages.append(base64.b64encode(jpg))
     newImage = cv2.imread(f"output/{image}")
-    updateCameraState(newImage)
+    if LAST_IMAGE[camera_idx] is not None:
+        updateCameraState(camera_idx, newImage)
+    LAST_TIME[camera_idx] = newImage
     return camImages
 
 
@@ -84,9 +87,7 @@ def updateCameraState(camera_idx, newImage):
         retval, buffer = cv2.imencode('.jpg', subImage)
         deltas.append(base64.b64encode(buffer))
     DELTAS[camera_idx] = deltas
-
     cv2.imwrite(f"output/changeTracked_c{camera_idx}.jpg", diffImage)
-    LAST_IMAGE[camera_idx] = newImage
 
 
 def exportLoop():
