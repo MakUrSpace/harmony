@@ -79,6 +79,8 @@ def collectFromCamera(camNum, frames=CAPTURE_FRAMES, delay=0.5):
             f.write(buff)
         os.rename(f"output/cam{camNum}_f{frame}_new.jpg", f"output/cam{camNum}_f{frame}.jpg")
         sleep(delay)
+    except Exception as e:
+        print(f"Failed to capture Camera {camNum}: {e}")
     finally:
         cap.release()
 
