@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css"
+          integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+    
+    <style>
+        table, th, td {
+          border: 1px solid black;
+          padding: 15px;
+        }
+    </style>
+
+    <title>Observer Control</title>
+</head>
+<body>
+<div class="container">
+    <h1 align="center">Observer Controller</h1>
+    <div class="row">
+        <div class="col-lg offset-lg d-flex align-items-center justify-content-center">
+            {captureImage}
+        </div>
+    </div>
+    <div class="row">
+        <h2 class="mt-5">Game Management</h2>
+        <div class="container">
+            <div class="row">
+                <div class="col offset" align="left">
+                    <form method="post">
+                        <input type="radio" id="null" name="capture_type" value="Null">
+                        <label for="null">Null</label><br>
+                        <input type="radio" id="add" name="capture_type" value="Add">
+                        <label for="add">Add</label><br>
+                        <p style="text-indent: 1em"><label for="obj_name">* Object Name:&nbsp;&nbsp;</label><input type="text" id="obj_name" name="obj_name" placeholder="New Object Name" size="15"></p>
+                        <input type="radio" id="del" name="capture_type" value="Delete">
+                        <label for="del">Delete</label><br>
+                        <p style="text-indent: 1em"><label for="obj_name">* Object Name:&nbsp;&nbsp;</label><input type="text" id="obj_name" name="obj_name" placeholder="Object Name" size="15"></p>
+                        <input type="radio" id="mvsel" name="capture_type" value="Select to Move">
+                        <label for="mvsel">Select to Move</label><br>
+                        <input type="radio" id="move" name="capture_type" value="Move">
+                        <label for="move">Move</label><br>
+                        <input type="radio" id="obj_ranges" name="capture_type" value="Object Range">
+                        <label for="atk">Get Object Ranges</label><br>
+                        <p style="text-indent: 1em"><label for="obj_name">* Aggressor Name:&nbsp;&nbsp;</label><input type="text" id="obj_name" name="obj_name" placeholder="Aggressor Object" size="15"></p>
+                        <input type="submit" value="Capture">
+                    </form>
+                </div>
+                <div class="col offset d-flex align-items-center justify-content-center">
+                    <div class="container">
+                        <div class="row justify-content-center">
+                            <iframe src="/console"></iframe>
+                        </div>
+                        <div class="row justify-content-center">
+                            <form>
+                                <input type="submit" value="Commit Changes">
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <hr>
+    <div class="row">
+        <div class="container" align="center">
+            <div class="row justify-content-center">
+                <h2 class="mt-5">Capture Objects Table</h2>
+            </div>
+            <div class="row justify-content-center">
+                {captureObjectsTable}
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
