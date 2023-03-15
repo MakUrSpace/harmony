@@ -36,10 +36,10 @@
                         <label for="null">Null</label><br>
                         <input type="radio" id="add" name="capture_type" value="Add">
                         <label for="add">Add</label><br>
-                        <p style="text-indent: 1em"><label for="obj_name">* Object Name:&nbsp;&nbsp;</label><input type="text" id="obj_name" name="obj_name" placeholder="New Object Name" size="15"></p>
+                        <p style="text-indent: 1em"><label for="add_obj_name">* Object Name:&nbsp;&nbsp;</label><input type="text" id="add_obj_name" name="add_obj_name" placeholder="New Object Name" size="15"></p>
                         <input type="radio" id="del" name="capture_type" value="Delete">
                         <label for="del">Delete</label><br>
-                        <p style="text-indent: 1em"><label for="obj_name">* Object Name:&nbsp;&nbsp;</label><input type="text" id="obj_name" name="obj_name" placeholder="Object Name" size="15"></p>
+                        <p style="text-indent: 1em"><label for="del_obj_name">* Object Name:&nbsp;&nbsp;</label><input type="text" id="del_obj_name" name="del_obj_name" placeholder="Object Name" size="15"></p>
                         <input type="radio" id="mvsel" name="capture_type" value="Select to Move">
                         <label for="mvsel">Select to Move</label><br>
                         <input type="radio" id="move" name="capture_type" value="Move">
@@ -47,6 +47,8 @@
                         <input type="radio" id="obj_ranges" name="capture_type" value="Object Range">
                         <label for="atk">Get Object Ranges</label><br>
                         <p style="text-indent: 1em"><label for="obj_name">* Aggressor Name:&nbsp;&nbsp;</label><input type="text" id="obj_name" name="obj_name" placeholder="Aggressor Object" size="15"></p>
+                        <input type="radio" id="pov" name="capture_type" value="POV">
+                        <label for="pov">POV</label><br>
                         <input type="submit" value="Capture">
                     </form>
                 </div>
@@ -56,8 +58,13 @@
                             <iframe src="/console"></iframe>
                         </div>
                         <div class="row justify-content-center">
-                            <form>
+                            <form method="post">
+                                <input type="hidden" id="capture_type" name="capture_type" value="commit">
                                 <input type="submit" value="Commit Changes">
+                            </form><br>
+                            <form method="post">
+                                <input type="hidden" id="capture_type" name="capture_type" value="reject">
+                                <input type="submit" value="Reject Changes">
                             </form>
                         </div>
                     </div>
@@ -72,7 +79,7 @@
                 <h2 class="mt-5">Capture Objects Table</h2>
             </div>
             <div class="row justify-content-center">
-                {captureObjectsTable}
+                <iframe src="/captureObjects" style="width:100%;min-height:300px"></iframe>
             </div>
         </div>
     </div>

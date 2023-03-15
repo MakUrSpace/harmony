@@ -7,7 +7,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.Observer import cc, cameras
+from ipynb.fs.full.Observer import cc, cameras, pov
 from flask import Flask, render_template, Response, request
 
 
@@ -154,72 +154,19 @@ def updateConfig():
             xPosition = float(request.form.get('calibrate_x'))
             yPosition = float(request.form.get('calibrate_y'))
             try:
-                cameras[camNum].calibrate((xPosition, yPosition))
-                CONSOLE_OUTPUT = f"Camera {camNum} Calibrated to ({xPosition}, {yPosition})"
+                qrCodes = cameras[camNum].calibrate((xPosition, yPosition))
+                CONSOLE_OUTPUT = f"Camera {camNum} Calibrated to ({xPosition}, {yPosition}). Saw {qrCodes} calibration boxes"
             except Exception as e:
                 print(f"Failed Calibration: {e}")
                 CONSOLE_OUTPUT = f"Failed Calibration: {e}"
 
     print(f"Rebuilding configurator")
     return buildConfigurator()
-    
 
-pieceToMove = None
-    
-    
-@observerApp.route('/control', methods=['GET', 'POST'])
-def controller():
-    global CONSOLE_OUTPUT
-    CONSOLE_OUTPUT = ""
-    captureType = request.form.get("capture_type")
-    if (captureType) is not None:
-        if captureType == 'Null':
-            captures = cc.capture()
-            CONSOLE_OUTPUT = {cam: [d for d in camCap[1]] for cam, camCap in captures.items()}
-        elif captureType == 'Add':
-            objName = request.form.get("obj_name")
-            captures = cc.capture()
-            CONSOLE_OUTPUT = {cam: [d for d in camCap[1]] for cam, camCap in captures.items()}
-            cc.defineObject(objName, captures)
-        elif captureType == 'Delete':
-            objName = request.form.get("obj_name")
-            assert objName in cc.captureObjects, f"Unrecognized object: {objName}"
-            cc.captureObjects.pop(objName)
-            CONSOLE_OUTPUT = f"{objName} deleted"
-        elif captureType == "Select to Move":
-            #locate piece
-            pass
-        elif captureType == 'Move':
-            objName = request.form.get("obj_name")
-            if False:
-                captures = cc.lastCapture
-                endingPoints = [cameras[cam].convertCameraToRealSpace(Camera.boxToBasePoint(camCap[1][0])) for cam, camCap in captures.items()]
-                print(f"Estimated Placement Coordinates: {endingPoints}")
-                avgDistanceEstimate = sum(distances := [
-                    Camera.distanceFormula(sP, eP) * CalibrationBox.millimetersPerPixel
-                    for eP in endingPoints
-                    for sP in startingPoints]) / len(distances)
-                print(f"Average Distance Estimate: {avgDistanceEstimate}")
-                _, changeBoxes, transitions = zip(*captures.values())
-                cc.updateObject(resp[0].name, changeBoxes, transitions)
-        elif captureType == 'Object Range':
-            objName = request.form.get("obj_name")
-            pass
-        else:
-            raise Exception(f"Unrecognized capture type: {captureType}")
 
-    fig = Figure(figsize=(20, 20), tight_layout=True)
-    cols = len(cameras)
-    for idx, cam in enumerate(cameras.values()):
-        axis = fig.add_subplot(1, cols, idx + 1)
-        axis.imshow(cam.drawActiveZone(cc.drawObjectsOnCam(cam)))
-        axis.set_title(f"Camera {cam.camNum}")
-    plot = BytesIO()
-    fig.tight_layout(pad=0)
-    FigureCanvas(fig).print_png(plot)
-    plot.seek(0)
-    plot = base64.b64encode(plot.read()).decode()
-    
+
+@observerApp.route('/captureObjects', methods=['GET'])
+def captureObjectsTable():
     capObjTableRows = "\n".join([f"""
         <tr>
             <td>{capObj.name}</td>
@@ -227,7 +174,18 @@ def controller():
         </tr>
     """ for capObj in cc.captureObjects.values()])
     
-    captureObjTable = f"""<table>
+    captureObjTable = f"""
+<html lang="en">
+<head>
+    <style>
+        table, th, td {{
+          border: 1px solid black;
+          padding: 15px;
+        }}
+    </style>
+</head>
+<body>
+    <table style="width:100%">
         <thead>
             <tr>
                 <th>Object Name</th>
@@ -237,12 +195,102 @@ def controller():
         <tbody>
             {capObjTableRows}
         </tbody>
-    </table>"""
+    </table>
+</body>
+</html>
+"""
+    
+    return captureObjTable
+    
+
+SELECTED = None
+LASTCHANGE = None
+
+
+@observerApp.route('/control', methods=['GET', 'POST'])
+def controller():
+    global CONSOLE_OUTPUT, LASTCHANGE
+    CONSOLE_OUTPUT = ""
+    captureType = request.form.get("capture_type")
+    if (captureType) is not None:
+        if captureType == 'commit':
+            LASTCHANGE[0](*LASTCHANGE[1:])
+            CONSOLE_OUTPUT = "Last Change committed"
+            LASTCHANGE = None
+        elif captureType == "reject":
+            LASTCHANGE = None
+            for cam in cameras.values():
+                cam.imageBuffer[0] = cam.imageBuffer[1]
+            CONSOLE_OUTPUT = "Last capture rejected"
+        elif captureType == 'Null':
+            captures = cc.capture()
+            changeBoxes = {cam: [d for d in camCap[1]] for cam, camCap in captures.items()}
+            CONSOLE_OUTPUT = f"Captured: {changeBoxes}"
+        elif captureType == 'Add':
+            objName = request.form.get("add_obj_name")
+            captures = cc.capture()
+            changeBoxes = {cam: [d for d in camCap[1]] for cam, camCap in captures.items()}
+            CONSOLE_OUTPUT = f"Captured: {changeBoxes}"
+            LASTCHANGE = (cc.defineObject, objName, captures)
+        elif captureType == 'Delete':
+            objName = request.form.get("del_obj_name")
+            assert objName in cc.captureObjects, f"Unrecognized object: {objName}"
+            cc.captureObjects.pop(objName)
+            CONSOLE_OUTPUT = f"{objName} deleted"
+        elif captureType == "Select to Move":
+            captures = cc.capture()
+            try:
+                selectedObj = cc.identifySelectedObject(captures)
+                startingPoints = [cameras[cam].convertCameraToRealSpace(Camera.boxToBasePoint(camCap[1][0]))
+                                  for cam, camCap in captures.items()]
+                SELECTED = (selectedOBJ, startingPoints)
+                CONSOLE_OUTPUT = f"Selected {SELECTED[0]}"
+            except Exception as e:
+                CONSOLE_OUTPUT = f"Failed to identify selected object: {e}"
+        elif captureType == 'Move':
+            assert SELECTED is not None, "No Mech selected to move"
+            captures = cc.lastCapture
+            endingPoints = [cameras[cam].convertCameraToRealSpace(Camera.boxToBasePoint(camCap[1][0])) for cam, camCap in captures.items()]
+            CONSOLE_OUTPUT = f"Moved {SELECTED[0]} to Estimated Placement Coordinates:<br>{endingPoints}"
+            avgDistanceEstimate = sum(distances := [
+                Camera.distanceFormula(sP, eP) * CalibrationBox.millimetersPerPixel
+                for eP in endingPoints
+                for sP in SELECTED[1]]) / len(distances)
+            CONSOLE_OUTPUT += f"<br>Distance Moved Estimate: {avgDistanceEstimate}"
+            _, changeBoxes, transitions = zip(*captures.values())
+            cc.updateObject(SELECTED[0], changeBoxes, transitions)
+        elif captureType == 'Object Range':
+            objName = request.form.get("obj_name")
+            CONSOLE_OUTPUT = "Not implemented"
+        elif captureType == "POV":
+            res, image = cv2.imencode('.jpg', pov.collectImage())
+            if res != True:
+                CONSOLE_OUTPUT = f'Failed to encode image'
+            else:
+                povCap = base64.b64encode(image.tobytes()).decode()
+                CONSOLE_OUTPUT = f'<img src="data:image/jpg;base64,{povCap}"/>'
+        else:
+            raise Exception(f"Unrecognized capture type: {captureType}")
             
+    if LASTCHANGE is not None:
+        changeBoxes = {cam: [d for d in camCap[1]] for cam, camCap in LASTCHANGE[2].items()} 
+        CONSOLE_OUTPUT += f"<br><br>LASTCHANGE: {LASTCHANGE[1]} - {changeBoxes}"
+
+    fig = Figure(figsize=(20, 20), tight_layout=True)
+    cols = len(cameras)
+    for idx, cam in enumerate(cameras.values()):
+        axis = fig.add_subplot(1, cols, idx + 1)
+        axis.imshow(cam.drawActiveZone(cc.drawDeltasOnCam(cam, cc.drawObjectsOnCam(cam))))
+        axis.set_title(f"Camera {cam.camNum}")
+    plot = BytesIO()
+    fig.tight_layout(pad=0)
+    FigureCanvas(fig).print_png(plot)
+    plot.seek(0)
+    plot = base64.b64encode(plot.read()).decode()
+      
     with open("templates/Controller.html") as f:
         template = f.read()
     template = template.replace("{captureImage}", f'<img src="data:image/png;base64,{plot}" width="640" height="480"/>')
-    template = template.replace("{captureObjectsTable}", captureObjTable)
     return template
 
 
@@ -257,4 +305,3 @@ if __name__ == '__main__':
     cc.capture()
     print(f"Launching Observer Server on {PORT}")
     observerApp.run(host="0.0.0.0", port=PORT)
-480
