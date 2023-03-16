@@ -7,7 +7,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.Observer import cc, cameras, pov
+from ipynb.fs.full.Observer import cc, cameras, pov, Camera, CalibrationBox
 from flask import Flask, render_template, Response, request
 
 
@@ -170,6 +170,7 @@ def captureObjectsTable():
     capObjTableRows = "\n".join([f"""
         <tr>
             <td>{capObj.name}</td>
+            <td>{capObj.realCoords}</td>
             <td>{capObj.camBoxes}</td>
         </tr>
     """ for capObj in cc.captureObjects.values()])
@@ -189,6 +190,7 @@ def captureObjectsTable():
         <thead>
             <tr>
                 <th>Object Name</th>
+                <th>Real Coordinates</th>
                 <th>Object Camera Boxes</th>
             </tr>
         </thead>
@@ -209,7 +211,7 @@ LASTCHANGE = None
 
 @observerApp.route('/control', methods=['GET', 'POST'])
 def controller():
-    global CONSOLE_OUTPUT, LASTCHANGE
+    global CONSOLE_OUTPUT, LASTCHANGE, SELECTED
     CONSOLE_OUTPUT = ""
     captureType = request.form.get("capture_type")
     if (captureType) is not None:
@@ -223,13 +225,17 @@ def controller():
                 cam.imageBuffer[0] = cam.imageBuffer[1]
             CONSOLE_OUTPUT = "Last capture rejected"
         elif captureType == 'Null':
+            LASTCHANGE = None
+            SELECTED = None
             captures = cc.capture()
-            changeBoxes = {cam: [d for d in camCap[1]] for cam, camCap in captures.items()}
+            changeBoxes = {cam: camCap[1] for cam, camCap in captures.items()}
             CONSOLE_OUTPUT = f"Captured: {changeBoxes}"
         elif captureType == 'Add':
             objName = request.form.get("add_obj_name")
+            movable = request.form.get("movable")
+            targetable = request.form.get("targetable")
             captures = cc.capture()
-            changeBoxes = {cam: [d for d in camCap[1]] for cam, camCap in captures.items()}
+            changeBoxes = {cam: camCap[1] for cam, camCap in captures.items()}
             CONSOLE_OUTPUT = f"Captured: {changeBoxes}"
             LASTCHANGE = (cc.defineObject, objName, captures)
         elif captureType == 'Delete':
@@ -238,19 +244,23 @@ def controller():
             cc.captureObjects.pop(objName)
             CONSOLE_OUTPUT = f"{objName} deleted"
         elif captureType == "Select to Move":
+            LASTCHANGE = None
             captures = cc.capture()
             try:
-                selectedObj = cc.identifySelectedObject(captures)
+                selectedObj = cc.identifySelectedObject(captures)[0]
                 startingPoints = [cameras[cam].convertCameraToRealSpace(Camera.boxToBasePoint(camCap[1][0]))
-                                  for cam, camCap in captures.items()]
-                SELECTED = (selectedOBJ, startingPoints)
+                                  for cam, camCap in captures.items()
+                                  if len(camCap[1]) > 0]
+                SELECTED = (selectedObj.name, startingPoints)
                 CONSOLE_OUTPUT = f"Selected {SELECTED[0]}"
             except Exception as e:
                 CONSOLE_OUTPUT = f"Failed to identify selected object: {e}"
         elif captureType == 'Move':
             assert SELECTED is not None, "No Mech selected to move"
-            captures = cc.lastCapture
-            endingPoints = [cameras[cam].convertCameraToRealSpace(Camera.boxToBasePoint(camCap[1][0])) for cam, camCap in captures.items()]
+            captures = cc.capture()
+            endingPoints = [cameras[cam].convertCameraToRealSpace(Camera.boxToBasePoint(camCap[1][0]))
+                            for cam, camCap in captures.items()
+                            if len(camCap[1]) > 0]
             CONSOLE_OUTPUT = f"Moved {SELECTED[0]} to Estimated Placement Coordinates:<br>{endingPoints}"
             avgDistanceEstimate = sum(distances := [
                 Camera.distanceFormula(sP, eP) * CalibrationBox.millimetersPerPixel
@@ -258,10 +268,14 @@ def controller():
                 for sP in SELECTED[1]]) / len(distances)
             CONSOLE_OUTPUT += f"<br>Distance Moved Estimate: {avgDistanceEstimate}"
             _, changeBoxes, transitions = zip(*captures.values())
-            cc.updateObject(SELECTED[0], changeBoxes, transitions)
+            LASTCHANGE = (cc.updateObject, SELECTED[0], changeBoxes, transitions)
+            SELECTED = None
         elif captureType == 'Object Range':
-            objName = request.form.get("obj_name")
-            CONSOLE_OUTPUT = "Not implemented"
+            aggressor = request.form.get("rng_obj_name")
+            objDistances = "<br>".join([f"{objName:15}: {cc.distanceBetween(aggressor, objName)}"
+                                        for objName, obj in cc.captureObjects.keys()
+                                        if aggressor != objName])
+            CONSOLE_OUTPUT = f"Target Distances from {aggressor}:<br>{objDistances}"
         elif captureType == "POV":
             res, image = cv2.imencode('.jpg', pov.collectImage())
             if res != True:
@@ -273,8 +287,7 @@ def controller():
             raise Exception(f"Unrecognized capture type: {captureType}")
             
     if LASTCHANGE is not None:
-        changeBoxes = {cam: [d for d in camCap[1]] for cam, camCap in LASTCHANGE[2].items()} 
-        CONSOLE_OUTPUT += f"<br><br>LASTCHANGE: {LASTCHANGE[1]} - {changeBoxes}"
+        CONSOLE_OUTPUT += f"<br><br>LASTCHANGE: {LASTCHANGE[1]} - {LASTCHANGE[0]}"
 
     fig = Figure(figsize=(20, 20), tight_layout=True)
     cols = len(cameras)

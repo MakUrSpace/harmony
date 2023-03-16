@@ -46,7 +46,7 @@
                         <label for="move">Move</label><br>
                         <input type="radio" id="obj_ranges" name="capture_type" value="Object Range">
                         <label for="atk">Get Object Ranges</label><br>
-                        <p style="text-indent: 1em"><label for="obj_name">* Aggressor Name:&nbsp;&nbsp;</label><input type="text" id="obj_name" name="obj_name" placeholder="Aggressor Object" size="15"></p>
+                        <p style="text-indent: 1em"><label for="obj_name">* Aggressor Name:&nbsp;&nbsp;</label><input type="text" id="rng_obj_name" name="rng_obj_name" placeholder="Aggressor Object" size="15"></p>
                         <input type="radio" id="pov" name="capture_type" value="POV">
                         <label for="pov">POV</label><br>
                         <input type="submit" value="Capture">
@@ -55,7 +55,7 @@
                 <div class="col offset d-flex align-items-center justify-content-center">
                     <div class="container">
                         <div class="row justify-content-center">
-                            <iframe src="/console"></iframe>
+                            <iframe src="/console" style="width:100%;min-height:500px"></iframe>
                         </div>
                         <div class="row justify-content-center">
                             <form method="post">
