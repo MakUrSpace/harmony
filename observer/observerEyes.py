@@ -20,6 +20,7 @@ def capture_camera(upsample=False):
         cam = cv2.VideoCapture(CAM_NUM)
         retval, image = cam.read()
         assert retval is True
+        image = cv2.cvtColor(src=image, code=cv2.COLOR_BGR2RGB)
     finally:
         cam.release()
     if upsample:
@@ -39,7 +40,7 @@ def trackedObjects():
 
 
 @eyesApp.route('/upcapture', methods=['GET'])
-def trackedObjects():
+def upTrackedObjects():
     try:
         image = capture_camera(upsample=True)
     except:
