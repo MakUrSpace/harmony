@@ -267,8 +267,8 @@ def controller():
                 for eP in endingPoints
                 for sP in SELECTED[1]]) / len(distances)
             CONSOLE_OUTPUT += f"<br>Distance Moved Estimate: {avgDistanceEstimate}"
-            _, changeBoxes, transitions = zip(*captures.values())
-            LASTCHANGE = (cc.updateObject, SELECTED[0], changeBoxes, transitions)
+            changeBoxes = {cam: camCap[1] for cam, camCap in captures.items()}
+            LASTCHANGE = (cc.updateObject, SELECTED[0], changeBoxes)
             SELECTED = None
         elif captureType == 'Object Range':
             aggressor = request.form.get("rng_obj_name")
@@ -287,12 +287,13 @@ def controller():
             raise Exception(f"Unrecognized capture type: {captureType}")
             
     if LASTCHANGE is not None:
-        CONSOLE_OUTPUT += f"<br><br>LASTCHANGE: {LASTCHANGE[1]} - {LASTCHANGE[0]}"
+        CONSOLE_OUTPUT += f"<br><br>LASTCHANGE: {LASTCHANGE[1]} - {LASTCHANGE[0].__name__}"
 
     fig = Figure(figsize=(20, 20), tight_layout=True)
-    cols = len(cameras)
+    rows = int(len(cameras) / 3 + 0.5)
+    cols = 3
     for idx, cam in enumerate(cameras.values()):
-        axis = fig.add_subplot(1, cols, idx + 1)
+        axis = fig.add_subplot(rows, cols, idx + 1)
         axis.imshow(cam.drawActiveZone(cc.drawDeltasOnCam(cam, cc.drawObjectsOnCam(cam))))
         axis.set_title(f"Camera {cam.camNum}")
     plot = BytesIO()
@@ -303,7 +304,7 @@ def controller():
       
     with open("templates/Controller.html") as f:
         template = f.read()
-    template = template.replace("{captureImage}", f'<img src="data:image/png;base64,{plot}" width="640" height="480"/>')
+    template = template.replace("{captureImage}", f'<img src="data:image/png;base64,{plot}" style="width:100;height:100%"/>')
     return template
 
 

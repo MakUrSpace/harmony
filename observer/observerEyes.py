@@ -15,14 +15,15 @@ sr.readModel("FSRCNN_x4.pb")
 sr.setModel("fsrcnn", 4);
 
 
-def capture_camera():
+def capture_camera(upsample=False):
     try:
         cam = cv2.VideoCapture(CAM_NUM)
         retval, image = cam.read()
         assert retval is True
     finally:
         cam.release()
-    image = sr.upsample(image)
+    if upsample:
+        image = sr.upsample(image)
     retval, buff = cv2.imencode('.jpg', image)
     return buff
 
@@ -31,6 +32,16 @@ def capture_camera():
 def trackedObjects():
     try:
         image = capture_camera()
+    except:
+        return ("UH-OH", 500, {})
+    image_bytes = image.tobytes()
+    return image_bytes, {'content-type': 'image/jpg'}
+
+
+@eyesApp.route('/upcapture', methods=['GET'])
+def trackedObjects():
+    try:
+        image = capture_camera(upsample=True)
     except:
         return ("UH-OH", 500, {})
     image_bytes = image.tobytes()
