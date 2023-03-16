@@ -9,6 +9,7 @@ import json
 from io import BytesIO
 from ipynb.fs.full.Observer import cc, cameras, pov, Camera, CalibrationBox
 from flask import Flask, render_template, Response, request
+from traceback import format_exc
 
 
 observerApp = Flask(__name__)
@@ -254,7 +255,7 @@ def controller():
                 SELECTED = (selectedObj.name, startingPoints)
                 CONSOLE_OUTPUT = f"Selected {SELECTED[0]}"
             except Exception as e:
-                CONSOLE_OUTPUT = f"Failed to identify selected object: {e}"
+                CONSOLE_OUTPUT = f"Failed to identify selected object: {e}<br>{format_exc()}"
         elif captureType == 'Move':
             assert SELECTED is not None, "No Mech selected to move"
             captures = cc.capture()
@@ -273,7 +274,7 @@ def controller():
         elif captureType == 'Object Range':
             aggressor = request.form.get("rng_obj_name")
             objDistances = "<br>".join([f"{objName:15}: {cc.distanceBetween(aggressor, objName)}"
-                                        for objName, obj in cc.captureObjects.keys()
+                                        for objName, obj in cc.captureObjects.items()
                                         if aggressor != objName])
             CONSOLE_OUTPUT = f"Target Distances from {aggressor}:<br>{objDistances}"
         elif captureType == "POV":
