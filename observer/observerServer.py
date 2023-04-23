@@ -1,5 +1,6 @@
 import os
 import cv2
+from math import ceil
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -291,8 +292,8 @@ def controller():
         CONSOLE_OUTPUT += f"<br><br>LASTCHANGE: {LASTCHANGE[1]} - {LASTCHANGE[0].__name__}"
 
     fig = Figure(figsize=(20, 20), tight_layout=True)
-    rows = int(len(cameras) / 3 + 0.5)
-    cols = 3
+    cols = 2
+    rows = ceil(len(cameras) / cols)
     for idx, cam in enumerate(cameras.values()):
         axis = fig.add_subplot(rows, cols, idx + 1)
         axis.imshow(cam.drawActiveZone(cc.drawDeltasOnCam(cam, cc.drawObjectsOnCam(cam))))

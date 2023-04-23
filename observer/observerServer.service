@@ -3,16 +3,16 @@ Description=DMA Observer Controller Service
 After=network.target
 
 [Service]
-User=mu
-ExecStart=/usr/bin/python3 /home/mu/prj/dma/observer/observerServer.py
+User=musengdir
+ExecStart=/usr/bin/python3 /home/musengdir/prj/dma/observer/observerServer.py
 Restart=always
 RestartSec=10                       
 StandardOutput=syslog               
 StandardError=syslog                
 SyslogIdentifier=dmaObserverServer
-WorkingDirectory=/home/mu/prj/dma/observer
+WorkingDirectory=/home/musengdir/prj/dma/observer
 Environment=PYTHONUNBUFFERED=1
 
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=musengdirlti-user.target

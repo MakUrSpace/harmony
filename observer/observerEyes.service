@@ -1,15 +1,15 @@
 [Unit]
 Description=DMA Observer Camera Service
-After=network.target
+After=cam0-camera-streamer
 
 [Service]
-ExecStart=/usr/bin/python3 /home/mu/prj/dma/observer/observerEyes.py -c 0
+ExecStart=/usr/bin/python3 /home/musengdir/prj/dma/observer/observerEyes.py
 Restart=always
 RestartSec=10                       
 StandardOutput=syslog               
 StandardError=syslog                
-SyslogIdentifier=dmaObserverEye0
-WorkingDirectory=/home/mu/prj/dma/observer
+SyslogIdentifier=dmaObserverEyes
+WorkingDirectory=/home/musengdir/prj/dma/observer
 Environment=PYTHONUNBUFFERED=1
 
 

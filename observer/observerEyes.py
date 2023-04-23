@@ -1,92 +1,71 @@
-import json
-import cv2
-import base64
-from flask import Flask, make_response, request, Response
-import asyncio
+import requests as req
 import argparse
 from time import sleep
-from traceback import format_exc
+import subprocess
 
 
-eyesApp = Flask(__name__)
-CAM_NUM = None
-CAM_SETTINGS = {}
+""" Control a strip of ws2812 LEDs """
+from rpi_ws281x import PixelStrip, Color
 
 
-sr = cv2.dnn_superres.DnnSuperResImpl_create()
-sr.readModel("FSRCNN_x4.pb")
-sr.setModel("fsrcnn", 4)
+colors = {
+    "white": Color(255, 255, 255),
+    "blue": Color(0, 0, 255),
+    "green":  Color(0, 255, 0),
+    "red": Color(255, 0, 0),
+    "off": Color(0, 0, 0)
+}
 
 
-def capture_camera():
-    upsample = False
-    sampleSize = 5
-    try:
-        cam = cv2.VideoCapture(CAM_NUM)
-        for setName, setValue in CAM_SETTINGS.items():
-            if setName == 'CAP_PROP_UPSAMPLE':
-                upsample = True
-            elif setName == 'CAP_PROP_SAMPLE_SIZE':
-                sampleSize = int(setValue)
+def identify_color(color):
+    if color in colors:
+        return color
+    for tcn, test_color in colors.items():
+        if test_color == color:
+            return tcn
+    raise Exception(f"Color ({color}) not recognized")
+
+
+
+DCOLOR = 'red'
+PIN = 18
+LEDS = 72
+
+
+def set_strip_to_color(color=None):
+    color = DCOLOR if color is None else color
+    assert type(color) == str
+    color = colors[color.lower()]
+    for i in range(strip.numPixels()):
+        strip.setPixelColor(i, color)
+    strip.show()
+
+
+def validateEyes():
+    for eye in [0, 2, 4, 6]:
+        for i in range(3):
+            resp = req.get(f"http://192.168.58.216:808{eye}/snapshot")
+            if resp.status_code == 500:
+                print("Restarting...")
+                subprocess.run(f"sudo systemctl restart cam{eye}-camera-streamer", shell=True)
+                sleep(5)
+                print("Trying again")
             else:
-                if "WIDTH" in setName or "HEIGHT" in setName:
-                    setValue = int(setValue)
-                else:
-                    setValue = float(setValue)
-                print(f"Setting {setName} to {setValue}")
-                cam.set(getattr(cv2, setName), setValue)
+                print(f"Success! {resp.status_code}")
+                break
+    if resp.status_code != 200:
+        raise Exception(f"Failed to establish connection to eyes")
 
-        for i in range(5):
-            retval, image = cam.read()
-            sleep(0.001)
-        assert retval is True
-        image = cv2.cvtColor(src=image, code=cv2.COLOR_BGR2RGB)
-    finally:
-        cam.release()
-    if upsample:
-        image = sr.upsample(image)
-    retval, buff = cv2.imencode('.jpg', image)
-    return buff
-
-
-def setSettings(newCamSettings):
-    global CAM_SETTINGS
-    for key in newCamSettings:
-        assert key in [
-            "CAP_PROP_UPSAMPLE", "CAP_PROP_SAMPLE_SIZE",
-            "CAP_PROP_FRAME_WIDTH", "CAP_PROP_FRAME_HEIGHT", "CAP_PROP_BRIGHTNESS", "CAP_PROP_CONTRAST",
-            "CAP_PROP_SATURATION", "CAP_PROP_EXPOSURE", "CAP_PROP_AUTO_EXPOSURE", "CAP_PROP_FPS"]
-    CAM_SETTINGS = newCamSettings
-
-
-@eyesApp.route('/capture', methods=['GET'])
-def capture():
-    setSettings(request.args.to_dict())
-    try:
-        image = capture_camera()
-    except:
-        print(format_exc())
-        return ("UH-OH", 500, {})
-    image_bytes = image.tobytes()
-    return image_bytes, {'content-type': 'image/jpg'}
-
-
-@eyesApp.route('/stream', methods=['GET'])
-def stream():
-    def gen_frames():
-        while True:
-            image = capture_camera()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + image.tobytes() + b'\r\n')
-    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog='ObserverEyes',
-        description='Hosts a single USB webcam')
-    parser.add_argument('-c', '--cam')
-    args = parser.parse_args()
-    CAM_NUM = int(args.cam)
-    port = f"720{CAM_NUM}"
-    eyesApp.run(host="0.0.0.0", port=port)
+        description='Validates Observer camera services are running and responsive')
+    strip = PixelStrip(num=LEDS, pin=PIN, freq_hz=800000, dma=10, invert=False, brightness=255, channel=0)
+    strip.begin()
+    color = colors[DCOLOR]
+    print("Setting lights to green")
+    set_strip_to_color("green")
+    while True:
+        validateEyes()
+        sleep(60)
