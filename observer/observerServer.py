@@ -9,7 +9,7 @@ import argparse
 import json
 from io import BytesIO
 from ipynb.fs.full.Observer import cc, cameras, pov, Camera, CalibrationBox
-from flask import Flask, render_template, Response, request
+from flask import Flask, render_template, Response, request, make_response
 from traceback import format_exc
 
 
@@ -21,6 +21,21 @@ CONSOLE_OUTPUT = "No Output Yet"
 
 def imageToBase64(img):
     return base64.b64encode(cv2.imencode('.jpg', img)[1]).decode()
+
+
+@observerApp.route('/bootstrap.min.css', methods=['GET'])
+def getBSCSS():
+    with open("templates/bootstrap.min.css", "r") as f:
+        bscss = f.read()
+    return Response(bscss, mimetype="text/css")
+
+
+@observerApp.route('/bootstrap.min.js', methods=['GET'])
+def getBSJS():
+    with open("templates/bootstrap.min.js", "r") as f:
+        bsjs = f.read()
+    return Response(bsjs
+                    , mimetype="application/javascript")
 
 
 @observerApp.route('/trackedObjects', methods=['GET'])
@@ -73,25 +88,51 @@ def select_object():
 @observerApp.route('/move/place_object', methods=['GET'])
 def move_object():
     "Object placed"
-    
 
+    
+@observerApp.route('/config/camera/<camNum>')
+def cameraActiveZoneWithObjects(camNum):
+    cam = cameras[int(camNum)]
+    camImage = cam.drawActiveZone(cc.drawObjectsOnCam(cam))
+    fig = Figure()
+    axis = fig.add_subplot(1, 1, 1)
+    axis.imshow(camImage)
+    camFrame = BytesIO()
+    FigureCanvas(fig).print_png(camFrame)
+    camFrame.seek(0)
+
+    response = make_response(camFrame.read())
+    response.headers.set('Content-Type', 'image/png')
+    return response
+
+
+def genCameraActiveZoneWithObjectsAndDeltas(camNum):
+    while True:
+        cam = cameras[camNum]
+        cam.capture()
+        camImage = cam.drawActiveZone(cc.drawDeltasOnCam(cam, cc.drawObjectsOnCam(cam)))
+        ret, camImage = cv2.imencode('.jpg', camImage)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/png\r\n\r\n' + camImage.tobytes() + b'\r\n')
+
+
+@observerApp.route('/control/camera/<camNum>')
+def cameraActiveZoneWithObjectsAndDeltas(camNum):
+    return Response(genCameraActiveZoneWithObjectsAndDeltas(int(camNum)), mimetype='multipart/x-mixed-replace; boundary=frame')
+    
+    
 def buildConfigurator():
     cameraConfigRows = []
     for cam in cameras.values():
         activeZone = json.dumps(cam.activeZone.tolist())
-        fig = Figure()
-        axis = fig.add_subplot(1, 1, 1)
-        axis.imshow(cam.drawActiveZone(cc.drawObjectsOnCam(cam)))
-        camFrame = BytesIO()
-        FigureCanvas(fig).print_png(camFrame)
-        camFrame.seek(0)
-        frame = base64.b64encode(camFrame.read()).decode()
         currentCalibration = f"Calibrated to: {cam.MCalibratedTo}" if cam.M is not None else "Not Calibrated"
         cameraConfigRows.append(f"""
             <div class="row">
                 <div class="col-lg-8  offset-lg-2">
                     <h3 class="mt-5">Camera {cam.camNum}</h3>
-                    <img src="data:image/jpg;base64,{frame}" alt="{cam.camNum} Most Recent Frame" width="640" height="480"/>
+                    <div>
+                        <iframe src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%" height="500"></iframe>
+                    </div>
                     <form method="post">
                       <label for="min_width">Minimum Width of Tracked Objects</label><br>
                       <input type="number" id="min_width" name="min_width" value="{cam.minimumWidth}"><br>
@@ -284,29 +325,23 @@ def controller():
                 CONSOLE_OUTPUT = f'Failed to encode image'
             else:
                 povCap = base64.b64encode(image.tobytes()).decode()
-                CONSOLE_OUTPUT = f'<img src="data:image/jpg;base64,{povCap}"/>'
+                CONSOLE_OUTPUT = f'<img src="data:image/jpg;base64,{povCap}" width="100%"/>'
         else:
             raise Exception(f"Unrecognized capture type: {captureType}")
             
     if LASTCHANGE is not None:
         CONSOLE_OUTPUT += f"<br><br>LASTCHANGE: {LASTCHANGE[1]} - {LASTCHANGE[0].__name__}"
 
-    fig = Figure(figsize=(20, 20), tight_layout=True)
-    cols = 2
-    rows = ceil(len(cameras) / cols)
-    for idx, cam in enumerate(cameras.values()):
-        axis = fig.add_subplot(rows, cols, idx + 1)
-        axis.imshow(cam.drawActiveZone(cc.drawDeltasOnCam(cam, cc.drawObjectsOnCam(cam))))
-        axis.set_title(f"Camera {cam.camNum}")
-    plot = BytesIO()
-    fig.tight_layout(pad=0)
-    FigureCanvas(fig).print_png(plot)
-    plot.seek(0)
-    plot = base64.b64encode(plot.read()).decode()
+    captureImage = '<div width="100%">\n' + "\n".join([f"""
+        <div width="100%">
+            <h3 class="mt-5">Camera {cam.camNum}</h3>
+            <img src="/control/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%">
+        </div>
+    """ for cam in cameras.values()]) + "\n</div>"
       
     with open("templates/Controller.html") as f:
         template = f.read()
-    template = template.replace("{captureImage}", f'<img src="data:image/png;base64,{plot}" style="width:100;height:100%"/>')
+    template = template.replace("{captureImage}",  captureImage)
     return template
 
 

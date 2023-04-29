@@ -1,6 +1,6 @@
 [Unit]
 Description=DMA Observer Controller Service
-After=network.target
+After=observerEyes.service
 
 [Service]
 User=musengdir

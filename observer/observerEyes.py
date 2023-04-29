@@ -29,7 +29,7 @@ def identify_color(color):
 
 DCOLOR = 'red'
 PIN = 18
-LEDS = 72
+LEDS = 88
 
 
 def set_strip_to_color(color=None):
@@ -42,19 +42,24 @@ def set_strip_to_color(color=None):
 
 
 def validateEyes():
-    for eye in [0, 2, 4, 6]:
+    reset = False
+    for eye in [0, 2, 4]:
         for i in range(3):
-            resp = req.get(f"http://192.168.58.216:808{eye}/snapshot")
+            resp = req.get(f"http://localhost:808{eye}/snapshot")
             if resp.status_code == 500:
+                reset = True
                 print("Restarting...")
                 subprocess.run(f"sudo systemctl restart cam{eye}-camera-streamer", shell=True)
-                sleep(5)
+                sleep(1)
                 print("Trying again")
             else:
                 print(f"Success! {resp.status_code}")
                 break
     if resp.status_code != 200:
         raise Exception(f"Failed to establish connection to eyes")
+    if reset:
+        subprocess.run(f"sudo systemctl restart observerServer.service", shell=True)
+
 
 
 if __name__ == "__main__":
@@ -64,8 +69,10 @@ if __name__ == "__main__":
     strip = PixelStrip(num=LEDS, pin=PIN, freq_hz=800000, dma=10, invert=False, brightness=255, channel=0)
     strip.begin()
     color = colors[DCOLOR]
-    print("Setting lights to green")
-    set_strip_to_color("green")
+    print("Setting lights to red")
+    set_strip_to_color("red")
     while True:
+        print("Validating Eyes")
         validateEyes()
-        sleep(60)
+        set_strip_to_color("blue")
+        sleep(30)
