@@ -11,12 +11,16 @@ from io import BytesIO
 from ipynb.fs.full.Observer import cc, cameras, pov, Camera, CalibrationBox
 from flask import Flask, render_template, Response, request, make_response
 from traceback import format_exc
+from ultralytics import YOLO
 
 
 observerApp = Flask(__name__)
 PORT = int(os.getenv("OBSERVER_PORT", "7000"))
 
 CONSOLE_OUTPUT = "No Output Yet"
+
+
+humanInferenceModel = YOLO("yolov8n.pt")
 
 
 def imageToBase64(img):
@@ -89,20 +93,72 @@ def select_object():
 def move_object():
     "Object placed"
 
+
+def genCameraFullViewWithActiveZone(camNum):
+    while True:
+        cam = cameras[int(camNum)]
+        cam.capture()
+        camImage = cam.drawActiveZone(cc.drawObjectsOnCam(cam))
+        fig = Figure()
+        axis = fig.add_subplot(1, 1, 1)
+        axis.imshow(camImage)
+        camFrame = BytesIO()
+        FigureCanvas(fig).print_png(camFrame)
+        camFrame.seek(0)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpg\r\n\r\n' + camFrame.read() + b'\r\n')
+    
     
 @observerApp.route('/config/camera/<camNum>')
 def cameraActiveZoneWithObjects(camNum):
-    cam = cameras[int(camNum)]
-    camImage = cam.drawActiveZone(cc.drawObjectsOnCam(cam))
-    fig = Figure()
-    axis = fig.add_subplot(1, 1, 1)
-    axis.imshow(camImage)
-    camFrame = BytesIO()
-    FigureCanvas(fig).print_png(camFrame)
-    camFrame.seek(0)
+    return Response(genCameraFullViewWithActiveZone(int(camNum)), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return response
 
-    response = make_response(camFrame.read())
-    response.headers.set('Content-Type', 'image/png')
+
+def genCameraInference(camNum):
+    cam = cameras[int(camNum)]
+    cam.capture()
+    baseIm = cam.maskFrameToActiveZone(cam.imageBuffer[0])
+    while True:
+        cam.capture()
+        contouredImages = None
+        for idx in range(0, len(cam.imageBuffer[:-1]), 3):
+            deltaIm = cam.imageBuffer[idx] 
+            deltaIm = cam.maskFrameToActiveZone(deltaIm)
+            contours = cam.contoursBetween(baseIm, deltaIm)
+
+            filteredContours = []
+            for c in contours:
+                x, y, w, h = cv2.boundingRect(c)
+                area = w * h
+                if 1000000 > area > 1000:
+                    filteredContours.append(c)
+
+            contours = [c for c in contours if (x, y, w, h := cv2.boundingRect(c))[-1] * w]
+            baseIm = cam.referenceFrame
+            contoured = cv2.drawContours(cam.maskFrameToActiveZone(baseIm.copy()), filteredContours, -1, (0,int((255 / 10) * idx),255), 3)
+            if cam.interactionDetection(deltaIm):
+                contoured = cv2.line(contoured, (0, 0), (1800, 1080), (0, 0, 255), 5)
+                contoured = cv2.line(contoured, (0, 1080), (1800, 0), (0, 0, 255), 5)
+
+            if contouredImages is None:
+                contouredImages = contoured
+            else:
+                contouredImages = np.concatenate((contouredImages, contoured), axis=1)
+        visImage = np.concatenate((contouredImages, baseIm), axis=1)
+        
+        # TODO: Filter for persistent contours
+        # TODO: Create persistent contoured image
+        # TODO: Combine statck image with large persistent, contoured image
+        
+        ret, visImage = cv2.imencode('.jpg', visImage)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpg\r\n\r\n' + visImage.tobytes() + b'\r\n')
+    
+    
+@observerApp.route('/debug/camera/<camNum>')
+def cameraInference(camNum):
+    return Response(genCameraInference(int(camNum)), mimetype='multipart/x-mixed-replace; boundary=frame')
     return response
 
 
@@ -110,10 +166,10 @@ def genCameraActiveZoneWithObjectsAndDeltas(camNum):
     while True:
         cam = cameras[camNum]
         cam.capture()
-        camImage = cam.drawActiveZone(cc.drawDeltasOnCam(cam, cc.drawObjectsOnCam(cam)))
+        camImage = cam.maskFrameToActiveZone(cam.drawActiveZone(cc.drawDeltasOnCam(cam, cc.drawObjectsOnCam(cam))))
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
-               b'Content-Type: image/png\r\n\r\n' + camImage.tobytes() + b'\r\n')
+               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 
 
 @observerApp.route('/control/camera/<camNum>')
@@ -271,6 +327,7 @@ def controller():
             LASTCHANGE = None
             SELECTED = None
             captures = cc.capture()
+            cc.setReference()
             changeBoxes = {cam: camCap[1] for cam, camCap in captures.items()}
             CONSOLE_OUTPUT = f"Captured: {changeBoxes}"
         elif captureType == 'Add':

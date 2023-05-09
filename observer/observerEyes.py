@@ -9,7 +9,7 @@ from rpi_ws281x import PixelStrip, Color
 
 
 colors = {
-    "white": Color(255, 255, 255),
+    "white": Color(180, 180, 180),
     "blue": Color(0, 0, 255),
     "green":  Color(0, 255, 0),
     "red": Color(255, 0, 0),
@@ -29,7 +29,7 @@ def identify_color(color):
 
 DCOLOR = 'red'
 PIN = 18
-LEDS = 88
+LEDS = 36
 
 
 def set_strip_to_color(color=None):
@@ -74,5 +74,5 @@ if __name__ == "__main__":
     while True:
         print("Validating Eyes")
         validateEyes()
-        set_strip_to_color("blue")
+        set_strip_to_color("white")
         sleep(30)
