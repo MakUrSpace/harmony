@@ -24,7 +24,7 @@
     <h3><a href="/config">Config</a></h3>
     <div class="row">
         <div class="col">
-            {captureImage}
+            {cameraCaptures}
         </div>
         <div class="col">
             <h2 class="mt-5">Game Management</h2>
@@ -34,21 +34,6 @@
                         <form method="post">
                             <input type="radio" id="null" name="capture_type" value="Null">
                             <label for="null">Null</label><br>
-                            <input type="radio" id="add" name="capture_type" value="Add">
-                            <label for="add">Add</label><br>
-                            <p style="text-indent: 1em"><label for="add_obj_name">* Object Name:&nbsp;&nbsp;</label><input type="text" id="add_obj_name" name="add_obj_name" placeholder="New Object Name" size="15"></p>
-                            <input type="radio" id="del" name="capture_type" value="Delete">
-                            <label for="del">Delete</label><br>
-                            <p style="text-indent: 1em"><label for="del_obj_name">* Object Name:&nbsp;&nbsp;</label><input type="text" id="del_obj_name" name="del_obj_name" placeholder="Object Name" size="15"></p>
-                            <input type="radio" id="mvsel" name="capture_type" value="Select to Move">
-                            <label for="mvsel">Select to Move</label><br>
-                            <input type="radio" id="move" name="capture_type" value="Move">
-                            <label for="move">Move</label><br>
-                            <input type="radio" id="obj_ranges" name="capture_type" value="Object Range">
-                            <label for="atk">Get Object Ranges</label><br>
-                            <p style="text-indent: 1em"><label for="obj_name">* Aggressor Name:&nbsp;&nbsp;</label><input type="text" id="rng_obj_name" name="rng_obj_name" placeholder="Aggressor Object" size="15"></p>
-                            <input type="radio" id="pov" name="capture_type" value="POV">
-                            <label for="pov">POV</label><br>
                             <input type="submit" value="Capture">
                         </form>
                     </div>
