@@ -37,23 +37,24 @@
                             <input type="submit" value="Capture">
                         </form>
                     </div>
-                    <div class="col offset d-flex align-items-center justify-content-center">
-                        <div class="container">
-                            <div class="row justify-content-center">
-                                <iframe src="/console" style="width:100%;min-height:500px"></iframe>
-                            </div>
-                            <div class="row justify-content-center">
-                                <form method="post">
-                                    <input type="hidden" id="capture_type" name="capture_type" value="commit">
-                                    <input type="submit" value="Commit Changes">
-                                </form><br>
-                                <form method="post">
-                                    <input type="hidden" id="capture_type" name="capture_type" value="reject">
-                                    <input type="submit" value="Reject Changes">
-                                </form>
-                            </div>
+                </div>
+                <div class="row offset d-flex align-items-center justify-content-center">
+                    <div class="container">
+                        <div class="row justify-content-center">
+                            <iframe src="/console" style="width:100%;min-height:500px"></iframe>
+                        </div>
+                        <div class="row justify-content-center">
+                            <form method="post">
+                                <input type="hidden" id="capture_type" name="capture_type" value="commit">
+                                <input type="submit" value="Commit Changes">
+                            </form><br>
+                            <form method="post">
+                                <input type="hidden" id="capture_type" name="capture_type" value="reject">
+                                <input type="submit" value="Reject Changes">
+                            </form>
                         </div>
                     </div>
+                </div>
                 </div>
             </div>
         </div>
@@ -62,13 +63,36 @@
     <div class="row">
         <div class="container" align="center">
             <div class="row justify-content-center">
-                <h2 class="mt-5">Capture Objects Table</h2>
+                <h2 class="mt-5">Change Tracker</h2>
             </div>
             <div class="row justify-content-center">
-                <iframe src="/captureObjects" style="width:100%;min-height:300px"></iframe>
+                <div id="changeTable"></div>
             </div>
         </div>
     </div>
 </div>
 </body>
+<script>
+    async function refreshChangeTable(){
+        const request = new Request("/changes");
+        await fetch(request)
+          .then((response) => {
+            if (response.status === 200) {
+                const element = document.getElementById("changeTable");
+                return response.text()
+            } else {
+              throw new Error("Failed to retreive change table");
+            }
+          })
+          .then((response) => {
+            const element = document.getElementById("changeTable");
+            element.innerHTML = response
+          })
+          .catch((error) => {
+            console.error(error);
+          });
+    }
+    
+    setInterval(refreshChangeTable, 5000);
+</script>
 </html>

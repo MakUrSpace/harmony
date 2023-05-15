@@ -65,8 +65,10 @@ def renderConsole():
         shape = (400, 400)
         mid = [int(d / 2) for d in shape]
         zeros = np.zeros(shape, dtype="uint8")
-        consoleImage = cv2.circle(zeros, mid, int(shape[0] / 6), 255, 10)
-        
+        consoleImage = cv2.putText(zeros, f'CapMac--{cm.state}',
+            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        consoleImage = cv2.putText(zeros, f'ID: {cm.interactionDetected} || DC: {cm.debounceCounter}',
+            (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)     
         ret, consoleImage = cv2.imencode('.jpg', consoleImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + consoleImage.tobytes() + b'\r\n')
@@ -212,7 +214,6 @@ def changeBetween(cam, im0, im1):
     
     activeZoneZeroMask = np.zeros((im0.shape[:2]), dtype="uint8")
     activeZoneMask = cv2.fillPoly(activeZoneZeroMask, [np.array(cam.activeZone, np.int32)], 255)
-    outOfZoneMask = np.bitwise_xor(activeZoneZeroMask, activeZoneMask)
     
     for contour in contours:
         bRect = cv2.boundingRect(contour)
@@ -227,9 +228,9 @@ def changeBetween(cam, im0, im1):
 def genCameraActiveZoneWithObjectsAndDeltas(camNum):
     while True:
         cam = cameras[camNum]
-        contours, changeBoxes = changeBetween(cam, cam.maskFrameToActiveZone(cam.referenceFrame), cam.maskFrameToActiveZone(cam.mostRecentFrame))
+        boxes, contours, clips = cam.changeSet()
         camImage = cam.maskFrameToActiveZone(cam.mostRecentFrame.copy())
-        camImage = cam.drawBoxesOnImage(camImage, changeBoxes, (255, 100, 0))
+        camImage = cam.drawBoxesOnImage(camImage, boxes, (255, 100, 0))
         camImage = cv2.drawContours(camImage, contours, -1, (100, 0, 100), 5)
         
         if cm.interactionDetected:
@@ -253,14 +254,79 @@ def buildController():
     with open("templates/Controller.html", "r") as f:
         template = f.read()
 
-    cameraCaptures = '<div class="container" width="100%">\n' + "\n".join([f"""
+    cameraCaptures = '<div class="container" width="100%">\n' + "".join([f"""
         <div class="row" width="100%">
-            <h3 class="mt-5">Camera {cam.camNum}</h3>
-            <img src="/control/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%">
+            <div class="col">
+                <h3 class="mt-5">Camera {cam.camNum}</h3>
+                <img src="/control/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%">
+            </div>
         </div>
-    """ for cam in cameras.values()]) + "\n</div>"
+    """ for cam in cameras.values()]) + "</div>"
     template = template.replace("{cameraCaptures}", cameraCaptures)
     return template
+
+
+@observerApp.route('/changes')
+def buildChanges():
+    keys = sorted(list(cm.changes.keys()), reverse=True)
+    changeRows = []
+    for changeKey in keys:
+        changeBoxes = {camNum: changeSet[0] for camNum, changeSet in cm.changes[changeKey].items()}
+        changeImages = {camNum: cm.cc.hStackImages(changeSet[2]) for camNum, changeSet in cm.changes[changeKey].items()}
+        cameraClips = "".join([f"""
+            <div class="col">
+                <img alt="{changeKey}-{camNum} Changes" src="data:image/png;base64,{imageToBase64(image)}" />
+            </div>
+        """ for camNum, image in changeImages.items()])
+        changeRow = f"""
+            <div class="row">
+                <div class="col-1">
+                    <p>Cycle {changeKey}</p>
+                </div>
+                <div class="col-2">
+                    <p>Change Boxes: {changeBoxes}</p>
+                </div>
+                <div class="col-6">
+                    <div class="container">
+                        <div class="row">
+                            {cameraClips}
+                        </div>
+                    </div>
+                </div>
+            </div>"""
+        changeRows.append(changeRow)
+    
+    topRow = """
+        <div class="row" width="100%">
+            <div class="container justify-content-center">
+                <div class="row">
+                    <div class="col-1">
+                        <p>Change Cycle<p>
+                    </div>
+                    <div class="col-2">
+                        <p>Object Coordinates<p>
+                    </div>
+                    <div class="col-6">
+                        <div class="container">
+                            <div class="row">
+                               {cameras}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {changeRows}
+            </div>
+        </div>""".format(
+        cameras="".join([f"""
+                <div class="col">
+                    <p>Camera {camNum}<p>
+                </div>""" for camNum in cameras.keys()]),
+        changeRows="".join(changeRows)
+    )
+    with open("templates/ChangeTable.html", "r") as f:
+        template = f.read()
+    return template.replace("{changeTableBody}", topRow)
+    
 
 
 if __name__ == "__main__":
