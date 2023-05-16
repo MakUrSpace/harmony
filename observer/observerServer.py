@@ -96,7 +96,6 @@ def getBSJS():
 def genCameraFullViewWithActiveZone(camNum):
     while True:
         cam = cameras[int(camNum)]
-        cam.capture()
         camImage = cam.drawActiveZone(cm.cc.drawObjectsOnCam(cam))
         fig = Figure()
         axis = fig.add_subplot(1, 1, 1)
@@ -116,6 +115,7 @@ def cameraActiveZoneWithObjects(camNum):
 
 def buildConfigurator():
     cameraConfigRows = []
+    clickSubs = []
     for cam in cameras.values():
         activeZone = json.dumps(cam.activeZone.tolist())
         currentCalibration = f"Calibrated to: {cam.MCalibratedTo}" if cam.M is not None else "Not Calibrated"
@@ -124,13 +124,13 @@ def buildConfigurator():
                 <div class="col-lg-8  offset-lg-2">
                     <h3 class="mt-5">Camera {cam.camNum}</h3>
                     <div>
-                        <iframe src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%" height="500"></iframe>
+                        <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%" height="500" id="cam{cam.camNum}" onclick="cam{cam.camNum}ClickListener(event)"></iframe>
                     </div>
                     <form method="post">
                       <label for="min_width">Minimum Width of Tracked Objects</label><br>
                       <input type="number" id="min_width" name="min_width" value="{cam.minimumWidth}"><br>
                       <label for="az">Active Zone</label><br>
-                      <input type="text" id="az" name="az" value="{activeZone}" size="50"><br>
+                      <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50"><br>
                       <input type="hidden" id="camNum" name="camNum" value="{cam.camNum}">
                       <input type="submit" value="Update Cam {cam.camNum}">
                       <input type="hidden" id="configType" name="configType" value="activeZone">
@@ -149,9 +149,35 @@ def buildConfigurator():
                     </form>
                 </div>
             </div>""")
+        clickSubs.append(f"""
+            function cam{cam.camNum}ClickListener(event) {{
+                const imgElem = document.getElementById("cam{cam.camNum}")
+                bounds=imgElem.getBoundingClientRect();
+                const left=bounds.left;
+                const top=bounds.top;
+                const x = event.x - left;
+                const y = event.y - top;
+                const cw=imgElem.clientWidth
+                const ch=imgElem.clientHeight
+                const iw=imgElem.naturalWidth
+                const ih=imgElem.naturalHeight
+                const px=x/cw*iw
+                const py=y/ch*ih
+                console.log(px, px)
+                const x_offset = 80
+                const x_scale = 1800 / 480
+                const image_x = (px - x_offset) * x_scale
+                const y_offset = 100
+                const y_scale = 1080 / 280
+                const image_y = (py - y_offset) * y_scale
+                const formField = document.getElementById("cam{cam.camNum}_ActiveZone")
+                var formValue = JSON.parse(formField.value)
+                formValue.push([~~image_x, ~~image_y])
+                formField.value = JSON.stringify(formValue)
+            }}""")
     with open("templates/Configuration.html") as f:
         template = f.read()
-    return template.replace("{cameraConfigRows}", "\n".join(cameraConfigRows))
+    return template.replace("{cameraConfigRows}", "\n".join(cameraConfigRows)).replace("{clickSubscriptions}", "\n".join(clickSubs))
 
     
 @observerApp.route('/config', methods=['GET'])
@@ -180,7 +206,7 @@ def updateConfig():
     else:
         camNum = int(request.form.get("camNum"))
         if (configType := request.form.get("configType")) == "activeZone":
-            az = np.float32(json.loads(request.form.get('az')))
+            az = np.float32(json.loads(request.form.get(f"az")))
             min_width = float(request.form.get("min_width"))
 
             cam = cameras[camNum]
