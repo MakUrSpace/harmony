@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.Observer import cm, cameras, pov, Camera, CalibrationBox
+from ipynb.fs.full.Observer import cm, cameras, pov, Camera, hStackImages
 
 import threading
 import atexit
@@ -37,7 +37,8 @@ def createCaptureApp():
 
     def cycleMachine():
         with data_lock:
-            cm.cycle()
+            # cm.cycle()
+            pass
         # Set the next timeout to happen
         captureTimer = threading.Timer(POOL_TIME, cycleMachine, ())
         captureTimer.start()   
@@ -67,8 +68,10 @@ def renderConsole():
         zeros = np.zeros(shape, dtype="uint8")
         consoleImage = cv2.putText(zeros, f'CapMac--{cm.state}',
             (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        consoleImage = cv2.putText(zeros, f'Mode: {cm.mode}',
+            (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'ID: {cm.interactionDetected} || DC: {cm.debounceCounter}',
-            (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)     
+            (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)     
         ret, consoleImage = cv2.imencode('.jpg', consoleImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + consoleImage.tobytes() + b'\r\n')
@@ -96,7 +99,7 @@ def getBSJS():
 def genCameraFullViewWithActiveZone(camNum):
     while True:
         cam = cameras[int(camNum)]
-        camImage = cam.drawActiveZone(cm.cc.drawObjectsOnCam(cam))
+        camImage = cam.drawActiveZone(cam.mostRecentFrame)
         fig = Figure()
         axis = fig.add_subplot(1, 1, 1)
         axis.imshow(camImage)
@@ -118,36 +121,24 @@ def buildConfigurator():
     clickSubs = []
     for cam in cameras.values():
         activeZone = json.dumps(cam.activeZone.tolist())
-        currentCalibration = f"Calibrated to: {cam.MCalibratedTo}" if cam.M is not None else "Not Calibrated"
+        currentCalibration = f"Calibrated" if cam.M is not None else "Not Calibrated"
         cameraConfigRows.append(f"""
-            <div class="row">
-                <div class="col-lg-8  offset-lg-2">
-                    <h3 class="mt-5">Camera {cam.camNum}</h3>
-                    <div>
-                        <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%" height="500" id="cam{cam.camNum}" onclick="cam{cam.camNum}ClickListener(event)"></iframe>
-                    </div>
-                    <form method="post">
-                      <label for="min_width">Minimum Width of Tracked Objects</label><br>
-                      <input type="number" id="min_width" name="min_width" value="{cam.minimumWidth}"><br>
-                      <label for="az">Active Zone</label><br>
-                      <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50"><br>
-                      <input type="hidden" id="camNum" name="camNum" value="{cam.camNum}">
-                      <input type="submit" value="Update Cam {cam.camNum}">
-                      <input type="hidden" id="configType" name="configType" value="activeZone">
-                    </form>
-                    <hr>
-                    {currentCalibration}
-                    <form method="post"
-                        <label>Calibration Coordinates:&nbsp;&nbsp;(</label>
-                        <label for="calibrate_x">X:&nbsp;&nbsp;</label>
-                        <input type="number" id="calibrate_x" name="calibrate_x" placeholder="0.0" min="0" max="10000">
-                        <label for="calibrate_y">, Y:&nbsp;&nbsp;</label>
-                        <input type="number" id="calibrate_y" name="calibrate_y" placeholder="0.0" min="0" max="10000">&nbsp;&nbsp;)</p>
-                        <input type="hidden" id="camNum" name="camNum" value="{cam.camNum}">
-                        <input type="hidden" id="configType" name="configType" value="calibrate">
-                        <input type="submit" value="Calibrate Cam {cam.camNum}">
-                    </form>
+            <div class="row justify-content-center">
+                <h3 class="mt-5">Camera {cam.camNum}</h3>
+                <div class="container">
+                    <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%" height="500" id="cam{cam.camNum}" onclick="cam{cam.camNum}ClickListener(event)"></iframe>
                 </div>
+                <form method="post">
+                  <label>{currentCalibration}</label><br>
+                  <label for="min_width">Minimum Width of Tracked Objects</label><br>
+                  <input type="number" id="min_width" name="min_width" value="{cam.minimumWidth}"><br>
+                  <label for="az">Active Zone</label><br>
+                  <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50"><br>
+                  <input type="hidden" id="camNum" name="camNum" value="{cam.camNum}">
+                  <input type="submit" value="Update Cam {cam.camNum}">
+                  <input type="hidden" id="configType" name="configType" value="activeZone">
+                </form>
+                <br>
             </div>""")
         clickSubs.append(f"""
             function cam{cam.camNum}ClickListener(event) {{
@@ -175,9 +166,16 @@ def buildConfigurator():
                 formValue.push([~~image_x, ~~image_y])
                 formField.value = JSON.stringify(formValue)
             }}""")
+    unwarpedImage = imageToBase64(cm.unwarpedOverlaidCameras())
+    unwarpedImage = f'<img src="data:image/jpeg;base64,{unwarpedImage}">'
     with open("templates/Configuration.html") as f:
         template = f.read()
-    return template.replace("{cameraConfigRows}", "\n".join(cameraConfigRows)).replace("{clickSubscriptions}", "\n".join(clickSubs))
+    return template.replace(
+        "{cameraConfigRows}", "\n".join(cameraConfigRows)
+    ).replace(
+        "{clickSubscriptions}", "\n".join(clickSubs)
+    ).replace(
+        "{unwarpedImage}", unwarpedImage)
 
     
 @observerApp.route('/config', methods=['GET'])
@@ -193,16 +191,17 @@ def updateConfig():
     print(f"Received update config request")
     
     if (config_type := request.form.get("config_type")) == 'save_state':
-        cm.cc.saveState()
+        cm.cc.saveConfiguration()
         CONSOLE_OUTPUT = "State Saved!"
         print("State Saved!")
-    elif config_type == 'capture_cameras':
-        cm.cc.capture()
-        CONSOLE_OUTPUT = "Cameras Captured"
     elif config_type == 'load_state':
-        cm.cc.recoverState()
+        cm.cc.recoverConfiguration()
         CONSOLE_OUTPUT = "State Recovered!"
         print("State Recovered!")
+    elif config_type == 'calibrate_cameras':
+        cm.calibrate()
+        CONSOLE_OUTPUT = "Cameras calibrated!"
+        print("Cameras Calibrated")
     else:
         camNum = int(request.form.get("camNum"))
         if (configType := request.form.get("configType")) == "activeZone":
@@ -254,10 +253,10 @@ def changeBetween(cam, im0, im1):
 def genCameraActiveZoneWithObjectsAndDeltas(camNum):
     while True:
         cam = cameras[camNum]
-        boxes, contours, clips = cam.changeSet()
+        cameraChanges = cam.changeSet()
+        boxes = [(int(c.center[0] - c.width), int(c.center[1] - c.height), int(c.width * 2.2), int(c.height * 2.2)) for c in cameraChanges]
         camImage = cam.maskFrameToActiveZone(cam.mostRecentFrame.copy())
         camImage = cam.drawBoxesOnImage(camImage, boxes, (255, 100, 0))
-        camImage = cv2.drawContours(camImage, contours, -1, (100, 0, 100), 5)
         
         if cm.interactionDetected:
             camImage = cv2.line(camImage, (0, 0), (1800, 1080), (0, 0, 255), 20)
@@ -292,67 +291,65 @@ def buildController():
     return template
 
 
-@observerApp.route('/changes')
-def buildChanges():
-    keys = sorted(list(cm.changes.keys()), reverse=True)
+def buildObjectTable():
     changeRows = []
-    for changeKey in keys:
-        changeBoxes = {camNum: changeSet[0] for camNum, changeSet in cm.changes[changeKey].items()}
-        changeImages = {camNum: cm.cc.hStackImages(changeSet[2]) for camNum, changeSet in cm.changes[changeKey].items()}
-        cameraClips = "".join([f"""
-            <div class="col">
-                <img alt="{changeKey}-{camNum} Changes" src="data:image/png;base64,{imageToBase64(image)}" />
-            </div>
-        """ for camNum, image in changeImages.items()])
+    items = list(cm.memory.captures.items())
+    for cid, capture in items:
+        encodedBA = imageToBase64(capture.visual())
         changeRow = f"""
             <div class="row">
-                <div class="col-1">
-                    <p>Cycle {changeKey}</p>
+                <div class="col">
+                    <form method=post">
+                      <label for="object_name">Object Name</label><br>
+                      <input type="text" name="object_name" id="object_name" value="{cid}" size="50"><br>
+                      <input type="hidden" id="orig_name" name="orig_name" value="{cid}">
+                      <input type="submit" value="Update {cid} Name">
+                    </form>
                 </div>
-                <div class="col-2">
-                    <p>Change Boxes: {changeBoxes}</p>
+                <div class="col">
+                    <p>{capture.realCoordinate()}</p>
                 </div>
-                <div class="col-6">
-                    <div class="container">
-                        <div class="row">
-                            {cameraClips}
-                        </div>
-                    </div>
+                <div class="col">
+                   <div class="row" name="captureVisual">
+                     <img alt="{cid} Capture" src="data:image/jpg;base64,{encodedBA}">
+                   </div>
+                </div>
+                <div class="col">
+                    <form method="post">
+                      <input type="submit" value="Delete {cid}">
+                    </form>
                 </div>
             </div>"""
         changeRows.append(changeRow)
     
     topRow = """
-        <div class="row" width="100%">
-            <div class="container justify-content-center">
-                <div class="row">
-                    <div class="col-1">
-                        <p>Change Cycle<p>
-                    </div>
-                    <div class="col-2">
-                        <p>Object Coordinates<p>
-                    </div>
-                    <div class="col-6">
-                        <div class="container">
-                            <div class="row">
-                               {cameras}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                {changeRows}
-            </div>
-        </div>""".format(
-        cameras="".join([f"""
+        <div class="container justify-content-center">
+            <div class="row">
                 <div class="col">
-                    <p>Camera {camNum}<p>
-                </div>""" for camNum in cameras.keys()]),
+                    <h3>Object Name</h3>
+                </div>
+                <div class="col">
+                    <h3>Object Coordinates</h3>
+                </div>
+                <div class="col">
+                    <h3>Object Visual</h3>
+                </div>
+                <div class="col">
+                    <h3>Delete Object</h3>
+                </div>
+            </div>
+            {changeRows}
+        </div>""".format(
         changeRows="".join(changeRows)
     )
     with open("templates/ChangeTable.html", "r") as f:
         template = f.read()
     return template.replace("{changeTableBody}", topRow)
-    
+
+
+@observerApp.route('/objects', methods=['GET'])
+def getObjectTable():
+    return buildObjectTable()
 
 
 if __name__ == "__main__":

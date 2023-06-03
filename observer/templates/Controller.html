@@ -27,14 +27,18 @@
             {cameraCaptures}
         </div>
         <div class="col">
-            <h2 class="mt-5">Game Management</h2>
+            <h2 class="mt-5">Management</h2>
             <div class="container">
                 <div class="row">
                     <div class="col offset" align="left">
                         <form method="post">
-                            <input type="radio" id="null" name="capture_type" value="Null">
-                            <label for="null">Null</label><br>
-                            <input type="submit" value="Capture">
+                            <input type="radio" id="terrain" name="capture_type" value="terrain">
+                            <label for="null">Terrain</label><br>
+                            <input type="radio" id="add" name="capture_type" value="add">
+                            <label for="null">Add Unit</label><br>
+                            <input type="radio" id="move" name="capture_type" value="move">
+                            <label for="null">Move Unit</label><br>
+                            <input type="submit" value="Set Capture Mode">
                         </form>
                     </div>
                 </div>
@@ -74,7 +78,7 @@
 </body>
 <script>
     async function refreshChangeTable(){
-        const request = new Request("/changes");
+        const request = new Request("/objects");
         await fetch(request)
           .then((response) => {
             if (response.status === 200) {
@@ -93,6 +97,6 @@
           });
     }
     
-    setInterval(refreshChangeTable, 5000);
+    setInterval(refreshChangeTable, 1500);
 </script>
 </html>

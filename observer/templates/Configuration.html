@@ -28,8 +28,8 @@
         </div>
         <div class="col">
             <form method="post">
-                <input type="hidden" name="config_type" value="capture_cameras">
-                <input type="submit" value="Capture Cameras">
+                <input type="hidden" name="config_type" value="calibrate_cameras">
+                <input type="submit" value="Calibrate Cameras">
             </form>
         </div>
         <div class="col">
@@ -40,6 +40,10 @@
         </div>
     </div>
     {cameraConfigRows}
+    <div class "row" align="center">
+        <h3>Unwarped Overlaid Cameras</h3>
+        {unwarpedImage}
+    </div>
 </div>
 </body>
 <script>
