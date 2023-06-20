@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.Observer import cm, cameras, pov, Camera, hStackImages
+from ipynb.fs.full.DebugObserver import cm, cameras, pov, Camera, hStackImages, vStackImages
 
 import threading
 import atexit
@@ -25,6 +25,8 @@ humanInferenceModel = YOLO("yolov8n.pt")
 POOL_TIME = 0.1 #Seconds
 PORT = int(os.getenv("OBSERVER_PORT", "7000"))
 
+ENABLE_CYCLE = True
+
 data_lock = threading.Lock()
 
 captureTimer = threading.Timer(0,lambda x: None,())    
@@ -37,8 +39,8 @@ def createCaptureApp():
 
     def cycleMachine():
         with data_lock:
-            # cm.cycle()
-            pass
+            if ENABLE_CYCLE:
+                cm.cycle()
         # Set the next timeout to happen
         captureTimer = threading.Timer(POOL_TIME, cycleMachine, ())
         captureTimer.start()   
@@ -166,7 +168,7 @@ def buildConfigurator():
                 formValue.push([~~image_x, ~~image_y])
                 formField.value = JSON.stringify(formValue)
             }}""")
-    unwarpedImage = imageToBase64(cm.unwarpedOverlaidCameras())
+    unwarpedImage = imageToBase64(cm.cc.unwarpedOverlaidCameras())
     unwarpedImage = f'<img src="data:image/jpeg;base64,{unwarpedImage}">'
     with open("templates/Configuration.html") as f:
         template = f.read()
@@ -250,20 +252,26 @@ def changeBetween(cam, im0, im1):
     return contours, boxes
 
 
-def genCameraActiveZoneWithObjectsAndDeltas(camNum):
+def buildCameraActiveZoneView(camNum):
+    cam = cameras[camNum]
+    changes = cam.changesBetween(cam.mostRecentFrame, cam.referenceFrame)
+    camImage = cam.maskFrameToActiveZone(cam.mostRecentFrame.copy())
+    if changes:
+        changeContour = np.array([changes.changePoints], dtype=np.int32)
+        hullContour = cv2.convexHull(changeContour)
+        camImage = cv2.drawContours(camImage, [hullContour], -1, (255, 0, 0), 3)
+
+    if cm.interactionDetected or cm.state == "debounce":
+        camImage = cv2.line(camImage, (0, 0), (1800, 1080), (0, 0, 255), 20)
+        camImage = cv2.line(camImage, (0, 1080), (1800, 0), (0, 0, 255), 20)
+    else:
+        camImage = cv2.line(camImage, (0, 3), (1800, 3), (0, 255, 0), 50)
+    return camImage
+
+
+def continuousSingleCameraActiveZone(camNum: int):
     while True:
-        cam = cameras[camNum]
-        cameraChanges = cam.changeSet()
-        boxes = [(int(c.center[0] - c.width), int(c.center[1] - c.height), int(c.width * 2.2), int(c.height * 2.2)) for c in cameraChanges]
-        camImage = cam.maskFrameToActiveZone(cam.mostRecentFrame.copy())
-        camImage = cam.drawBoxesOnImage(camImage, boxes, (255, 100, 0))
-        
-        if cm.interactionDetected:
-            camImage = cv2.line(camImage, (0, 0), (1800, 1080), (0, 0, 255), 20)
-            camImage = cv2.line(camImage, (0, 1080), (1800, 0), (0, 0, 255), 20)
-        else:
-            camImage = cv2.line(camImage, (0, 3), (1800, 3), (0, 255, 0), 50)
-        
+        camImage = buildCameraActiveZoneView(camNum)
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
@@ -271,7 +279,37 @@ def genCameraActiveZoneWithObjectsAndDeltas(camNum):
 
 @observerApp.route('/control/camera/<camNum>')
 def cameraActiveZoneWithObjectsAndDeltas(camNum):
-    return Response(genCameraActiveZoneWithObjectsAndDeltas(int(camNum)), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(continuousSingleCameraActiveZone(int(camNum)), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+def genCombinedCameraView():
+    while True:
+        camImages = []
+        for camNum in cameras.keys():
+            camImages.append(buildCameraActiveZoneView(camNum))
+        camImage = vStackImages(camImages)
+        camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
+        ret, camImage = cv2.imencode('.jpg', camImage)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+
+
+@observerApp.route('/control/combinedCameras')
+def combinedCamerasResponse():
+    return Response(genCombinedCameraView(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+def minimapGenerator():
+    while True:
+        camImage = cm.memory.buildMiniMap()
+        ret, camImage = cv2.imencode('.jpg', camImage)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+    
+
+@observerApp.route('/control/minimap')
+def minimapResponse():
+    return Response(minimapGenerator(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 @observerApp.route('/control')
@@ -279,14 +317,16 @@ def buildController():
     with open("templates/Controller.html", "r") as f:
         template = f.read()
 
-    cameraCaptures = '<div class="container" width="100%">\n' + "".join([f"""
+    cameraCaptures = """    <div class="container" width="100%">
         <div class="row" width="100%">
-            <div class="col">
-                <h3 class="mt-5">Camera {cam.camNum}</h3>
-                <img src="/control/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%">
-            </div>
+            <h3 class="mt-5">Virtual Map</h3>
+            <img src="/control/minimap" height=200px>
         </div>
-    """ for cam in cameras.values()]) + "</div>"
+        <div class="row" width="100%">
+            <h3 class="mt-5">Live Cameras</h3>
+            <img src="/control/combinedCameras" height=500px>
+        </div>
+    </div>"""
     template = template.replace("{cameraCaptures}", cameraCaptures)
     return template
 
@@ -307,7 +347,7 @@ def buildObjectTable():
                     </form>
                 </div>
                 <div class="col">
-                    <p>{capture.realCoordinate()}</p>
+                    <p>{capture.realCenter}</p>
                 </div>
                 <div class="col">
                    <div class="row" name="captureVisual">
