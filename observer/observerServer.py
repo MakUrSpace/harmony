@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.DebugObserver import cm, cameras, pov, Camera, hStackImages, vStackImages
+from ipynb.fs.full.Observer import cm, cameras, pov, Camera, hStackImages, vStackImages
 
 import threading
 import atexit
@@ -132,8 +132,6 @@ def buildConfigurator():
                 </div>
                 <form method="post">
                   <label>{currentCalibration}</label><br>
-                  <label for="min_width">Minimum Width of Tracked Objects</label><br>
-                  <input type="number" id="min_width" name="min_width" value="{cam.minimumWidth}"><br>
                   <label for="az">Active Zone</label><br>
                   <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50"><br>
                   <input type="hidden" id="camNum" name="camNum" value="{cam.camNum}">
@@ -208,11 +206,9 @@ def updateConfig():
         camNum = int(request.form.get("camNum"))
         if (configType := request.form.get("configType")) == "activeZone":
             az = np.float32(json.loads(request.form.get(f"az")))
-            min_width = float(request.form.get("min_width"))
 
             cam = cameras[camNum]
             cam.setActiveZone(az)
-            cam.minimumWidth = min_width
         elif configType == "calibrate":
             xPosition = float(request.form.get('calibrate_x'))
             yPosition = float(request.form.get('calibrate_y'))
@@ -227,66 +223,12 @@ def updateConfig():
     return buildConfigurator()
 
 
-def changeBetween(cam, im0, im1):
-    if im0 is None or im1 is None:
-        return []
-    img_height = im0.shape[0]
-    diff = cv2.absdiff(cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY),
-                       cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY))
-    thresh = cv2.threshold(diff,64,255,cv2.THRESH_BINARY)[1]
-    kernel = np.ones((5,5), np.uint8) 
-    dilate = cv2.dilate(thresh, kernel, iterations=2)
-    contours, _ = cv2.findContours(dilate.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    boxes = []
-    
-    activeZoneZeroMask = np.zeros((im0.shape[:2]), dtype="uint8")
-    activeZoneMask = cv2.fillPoly(activeZoneZeroMask, [np.array(cam.activeZone, np.int32)], 255)
-    
-    for contour in contours:
-        bRect = cv2.boundingRect(contour)
-        x, y, w, h = bRect
-        area = w * h
-        presumedBasePoint = cam.boxToBasePoint((x, y, w, h))
-        if area > 10000 and cam.pointInActiveZone(presumedBasePoint):
-            boxes.append(cv2.boundingRect(contour))
-    return contours, boxes
-
-
-def buildCameraActiveZoneView(camNum):
-    cam = cameras[camNum]
-    changes = cam.changesBetween(cam.mostRecentFrame, cam.referenceFrame)
-    camImage = cam.maskFrameToActiveZone(cam.mostRecentFrame.copy())
-    if changes:
-        changeContour = np.array([changes.changePoints], dtype=np.int32)
-        hullContour = cv2.convexHull(changeContour)
-        camImage = cv2.drawContours(camImage, [hullContour], -1, (255, 0, 0), 3)
-
-    if cm.interactionDetected or cm.state == "debounce":
-        camImage = cv2.line(camImage, (0, 0), (1800, 1080), (0, 0, 255), 20)
-        camImage = cv2.line(camImage, (0, 1080), (1800, 0), (0, 0, 255), 20)
-    else:
-        camImage = cv2.line(camImage, (0, 3), (1800, 3), (0, 255, 0), 50)
-    return camImage
-
-
-def continuousSingleCameraActiveZone(camNum: int):
-    while True:
-        camImage = buildCameraActiveZoneView(camNum)
-        ret, camImage = cv2.imencode('.jpg', camImage)
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
-
-
-@observerApp.route('/control/camera/<camNum>')
-def cameraActiveZoneWithObjectsAndDeltas(camNum):
-    return Response(continuousSingleCameraActiveZone(int(camNum)), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-
-def genCombinedCameraView():
+def genCombinedCamerasView():
     while True:
         camImages = []
         for camNum in cameras.keys():
-            camImages.append(buildCameraActiveZoneView(camNum))
+            camImage = cameras[camNum].mostRecentFrame.copy()
+            camImages.append(camImage)
         camImage = vStackImages(camImages)
         camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
         ret, camImage = cv2.imencode('.jpg', camImage)
@@ -296,12 +238,52 @@ def genCombinedCameraView():
 
 @observerApp.route('/control/combinedCameras')
 def combinedCamerasResponse():
-    return Response(genCombinedCameraView(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(genCombinedCamerasView(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+def genCombinedCameraWithChangesView():
+    while True:
+        camImages = []
+        print(f"Num memories: {len(cm.memory)}")
+        if cm.lastChanges is not None and not cm.lastChanges.empty:
+            print("Has changes")
+        if cm.lastClassification is not None:
+            print("Has class")
+        for camNum in cameras.keys():
+            camImage = cameras[camNum].mostRecentFrame.copy()
+            # Paint known objects blue
+            for memObj in cm.memory:
+                if memObj.changeSet[camNum].changeType not in ['delete', None]:
+                    memContour = np.array([memObj.changeSet[camNum].changePoints], dtype=np.int32)
+                    camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
+            # Paint last changes red
+            if cm.lastChanges is not None and not cm.lastChanges.empty:
+                lastChange = cm.lastChanges.changeSet[camNum]
+                if lastChange is not None and lastChange.changeType not in ['delete', None]:
+                    lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
+                    camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
+            # Paint classification green
+            if cm.lastClassification is not None and not cm.lastClassification.empty:
+                lastClass = cm.lastClassification.changeSet[camNum]
+                if lastClass is not None and lastClass.changeType not in ['delete', None]:
+                    lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
+                    camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
+            camImages.append(camImage)
+        camImage = vStackImages(camImages)
+        camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
+        ret, camImage = cv2.imencode('.jpg', camImage)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+
+
+@observerApp.route('/control/combinedCamerasWithChanges')
+def combinedCamerasWithChangesResponse():
+    return Response(genCombinedCameraWithChangesView(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 def minimapGenerator():
     while True:
-        camImage = cm.memory.buildMiniMap()
+        camImage = cameras[0].mostRecentFrame
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
@@ -324,7 +306,7 @@ def buildController():
         </div>
         <div class="row" width="100%">
             <h3 class="mt-5">Live Cameras</h3>
-            <img src="/control/combinedCameras" height=500px>
+            <img src="/control/combinedCamerasWithChanges" height=500px>
         </div>
     </div>"""
     template = template.replace("{cameraCaptures}", cameraCaptures)
@@ -333,8 +315,8 @@ def buildController():
 
 def buildObjectTable():
     changeRows = []
-    items = list(cm.memory.captures.items())
-    for cid, capture in items:
+    print(f"Aware of {len(cm.memory)} objects")
+    for cid, capture in enumerate(cm.memory[::-1]):
         encodedBA = imageToBase64(capture.visual())
         changeRow = f"""
             <div class="row">
@@ -348,7 +330,7 @@ def buildObjectTable():
                 </div>
                 <div class="col">
                     <p>{capture.realCenter}</p>
-                </div>
+                </div> 
                 <div class="col">
                    <div class="row" name="captureVisual">
                      <img alt="{cid} Capture" src="data:image/jpg;base64,{encodedBA}">
