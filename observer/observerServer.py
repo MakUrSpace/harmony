@@ -68,12 +68,12 @@ def renderConsole():
         shape = (400, 400)
         mid = [int(d / 2) for d in shape]
         zeros = np.zeros(shape, dtype="uint8")
-        consoleImage = cv2.putText(zeros, f'CapMac--{cm.state}',
-            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'Mode: {cm.mode}',
-            (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'ID: {cm.interactionDetected} || DC: {cm.debounceCounter}',
-            (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)     
+        #consoleImage = cv2.putText(zeros, f'CapMac--{cm.state}',
+        #    (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        #consoleImage = cv2.putText(zeros, f'Mode: {cm.mode}',
+        #    (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        #consoleImage = cv2.putText(zeros, f'ID: {cm.interactionDetected} || DC: {cm.debounceCounter}',
+        #    (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)     
         ret, consoleImage = cv2.imencode('.jpg', consoleImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + consoleImage.tobytes() + b'\r\n')
@@ -123,7 +123,6 @@ def buildConfigurator():
     clickSubs = []
     for cam in cameras.values():
         activeZone = json.dumps(cam.activeZone.tolist())
-        currentCalibration = f"Calibrated" if cam.M is not None else "Not Calibrated"
         cameraConfigRows.append(f"""
             <div class="row justify-content-center">
                 <h3 class="mt-5">Camera {cam.camNum}</h3>
@@ -131,7 +130,6 @@ def buildConfigurator():
                     <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%" height="500" id="cam{cam.camNum}" onclick="cam{cam.camNum}ClickListener(event)"></iframe>
                 </div>
                 <form method="post">
-                  <label>{currentCalibration}</label><br>
                   <label for="az">Active Zone</label><br>
                   <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50"><br>
                   <input type="hidden" id="camNum" name="camNum" value="{cam.camNum}">
@@ -166,8 +164,6 @@ def buildConfigurator():
                 formValue.push([~~image_x, ~~image_y])
                 formField.value = JSON.stringify(formValue)
             }}""")
-    unwarpedImage = imageToBase64(cm.cc.unwarpedOverlaidCameras())
-    unwarpedImage = f'<img src="data:image/jpeg;base64,{unwarpedImage}">'
     with open("templates/Configuration.html") as f:
         template = f.read()
     return template.replace(
@@ -175,12 +171,11 @@ def buildConfigurator():
     ).replace(
         "{clickSubscriptions}", "\n".join(clickSubs)
     ).replace(
-        "{unwarpedImage}", unwarpedImage)
+        "{unwarpedImage}", '')
 
     
 @observerApp.route('/config', methods=['GET'])
 def config():
-    cm.cc.capture()
     return buildConfigurator()
     
     
@@ -221,6 +216,46 @@ def updateConfig():
 
     print(f"Rebuilding configurator")
     return buildConfigurator()
+
+
+def buildCalibrator():
+    if cm.mode != "calibrate":
+        calibratorControl = """
+            <form method="post">
+                <input type="hidden" name="calib_type" value="start_calibration">
+                <input type="submit" value="Frame is set">
+            </form>
+        """
+        calibrationMonitor = f"""<p>Calibration in not in Progress<p>"""
+    else:
+        calibratorControl = f"""
+            <p>Place a Calibration Triangle at Calibration Point {len(cm.calibrationPts)}<p>
+            <form method="post">
+                <input type="hidden" name="calib_type" value="abort_calibration">
+                <input type="submit" value="Abort Calibration">
+            </form>
+        """
+        calibrationMonitor = f"""
+            <p>Calibration in Progress: {cm.mode == "calibrate"} -- Progress {len(cm.calibrationPts)} / {cm.NUM_CALIB_PTS}<br>{cm.calibrationPts}<p>
+        """
+    calibratorResult = "Not Calibrated" if cm.cc.rsc == None else f"{cm.cc.rsc}"
+    with open("templates/Calibrator.html") as f:
+        template = f.read()
+    return template.replace(
+        "{calibratorControl}", calibratorControl).replace(
+        "{calibratorResult}", calibratorResult).replace(
+        "{calibrationMonitor}", calibrationMonitor)
+
+    
+@observerApp.route('/calibrator', methods=['GET', 'POST'])
+def calibrator():
+    if (start_calibration := request.form.get("calib_type")) == 'start_calibration':
+        with data_lock:
+            cm.startCalibration()
+    elif (abort_calibration := request.form.get("calib_type")) == 'abort_calibration':
+        with data_lock:
+            cm.abortCalibration()
+    return buildCalibrator()
 
 
 def genCombinedCamerasView():
