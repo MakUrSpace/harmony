@@ -62,6 +62,7 @@ observerApp = createCaptureApp()
 def imageToBase64(img):
     return base64.b64encode(cv2.imencode('.jpg', img)[1]).decode()
 
+
 def renderConsole():
     while True:
         cam = list(cameras.values())[0]
@@ -74,7 +75,7 @@ def renderConsole():
         #    (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         #consoleImage = cv2.putText(zeros, f'ID: {cm.interactionDetected} || DC: {cm.debounceCounter}',
         #    (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)     
-        ret, consoleImage = cv2.imencode('.jpg', consoleImage)
+        ret, consoleImage = cv2.imencode('.jpg', zeros)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + consoleImage.tobytes() + b'\r\n')
 
@@ -218,37 +219,50 @@ def updateConfig():
     return buildConfigurator()
 
 
+
+@observerApp.route('/calibrator/start_calibration')
+def startCalibration():
+    with data_lock:
+        cm.startCalibration()
+    return "success"
+        
+        
+@observerApp.route('/calibrator/abort_calibration')
+def abortCalibration():
+    with data_lock:
+        cm.abortCalibration()
+    return "success"
+
+
+@observerApp.route('/calibrator', methods=['GET'])
 def buildCalibrator():
     if cm.mode != "calibrate":
-        calibratorControl = """
-            <form method="post">
-                <input type="hidden" name="calib_type" value="start_calibration">
-                <input type="submit" value="Frame is set">
-            </form>
-        """
         calibrationMonitor = f"""<p>Calibration in not in Progress<p>"""
     else:
-        calibratorControl = f"""
-            <p>Place a Calibration Triangle at Calibration Point {len(cm.calibrationPts)}<p>
-            <form method="post">
-                <input type="hidden" name="calib_type" value="abort_calibration">
-                <input type="submit" value="Abort Calibration">
-            </form>
-        """
+        formattedPts = [f"> {pt}<br>" for pt in cm.calibrationPts]
         calibrationMonitor = f"""
-            <p>Calibration in Progress: {cm.mode == "calibrate"} -- Progress {len(cm.calibrationPts)} / {cm.NUM_CALIB_PTS}<br>{cm.calibrationPts}<p>
+            <p>Calibration in Progress: {cm.mode == "calibrate"}<br>Progress {len(cm.calibrationPts)} / {cm.NUM_CALIB_PTS}<br>{formattedPts}<p>
         """
-    calibratorResult = "Not Calibrated" if cm.cc.rsc == None else f"{cm.cc.rsc}"
+        
+    if cm.cc.rsc == None:
+        calibratorResult = "Not Calibrated"
+    else:
+        ims = []
+        for camNum, cons in cm.cc.rsc.converters.items():
+            if len(cons) == 1:
+                camImage = cons[0].showUnwarpedImage()
+            else:
+                camImage = hStackImages([c.showUnwarpedImage() for c in cons])
+            ims.append(camImage)
+        unWarped = imageToBase64(vStackImages(ims))
+        calibratorResult = f'{cm.cc.rsc}<br><img alt="Unwarped Camera Views" src="data:image/jpg;base64,{unWarped}">'
+
     with open("templates/Calibrator.html") as f:
         template = f.read()
     return template.replace(
-        "{calibratorControl}", calibratorControl).replace(
         "{calibratorResult}", calibratorResult).replace(
         "{calibrationMonitor}", calibrationMonitor)
 
-    
-@observerApp.route('/calibrator', methods=['GET', 'POST'])
-def calibrator():
     if (start_calibration := request.form.get("calib_type")) == 'start_calibration':
         with data_lock:
             cm.startCalibration()

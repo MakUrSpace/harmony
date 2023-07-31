@@ -3,6 +3,7 @@
 <head>
     <!-- Required meta tags -->
     <meta charset="utf-8">
+    <meta http-equiv="refresh" content="5">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 
     <link rel="stylesheet" href="/bootstrap.min.css">
@@ -17,7 +18,14 @@
     <h1 align="center">Observer Calibrator</h1>
     <h3><a href="/config">Configuration</a></h3>
     <div class="row" align="center">
-        {calibratorControl}
+        <div class="container">
+            <div class="row">
+                <input type="button" value="Start Calibration" onclick="startCalibration()">
+            </div>
+            <div class="row">
+                <input type="button" value="Abort Calibration" onclick="abortCalibration()">
+            </div>
+        </div>
     </div>
     <div class="row" align="center">
         {calibratorResult}
@@ -27,4 +35,15 @@
     </div>
 </div>
 </body>
+<script>
+    async function startCalibration(){
+        const request = new Request("/calibrator/start_calibration");
+        fetch(request)
+    }
+    
+    async function abortCalibration(){
+        const request = new Request("/calibrator/abort_calibration");
+        fetch(request)
+    }
+</script>
 </html>
