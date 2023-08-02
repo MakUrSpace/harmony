@@ -82,7 +82,7 @@ def renderConsole():
             consoleImage = cv2.putText(zeros, f'Obj at {currentLocation}',
                 (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             if not lastObj.isNewObject:
-                lastLocation = [f"{pt:7.2f}" for pt in cc.rsc.trackedObjectToRealCenter(lastObj.previousVersion())]
+                lastLocation = [f"{d:7.2f}" for d in cc.rsc.trackedObjectToRealCenter(lastObj.previousVersion())]
                 distanceMoved = cc.rsc.trackedObjectLastDistance(lastObj)
                 consoleImage = cv2.putText(zeros, f'Moved {distanceMoved:6.2f} mm',
                     (50, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
@@ -380,7 +380,7 @@ def buildController():
     cameraCaptures = """    <div class="container" width="100%">
         <div class="row" width="100%">
             <h3 class="mt-5">Virtual Map</h3>
-            <img src="/control/minimap" height=300px>
+            <img src="/control/minimap" height=200px>
         </div>
         <div class="row" width="100%">
             <h3 class="mt-5">Live Cameras</h3>
