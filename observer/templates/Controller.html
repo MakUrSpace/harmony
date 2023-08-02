@@ -27,19 +27,14 @@
             {cameraCaptures}
         </div>
         <div class="col">
-            <h2 class="mt-5">Management</h2>
+            <h2 class="mt-5">Capture Control</h2>
             <div class="container">
                 <div class="row">
-                    <div class="col offset" align="left">
-                        <form method="post">
-                            <input type="radio" id="terrain" name="capture_type" value="terrain">
-                            <label for="null">Terrain</label><br>
-                            <input type="radio" id="add" name="capture_type" value="add">
-                            <label for="null">Add Unit</label><br>
-                            <input type="radio" id="move" name="capture_type" value="move">
-                            <label for="null">Move Unit</label><br>
-                            <input type="submit" value="Set Capture Mode">
-                        </form>
+                    <div class="col offset" id="captureControl" align="left">
+                        <input type="radio" id="passive" name="capture_type" value="passive" checked onclick="setPassive();">
+                        <label for="null">Passive</label><br>
+                        <input type="radio" id="trackObjects" name="capture_type" value="trackObjects" onclick="setTracking();">
+                        <label for="null">Track Objects</label><br>
                     </div>
                 </div>
                 <div class="row offset d-flex align-items-center justify-content-center">
@@ -98,5 +93,15 @@
     }
     
     setInterval(refreshChangeTable, 1500);
+    
+    async function setPassive(){
+        const request = new Request("/control/set_passive");
+        fetch(request)
+    }
+    
+    async function setTracking(){
+        const request = new Request("/control/set_tracking");
+        fetch(request)
+    }
 </script>
 </html>

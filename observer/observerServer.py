@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.Observer import cm, cameras, pov, Camera, hStackImages, vStackImages
+from ipynb.fs.full.Observer import cm, cc, cameras, pov, Camera, hStackImages, vStackImages
 
 import threading
 import atexit
@@ -69,10 +69,26 @@ def renderConsole():
         shape = (400, 400)
         mid = [int(d / 2) for d in shape]
         zeros = np.zeros(shape, dtype="uint8")
-        #consoleImage = cv2.putText(zeros, f'CapMac--{cm.state}',
-        #    (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        #consoleImage = cv2.putText(zeros, f'Mode: {cm.mode}',
-        #    (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        
+        consoleImage = cv2.putText(zeros, f'Status: {cm.mode:7} -- {cm.state:10}',
+            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        consoleImage = cv2.putText(zeros, f'Cycle {cm.cycleCounter}',
+            (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        if len(cm.transitions) > 0:
+            lastObj = cm.transitions[-1]['obj']
+            currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.trackedObjectToRealCenter(lastObj)]
+            consoleImage = cv2.putText(zeros, f'Last Action',
+                (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            consoleImage = cv2.putText(zeros, f'Obj at {currentLocation}',
+                (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            if not lastObj.isNewObject:
+                lastLocation = [f"{pt:7.2f}" for pt in cc.rsc.trackedObjectToRealCenter(lastObj.previousVersion())]
+                distanceMoved = cc.rsc.trackedObjectLastDistance(lastObj)
+                consoleImage = cv2.putText(zeros, f'Moved {distanceMoved:6.2f} mm',
+                    (50, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                consoleImage = cv2.putText(zeros, f'From {lastLocation}',
+                    (50, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                # TODO: Scale down lastObj icon and put into status message
         #consoleImage = cv2.putText(zeros, f'ID: {cm.interactionDetected} || DC: {cm.debounceCounter}',
         #    (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)     
         ret, consoleImage = cv2.imencode('.jpg', zeros)
@@ -293,7 +309,6 @@ def combinedCamerasResponse():
 def genCombinedCameraWithChangesView():
     while True:
         camImages = []
-        print(f"Num memories: {len(cm.memory)}")
         if cm.lastChanges is not None and not cm.lastChanges.empty:
             print("Has changes")
         if cm.lastClassification is not None:
@@ -332,7 +347,7 @@ def combinedCamerasWithChangesResponse():
 
 def minimapGenerator():
     while True:
-        camImage = cameras[0].mostRecentFrame
+        camImage = cm.buildMiniMap()
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
@@ -343,6 +358,20 @@ def minimapResponse():
     return Response(minimapGenerator(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+@observerApp.route('/control/set_passive')
+def controlSetPassive():
+    with data_lock:
+        cm.passiveMode()
+    return "success"
+        
+
+@observerApp.route('/control/set_tracking')
+def controlSetTracking():
+    with data_lock:
+        cm.trackingMode()
+    return "success"
+
+
 @observerApp.route('/control')
 def buildController():
     with open("templates/Controller.html", "r") as f:
@@ -351,7 +380,7 @@ def buildController():
     cameraCaptures = """    <div class="container" width="100%">
         <div class="row" width="100%">
             <h3 class="mt-5">Virtual Map</h3>
-            <img src="/control/minimap" height=200px>
+            <img src="/control/minimap" height=300px>
         </div>
         <div class="row" width="100%">
             <h3 class="mt-5">Live Cameras</h3>
@@ -367,6 +396,7 @@ def buildObjectTable():
     print(f"Aware of {len(cm.memory)} objects")
     for cid, capture in enumerate(cm.memory[::-1]):
         encodedBA = imageToBase64(capture.visual())
+        center = [f"{pt:.2f}" for pt in cc.rsc.trackedObjectToRealCenter(capture)]
         changeRow = f"""
             <div class="row">
                 <div class="col">
@@ -378,7 +408,7 @@ def buildObjectTable():
                     </form>
                 </div>
                 <div class="col">
-                    <p>{capture.realCenter}</p>
+                    <p>{center}</p>
                 </div> 
                 <div class="col">
                    <div class="row" name="captureVisual">
