@@ -306,6 +306,43 @@ def combinedCamerasResponse():
     return Response(genCombinedCamerasView(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+def genCameraWithChangesView(camNum):
+    camNum = int(camNum)
+    cam = cameras[camNum]
+    while True:
+        if cm.lastChanges is not None and not cm.lastChanges.empty:
+            print("Has changes")
+        if cm.lastClassification is not None:
+            print("Has class")
+        camImage = cam.mostRecentFrame.copy()
+        # Paint known objects blue
+        for memObj in cm.memory:
+            if memObj.changeSet[camNum].changeType not in ['delete', None]:
+                memContour = np.array([memObj.changeSet[camNum].changePoints], dtype=np.int32)
+                camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
+        # Paint last changes red
+        if cm.lastChanges is not None and not cm.lastChanges.empty:
+            lastChange = cm.lastChanges.changeSet[camNum]
+            if lastChange is not None and lastChange.changeType not in ['delete', None]:
+                lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
+                camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
+        # Paint classification green
+        if cm.lastClassification is not None and not cm.lastClassification.empty:
+            lastClass = cm.lastClassification.changeSet[camNum]
+            if lastClass is not None and lastClass.changeType not in ['delete', None]:
+                lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
+                camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
+        camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
+        ret, camImage = cv2.imencode('.jpg', camImage)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+
+
+@observerApp.route('/control/camWithChanges/<camNum>')
+def cameraViewWithChangesResponse(camNum):
+    return Response(genCameraWithChangesView(camNum), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
 def genCombinedCameraWithChangesView():
     while True:
         camImages = []
@@ -376,25 +413,16 @@ def controlSetTracking():
 def buildController():
     with open("templates/Controller.html", "r") as f:
         template = f.read()
-
-    cameraCaptures = """    <div class="container" width="100%">
-        <div class="row" width="100%">
-            <h3 class="mt-5">Virtual Map</h3>
-            <img src="/control/minimap" height=200px>
-        </div>
-        <div class="row" width="100%">
-            <h3 class="mt-5">Live Cameras</h3>
-            <img src="/control/combinedCamerasWithChanges" height=500px>
-        </div>
-    </div>"""
-    template = template.replace("{cameraCaptures}", cameraCaptures)
+    cameraButtons = ' '.join([f'<input type="button" value="Camera {camNum}" onclick="liveCameraClick({camNum})">' for camNum in cameras.keys()])
+    template = template.replace("{cameraButtons}", cameraButtons)
     return template
 
 
 def buildObjectTable():
     changeRows = []
     print(f"Aware of {len(cm.memory)} objects")
-    for cid, capture in enumerate(cm.memory[::-1]):
+    memoriesInChangeOrder = cm.memoriesInChangeOrder()
+    for cid, capture in enumerate(memoriesInChangeOrder):
         encodedBA = imageToBase64(capture.visual())
         center = [f"{pt:.2f}" for pt in cc.rsc.trackedObjectToRealCenter(capture)]
         changeRow = f"""

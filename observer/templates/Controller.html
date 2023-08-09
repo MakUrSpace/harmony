@@ -21,51 +21,48 @@
 <body>
 <div class="container">
     <h1 align="center">Observer Controller</h1>
-    <h3><a href="/config">Config</a></h3>
+    <h3 text-align="right"><a href="/config">Config</a></h3>
     <div class="row">
         <div class="col">
-            {cameraCaptures}
+            <div class="container">
+                <h2 class="mt-5">Capture Control
+                <input type="button" id="passive" name="capture_type" value="Passive" checked onclick="setPassive();">
+                <input type="button" id="active" name="capture_type" value="Active" onclick="setTracking();"></h2>
+                <img src="/console">
+            </div>
         </div>
         <div class="col">
-            <h2 class="mt-5">Capture Control</h2>
-            <div class="container">
-                <div class="row">
-                    <div class="col offset" id="captureControl" align="left">
-                        <input type="radio" id="passive" name="capture_type" value="passive" checked onclick="setPassive();">
-                        <label for="null">Passive</label><br>
-                        <input type="radio" id="trackObjects" name="capture_type" value="trackObjects" onclick="setTracking();">
-                        <label for="null">Track Objects</label><br>
-                    </div>
-                </div>
-                <div class="row offset d-flex align-items-center justify-content-center">
-                    <div class="container">
-                        <div class="row justify-content-center">
-                            <iframe src="/console" style="width:100%;min-height:500px"></iframe>
-                        </div>
-                        <div class="row justify-content-center">
-                            <form method="post">
-                                <input type="hidden" id="capture_type" name="capture_type" value="commit">
-                                <input type="submit" value="Commit Changes">
-                            </form><br>
-                            <form method="post">
-                                <input type="hidden" id="capture_type" name="capture_type" value="reject">
-                                <input type="submit" value="Reject Changes">
-                            </form>
-                        </div>
-                    </div>
-                </div>
-                </div>
-            </div>
+            <h3 class="mt-5">Virtual Map</h3>
+            <img src="/control/minimap" height=300px>
         </div>
     </div>
     <hr>
     <div class="row">
-        <div class="container" align="center">
-            <div class="row justify-content-center">
-                <h2 class="mt-5">Change Tracker</h2>
+        <div class="col">
+            <div class="row">
+                <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected 0)</h3>
+                <img id="liveCam" src="/control/camWithChanges/0" style="transform: rotate(-90deg);">
             </div>
             <div class="row justify-content-center">
-                <div id="changeTable"></div>
+                <script>
+                    function liveCameraClick(camNum){{
+                        var header = document.querySelector("#liveCamHeader")
+                        header.innerText = `Live Cameras (Selected ${camNum})`
+                        var img = document.querySelector("#liveCam")
+                        img.src = `/control/camWithChanges/${camNum}`
+                    }}
+                </script>
+                {cameraButtons}
+            </div>
+        </div>
+        <div class="col" align="center">
+            <div class="container">
+                <div class="row justify-content-center">
+                    <h2 class="mt-5">Change Tracker</h2>
+                </div>
+                <div class="row justify-content-center">
+                    <div id="changeTable"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -97,11 +94,15 @@
     async function setPassive(){
         const request = new Request("/control/set_passive");
         fetch(request)
+        document.getElementById("passive").style.backgroundColor = 'green'
+        document.getElementById("active").style.backgroundColor = 'gray'
     }
     
     async function setTracking(){
         const request = new Request("/control/set_tracking");
         fetch(request)
+        document.getElementById("passive").style.backgroundColor = 'gray'
+        document.getElementById("active").style.backgroundColor = 'green'
     }
 </script>
 </html>
