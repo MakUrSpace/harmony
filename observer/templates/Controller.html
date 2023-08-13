@@ -26,33 +26,39 @@
         <div class="col">
             <div class="container">
                 <h2 class="mt-5">Capture Control
-                <input type="button" id="passive" name="capture_type" value="Passive" checked onclick="setPassive();">
-                <input type="button" id="active" name="capture_type" value="Active" onclick="setTracking();"></h2>
-                <img src="/console">
+                <div class="btn-group" role="group" aria-label="Observer Capture Mode Control Buttons">
+                  <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" checked="" onclick="setPassive();">
+                  <label class="btn btn-outline-primary" for="passive">Passive</label>
+                  <input type="radio" class="btn-check" name="btnradio" id="active" autocomplete="off" onclick="setTracking();">
+                  <label class="btn btn-outline-primary" for="active">Active</label>
+                </div></h2>
+                <img class="img-fluid border border-primary" src="/console" style="border-radius: 50px;">
             </div>
         </div>
         <div class="col">
             <h3 class="mt-5">Virtual Map</h3>
-            <img src="/control/minimap" height=300px>
+            <img class="img-fluid border border-primary" src="/control/minimap" style="border-radius: 5px;">
         </div>
     </div>
     <hr>
     <div class="row">
         <div class="col">
-            <div class="row">
-                <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected 0)</h3>
-                <img id="liveCam" src="/control/camWithChanges/0" style="transform: rotate(-90deg);">
-            </div>
-            <div class="row justify-content-center">
-                <script>
-                    function liveCameraClick(camNum){{
-                        var header = document.querySelector("#liveCamHeader")
-                        header.innerText = `Live Cameras (Selected ${camNum})`
-                        var img = document.querySelector("#liveCam")
-                        img.src = `/control/camWithChanges/${camNum}`
-                    }}
-                </script>
-                {cameraButtons}
+            <div class="container">
+                <div class="row justify-content-center">
+                    <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected 0)</h3>
+                    <img id="liveCam" class="img-responsive border border-primary bg-primary" src="/control/camWithChanges/0" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
+                </div>
+                <div class="row justify-content-center">
+                    <script>
+                        function liveCameraClick(camNum){{
+                            var header = document.querySelector("#liveCamHeader")
+                            header.innerText = `Live Cameras (Selected ${camNum})`
+                            var img = document.querySelector("#liveCam")
+                            img.src = `/control/camWithChanges/${camNum}`
+                        }}
+                    </script>
+                    {cameraButtons}
+                </div>
             </div>
         </div>
         <div class="col" align="center">
@@ -94,15 +100,11 @@
     async function setPassive(){
         const request = new Request("/control/set_passive");
         fetch(request)
-        document.getElementById("passive").style.backgroundColor = 'green'
-        document.getElementById("active").style.backgroundColor = 'gray'
     }
     
     async function setTracking(){
         const request = new Request("/control/set_tracking");
         fetch(request)
-        document.getElementById("passive").style.backgroundColor = 'gray'
-        document.getElementById("active").style.backgroundColor = 'green'
     }
 </script>
 </html>

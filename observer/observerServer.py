@@ -203,13 +203,10 @@ def updateConfig():
     print(f"Received update config request")
     
     if (config_type := request.form.get("config_type")) == 'save_state':
-        cm.cc.saveConfiguration()
+        with open("observerConfiguration.json", "w") as f:
+            f.write(cm.cc.jsonConfiguration())
         CONSOLE_OUTPUT = "State Saved!"
         print("State Saved!")
-    elif config_type == 'load_state':
-        cm.cc.recoverConfiguration()
-        CONSOLE_OUTPUT = "State Recovered!"
-        print("State Recovered!")
     elif config_type == 'calibrate_cameras':
         cm.calibrate()
         CONSOLE_OUTPUT = "Cameras calibrated!"

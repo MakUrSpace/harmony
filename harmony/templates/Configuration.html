@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <link rel="stylesheet" href="/bootstrap.min.css">
+    <script src="/bootstrap.min.js"></script>
+
+    
+    <title>Observer Configuration</title>
+</head>
+<body>
+
+<div class="container">
+    <h1 align="center">Observer Configuration</h1>
+    <h3><a href="/control">Control</a></h3>
+    <div class="row">
+        <iframe src="/console"></iframe>
+    </div>
+    <div class="row" align="center">
+        <div class="col">
+            <form method="post">
+                <input type="hidden" name="config_type" value="save_state">
+                <input type="submit" value="Save State">
+            </form>
+        </div>
+        <div class="col">
+            <input type="button" value="Calibrate Cameras" onclick="window.location.href='/calibrator'">
+        </div>
+    </div>
+    {cameraConfigRows}
+    <div class "row" align="center">
+        <h3>Unwarped Overlaid Cameras</h3>
+        {unwarpedImage}
+    </div>
+</div>
+</body>
+<script>
+    {clickSubscriptions}
+</script>
+</html>
