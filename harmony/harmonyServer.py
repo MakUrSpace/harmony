@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.HarmonyEye import cm, cc, cameras, Camera, hStackImages, vStackImages
+from ipynb.fs.full.HarmonyEye import cm, cc, cameras, Camera, hStackImages, vStackImages, mc, QuantumObject
 
 import threading
 import atexit
@@ -432,40 +432,97 @@ def buildController():
 
 def buildObjectTable():
     changeRows = []
+    captureModals = []
     print(f"Aware of {len(cm.memory)} objects")
-    memoriesInChangeOrder = cm.memoriesInChangeOrder()
-    for capture in memoriesInChangeOrder:
+    for capture in cm.memory:
         encodedBA = imageToBase64(capture.visual())
-        mechTypeDataList = """<datalist id="mechTypeDataList">
-            <option value="KingFisher"
-        </datalist>"""
-        center = [f"{pt:.2f}" for pt in cc.rsc.trackedObjectToRealCenter(capture)]
+        center = ", ".join([f"{pt:.2f}" for pt in cc.rsc.trackedObjectToRealCenter(capture)])
         changeRow = f"""
             <div class="row mb-1">
                 <div class="col">
-                    <p>{"Unnamed" if capture.isNewObject else capture.name}</p>
+                    <p>{"" if capture.name is None else capture.name}</p>
                 </div>
                 <div class="col">
-                    <p>{center}</p>
+                    <p>({center})</p>
                 </div> 
                 <div class="col">
                     <img class="img-fluid border border-secondary" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
                 </div>
-                <div class="col">
-                    <form action="/objectSettings/{capture.oid}">
-                        <input type="submit" value="Object Settings">
-                    </form>
-                </div>
             </div>"""
         changeRows.append(changeRow)
-    with open("templates/ChangeTable.html", "r") as f:
-        template = f.read()
-    return template.replace("{changeTableBody}", " ".join(changeRows))
+    if len(cm.newObjectBuffer) > 0:
+        changeRows.insert(0, """
+            <div class="row">
+                <button type="button" class="btn btn-warning btn-sm" onclick="location.href='/objectsettings';">Assign New Objects</button>
+            </div>
+        """)
+    return " ".join(changeRows)
 
 
 @observerApp.route('/objects', methods=['GET'])
 def getObjectTable():
     return buildObjectTable()
+
+
+def buildObjectSettingsTable():
+    changeRows = []
+    captureModals = []
+    print(f"Aware of {len(cm.memory)} objects")
+    for idx, capture in enumerate(cm.newObjectBuffer):
+        encodedBA = imageToBase64(capture.visual())
+        center = [f"{pt:.2f}" for pt in cc.rsc.trackedObjectToRealCenter(capture)]
+        changeRow = f"""
+            <div class="row mb-1">
+                <div class="col">
+                    <form method="post">
+                      <div class="form-group">
+                        <label for="objectName">Object Name</label>
+                        <input type="text" name="objectName" value="" required>
+                      </div>
+                      <div class="form-group">
+                        <label for="objectType">Object Type</label>
+                        <input name="objectType" list="mechTypeDataList" value="" required>
+                      </div>
+                      <input type="hidden" name="objectId" value="{capture.oid}">
+                      <button type="submit" class="btn btn-secondary">Update Object</button>
+                    </form>
+                </div>
+                <div class="col">
+                    <p>{center}</p><br>
+                    <img class="img-fluid border border-secondary" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
+                </div>
+            </div>"""
+        changeRows.append(changeRow)
+    changeRows.insert(0, """
+            <datalist id="mechTypeDataList">
+                <option value="KingFisher">
+            </datalist>""")
+    with open("templates/ChangeTable.html", "r") as f:
+        template = f.read()
+    return template.replace("{changeTableBody}", " ".join(changeRows))
+
+
+@observerApp.route('/objectsettings', methods=['GET'])
+def getObjectSettingsTable():
+    return buildObjectSettingsTable()
+    
+    
+@observerApp.route('/objectsettings', methods=['POST'])
+def postObjectSettings():
+    objName = request.form.get("objectName")
+    objType = request.form.get("objectType")
+    oid = request.form.get("objectId")
+    caps = {cap.oid: cap for cap in cm.newObjectBuffer}
+    cap = caps[oid]
+    center = cc.rsc.trackedObjectToRealCenter(cap)
+    print(f"Received Update: {objName} - {objType} - {oid}")
+    if objType == "KingFisher":
+        mc.kingfisherFactory(objName)
+        mc.Location.set_location(objName, json.dumps(list(center) + [0]))
+    qObj = QuantumObject(cap.changeSet, objName, objType)
+    cm.memory.append(qObj)
+    cm.newObjectBuffer.remove(cap)
+    return buildObjectSettingsTable()
 
 
 if __name__ == "__main__":

@@ -67,6 +67,8 @@
         </div>
         <div class="col" align="center">
             <div class="container">
+                <script>
+                </script>
                 <div class="row justify-content-center">
                     <h2 class="mt-5">Object Tracker</h2>
                 </div>
@@ -79,24 +81,35 @@
 </div>
 </body>
 <script>
+    var cycleChangeTable = true;
+    function captureModalEnable(modalId) {
+        const modal = document.getElementById(modalId)
+        modal.style.display = "block";
+        cycleChangeTable = false;
+        modal.addEventListener('hidden.bs.modal', function (e) {
+            cycleChangeTable = true;
+        })
+    }
     async function refreshChangeTable(){
         const request = new Request("/objects");
-        await fetch(request)
-          .then((response) => {
-            if (response.status === 200) {
+        if (cycleChangeTable) {
+            await fetch(request)
+              .then((response) => {
+                if (response.status === 200) {
+                    const element = document.getElementById("changeTable");
+                    return response.text()
+                } else {
+                  throw new Error("Failed to retreive change table");
+                }
+              })
+              .then((response) => {
                 const element = document.getElementById("changeTable");
-                return response.text()
-            } else {
-              throw new Error("Failed to retreive change table");
-            }
-          })
-          .then((response) => {
-            const element = document.getElementById("changeTable");
-            element.innerHTML = response
-          })
-          .catch((error) => {
-            console.error(error);
-          });
+                element.innerHTML = response
+              })
+              .catch((error) => {
+                console.error(error);
+              });
+        }
     }
     
     setInterval(refreshChangeTable, 1500);
