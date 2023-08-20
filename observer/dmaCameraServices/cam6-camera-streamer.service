@@ -7,7 +7,7 @@ ExecStart=/usr/local/bin/camera-streamer \
   --camera-path=/dev/video6 \
   --camera-format=JPEG \
   --camera-width=1920 --camera-height=1080 \
-  --camera-fps=30 \
+  --camera-fps=10 \
   ; use two memory buffers to optimise usage
   --camera-nbufs=2 \
   ; the high-res is 1920x1080

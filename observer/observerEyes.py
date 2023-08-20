@@ -43,7 +43,7 @@ def set_strip_to_color(color=None):
 
 def validateEyes():
     reset = False
-    for eye in [0, 2, 4]:
+    for eye in [0, 2, 4, 6]:
         for i in range(3):
             resp = req.get(f"http://localhost:808{eye}/snapshot")
             if resp.status_code == 500:

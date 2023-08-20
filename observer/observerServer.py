@@ -76,13 +76,13 @@ def renderConsole():
             (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         if len(cm.transitions) > 0:
             lastObj = cm.transitions[-1]['obj']
-            currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.trackedObjectToRealCenter(lastObj)]
+            currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(lastObj)]
             consoleImage = cv2.putText(zeros, f'Last Action',
                 (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             consoleImage = cv2.putText(zeros, f'Obj at {currentLocation}',
                 (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             if not lastObj.isNewObject:
-                lastLocation = [f"{d:7.2f}" for d in cc.rsc.trackedObjectToRealCenter(lastObj.previousVersion())]
+                lastLocation = [f"{d:7.2f}" for d in cc.rsc.changeSetToRealCenter(lastObj.previousVersion())]
                 distanceMoved = cc.rsc.trackedObjectLastDistance(lastObj)
                 consoleImage = cv2.putText(zeros, f'Moved {distanceMoved:6.2f} mm',
                     (50, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
@@ -421,7 +421,7 @@ def buildObjectTable():
     memoriesInChangeOrder = cm.memoriesInChangeOrder()
     for cid, capture in enumerate(memoriesInChangeOrder):
         encodedBA = imageToBase64(capture.visual())
-        center = [f"{pt:.2f}" for pt in cc.rsc.trackedObjectToRealCenter(capture)]
+        center = [f"{pt:.2f}" for pt in cc.rsc.changeSetToRealCenter(capture)]
         changeRow = f"""
             <div class="row">
                 <div class="col">
