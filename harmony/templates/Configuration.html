@@ -7,14 +7,14 @@
 
     <link rel="stylesheet" href="/bootstrap.min.css">
     <script src="/bootstrap.min.js"></script>
+    <script src="/htmx.min.js"></script>
 
-    
-    <title>Observer Configuration</title>
+    <title>Harmony Configuration</title>
 </head>
 <body>
 
 <div class="container">
-    <h1 align="center">Observer Configuration</h1>
+    <h1 align="center">Harmony Configuration</h1>
     <h3><a href="/control">Control</a></h3>
     <div class="row">
         <iframe src="/console"></iframe>
@@ -22,8 +22,7 @@
     <div class="row" align="center">
         <div class="col">
             <form method="post">
-                <input type="hidden" name="config_type" value="save_state">
-                <input type="submit" value="Save State">
+                <input type="submit" value="Save State" hx-post="/config" hx-swap="none">
             </form>
         </div>
         <div class="col">
@@ -31,10 +30,6 @@
         </div>
     </div>
     {cameraConfigRows}
-    <div class "row" align="center">
-        <h3>Unwarped Overlaid Cameras</h3>
-        {unwarpedImage}
-    </div>
 </div>
 </body>
 <script>

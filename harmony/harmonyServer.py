@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.HarmonyEye import cm, cc, cameras, Camera, hStackImages, vStackImages, mc, QuantumObject
+from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackImages
 
 import threading
 import atexit
@@ -113,6 +113,13 @@ def getBSJS():
     return Response(bsjs, mimetype="application/javascript")
 
 
+@observerApp.route('/htmx.min.js', methods=['GET'])
+def getHTMX():
+    with open("templates/htmx.min.js", "r") as f:
+        htmx = f.read()
+    return Response(htmx, mimetype="application/javascript")
+
+
 def genCameraFullViewWithActiveZone(camNum):
     while True:
         cam = cameras[int(camNum)]
@@ -130,7 +137,6 @@ def genCameraFullViewWithActiveZone(camNum):
 @observerApp.route('/config/camera/<camNum>')
 def cameraActiveZoneWithObjects(camNum):
     return Response(genCameraFullViewWithActiveZone(int(camNum)), mimetype='multipart/x-mixed-replace; boundary=frame')
-    return response
 
 
 def buildConfigurator():
@@ -144,14 +150,10 @@ def buildConfigurator():
                 <div class="container">
                     <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%" height="500" id="cam{cam.camNum}" onclick="cam{cam.camNum}ClickListener(event)"></iframe>
                 </div>
-                <form method="post">
-                  <label for="az">Active Zone</label><br>
-                  <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50"><br>
-                  <input type="hidden" id="camNum" name="camNum" value="{cam.camNum}">
-                  <input type="submit" value="Update Cam {cam.camNum}">
-                  <input type="hidden" id="configType" name="configType" value="activeZone">
-                </form>
-                <br>
+                <div class="container">
+                    <label for="az">Active Zone</label><br>
+                    <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camNum}_activezone" hx-swap="none"><br>
+                </div>
             </div>""")
         clickSubs.append(f"""
             function cam{cam.camNum}ClickListener(event) {{
@@ -192,46 +194,29 @@ def buildConfigurator():
 @observerApp.route('/config', methods=['GET'])
 def config():
     return buildConfigurator()
-    
-    
+
+
 @observerApp.route('/config', methods=['POST'])
-def updateConfig():
+def updateConfig(camNum):
+    global CONSOLE_OUTPUT
+    CONSOLE_OUTPUT = "Saved Configuration"
+    cc.saveConfiguration()
+    return "success"
+
+
+@observerApp.route('/config/cam<camNum>_activezone', methods=['POST'])
+def updateCamActiveZone(camNum):
     global CONSOLE_OUTPUT
     CONSOLE_OUTPUT = ""
-    print(f"Received update config request")
-    
-    if (config_type := request.form.get("config_type")) == 'save_state':
-        cm.cc.saveConfiguration()
-        CONSOLE_OUTPUT = "State Saved!"
-        print("State Saved!")
-    elif config_type == 'load_state':
-        cm.cc.recoverConfiguration()
-        CONSOLE_OUTPUT = "State Recovered!"
-        print("State Recovered!")
-    elif config_type == 'calibrate_cameras':
-        cm.calibrate()
-        CONSOLE_OUTPUT = "Cameras calibrated!"
-        print("Cameras Calibrated")
-    else:
-        camNum = int(request.form.get("camNum"))
-        if (configType := request.form.get("configType")) == "activeZone":
-            az = np.float32(json.loads(request.form.get(f"az")))
-
-            cam = cameras[camNum]
-            cam.setActiveZone(az)
-        elif configType == "calibrate":
-            xPosition = float(request.form.get('calibrate_x'))
-            yPosition = float(request.form.get('calibrate_y'))
-            try:
-                qrCodes = cameras[camNum].calibrate((xPosition, yPosition))
-                CONSOLE_OUTPUT = f"Camera {camNum} Calibrated to ({xPosition}, {yPosition}). Saw {qrCodes} calibration boxes"
-            except Exception as e:
-                print(f"Failed Calibration: {e}")
-                CONSOLE_OUTPUT = f"Failed Calibration: {e}"
-
-    print(f"Rebuilding configurator")
-    return buildConfigurator()
-
+    print(f"Received update Active Zone request for {camNum}")
+    try:
+        az = np.float32(json.loads(request.form.get(f"az")))
+        cam = cameras[int(camNum)]
+        cam.setActiveZone(az)
+    except:
+        print(f"Unrecognized data: {camNum} - {az}")
+    CONSOLE_OUPUT = f"Updated {camNum} AZ"
+    return "success"
 
 
 @observerApp.route('/calibrator/start_calibration')
@@ -264,9 +249,9 @@ def buildCalibrator():
         ims = []
         for camNum, cons in cm.cc.rsc.converters.items():
             if len(cons) == 1:
-                camImage = cons[0].showUnwarpedImage(cm.cc.cameras)
+                camImage = cons[0].showUnwarpedImage()
             else:
-                camImage = hStackImages([c.showUnwarpedImage(cm.cc.cameras) for c in cons])
+                camImage = hStackImages([c.showUnwarpedImage() for c in cons])
             ims.append(camImage)
         unWarped = imageToBase64(vStackImages(ims))
         calibratorResult = f'{cm.cc.rsc}<br><img alt="Unwarped Camera Views" src="data:image/jpg;base64,{unWarped}">'
@@ -493,9 +478,10 @@ def buildObjectSettingsTable():
                 </div>
             </div>"""
         changeRows.append(changeRow)
+    mechOptions = "\n".join([f'<option value="{mechName}">' for mechName in mc.MechFactories.keys()])
     changeRows.insert(0, """
             <datalist id="mechTypeDataList">
-                <option value="KingFisher">
+                {mechOptions}
             </datalist>""")
     with open("templates/ChangeTable.html", "r") as f:
         template = f.read()
@@ -512,16 +498,7 @@ def postObjectSettings():
     objName = request.form.get("objectName")
     objType = request.form.get("objectType")
     oid = request.form.get("objectId")
-    caps = {cap.oid: cap for cap in cm.newObjectBuffer}
-    cap = caps[oid]
-    center = cc.rsc.trackedObjectToRealCenter(cap)
-    print(f"Received Update: {objName} - {objType} - {oid}")
-    if objType == "KingFisher":
-        mc.kingfisherFactory(objName)
-        mc.Location.set_location(objName, json.dumps(list(center) + [0]))
-    qObj = QuantumObject(cap.changeSet, objName, objType)
-    cm.memory.append(qObj)
-    cm.newObjectBuffer.remove(cap)
+    cm.annotateObject(oid, objName, objType)
     return buildObjectSettingsTable()
 
 
