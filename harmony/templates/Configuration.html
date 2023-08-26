@@ -33,6 +33,37 @@
 </div>
 </body>
 <script>
-    {clickSubscriptions}
+    function camClickListener(camNum, event) {
+        const imgElem = document.getElementById(`cam${camNum}`)
+        bounds=imgElem.getBoundingClientRect();
+        const left=bounds.left;
+        const top=bounds.top;
+        const x = event.x - left;
+        const y = event.y - top;
+        const cw=imgElem.clientWidth
+        const ch=imgElem.clientHeight
+        const iw=imgElem.naturalWidth
+        const ih=imgElem.naturalHeight
+        const px=x/cw*iw
+        const py=y/ch*ih
+        //console.log("img element points: ", px, py)
+        const x_offset = 200
+        const x_scale = 1
+        const image_x = (px - x_offset) * x_scale
+        const y_offset = 100
+        const y_scale = 1
+        const image_y = (py - y_offset) * y_scale
+        const formField = document.getElementById(`cam${camNum}_ActiveZone`)
+        var formValue
+        try {
+          formValue = JSON.parse(formField.value)
+        }
+        catch(err) {
+          formValue = []
+        }
+        formValue.push([~~image_x, ~~image_y])
+        formField.value = JSON.stringify(formValue)
+        formField.dispatchEvent(new Event('change'));
+    }
 </script>
 </html>

@@ -73,13 +73,13 @@ def renderConsole():
             (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         if len(cm.transitions) > 0:
             lastObj = cm.transitions[-1]['obj']
-            currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.trackedObjectToRealCenter(lastObj)]
+            currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(lastObj)]
             consoleImage = cv2.putText(zeros, f'Last Action',
                 (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             consoleImage = cv2.putText(zeros, f'Obj at {currentLocation}',
                 (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             if not lastObj.isNewObject:
-                lastLocation = [f"{d:7.2f}" for d in cc.rsc.trackedObjectToRealCenter(lastObj.previousVersion())]
+                lastLocation = [f"{d:7.2f}" for d in cc.rsc.changeSetToRealCenter(lastObj.previousVersion())]
                 distanceMoved = cc.rsc.trackedObjectLastDistance(lastObj)
                 consoleImage = cv2.putText(zeros, f'Moved {distanceMoved:6.2f} mm',
                     (50, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
@@ -123,15 +123,41 @@ def getHTMX():
 def genCameraFullViewWithActiveZone(camNum):
     while True:
         cam = cameras[int(camNum)]
-        camImage = cam.drawActiveZone(cam.mostRecentFrame)
-        fig = Figure()
-        axis = fig.add_subplot(1, 1, 1)
-        axis.imshow(camImage)
-        camFrame = BytesIO()
-        FigureCanvas(fig).print_png(camFrame)
-        camFrame.seek(0)
+        img = cam.drawActiveZone(cam.mostRecentFrame)
+
+        h, w, _ = img.shape
+        dy, dx = 100, 100
+        rows, cols = int(h / dy), int(w / dx)
+        
+        # Draw vertical lines
+        for x in np.linspace(start=dx, stop=w-dx, num=cols-1):
+            x = int(round(x))
+            cv2.line(img, (x, 0), (x, h), color=(0, 0, 255), thickness=2)
+        
+        # Draw horizontal lines
+        for y in np.linspace(start=dy, stop=h-dy, num=rows-1):
+            y = int(round(y))
+            cv2.line(img, (0, y), (w, y), color=(0, 0, 255), thickness=2)
+        
+        gridImage = 255 * np.ones([1300, 2220, 3], dtype="uint8")
+        gridImage[100:1180, 200:2120] = img
+        
+        # Annotate with pixel numbers
+        for i in range(rows):
+            y = int(round(i * dy + dy)) + 120
+            x = 50
+            cv2.putText(gridImage, f"{(i+1) * dy:4}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 0, 0), 2, cv2.LINE_AA)
+        
+        for j in range(cols):
+            if j % 2 != 0:
+                continue
+            x = int(round(j * dx + dx / 2)) + 180
+            y = 1250
+            cv2.putText(gridImage, f"{(j+1) * dx:4}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 0, 0), 2, cv2.LINE_AA)
+
+        ret, gridImage = cv2.imencode('.jpg', gridImage)
         yield (b'--frame\r\n'
-               b'Content-Type: image/jpg\r\n\r\n' + camFrame.read() + b'\r\n')
+               b'Content-Type: image/jpg\r\n\r\n' + gridImage.tobytes() + b'\r\n')
     
     
 @observerApp.route('/config/camera/<camNum>')
@@ -145,50 +171,21 @@ def buildConfigurator():
     for cam in cameras.values():
         activeZone = json.dumps(cam.activeZone.tolist())
         cameraConfigRows.append(f"""
-            <div class="row justify-content-center">
+            <div class="row justify-content-center text-center">
                 <h3 class="mt-5">Camera {cam.camNum}</h3>
                 <div class="container">
-                    <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" width="100%" height="500" id="cam{cam.camNum}" onclick="cam{cam.camNum}ClickListener(event)"></iframe>
+                    <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" height="375" id="cam{cam.camNum}" onclick="camClickListener({cam.camNum}, event)"></iframe>
                 </div>
                 <div class="container">
                     <label for="az">Active Zone</label><br>
                     <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camNum}_activezone" hx-swap="none"><br>
                 </div>
             </div>""")
-        clickSubs.append(f"""
-            function cam{cam.camNum}ClickListener(event) {{
-                const imgElem = document.getElementById("cam{cam.camNum}")
-                bounds=imgElem.getBoundingClientRect();
-                const left=bounds.left;
-                const top=bounds.top;
-                const x = event.x - left;
-                const y = event.y - top;
-                const cw=imgElem.clientWidth
-                const ch=imgElem.clientHeight
-                const iw=imgElem.naturalWidth
-                const ih=imgElem.naturalHeight
-                const px=x/cw*iw
-                const py=y/ch*ih
-                console.log(px, px)
-                const x_offset = 80
-                const x_scale = 1800 / 480
-                const image_x = (px - x_offset) * x_scale
-                const y_offset = 100
-                const y_scale = 1080 / 280
-                const image_y = (py - y_offset) * y_scale
-                const formField = document.getElementById("cam{cam.camNum}_ActiveZone")
-                var formValue = JSON.parse(formField.value)
-                formValue.push([~~image_x, ~~image_y])
-                formField.value = JSON.stringify(formValue)
-            }}""")
     with open("templates/Configuration.html") as f:
         template = f.read()
     return template.replace(
         "{cameraConfigRows}", "\n".join(cameraConfigRows)
-    ).replace(
-        "{clickSubscriptions}", "\n".join(clickSubs)
-    ).replace(
-        "{unwarpedImage}", '')
+    )
 
     
 @observerApp.route('/config', methods=['GET'])
@@ -197,7 +194,7 @@ def config():
 
 
 @observerApp.route('/config', methods=['POST'])
-def updateConfig(camNum):
+def updateConfig():
     global CONSOLE_OUTPUT
     CONSOLE_OUTPUT = "Saved Configuration"
     cc.saveConfiguration()
@@ -421,7 +418,7 @@ def buildObjectTable():
     print(f"Aware of {len(cm.memory)} objects")
     for capture in cm.memory:
         encodedBA = imageToBase64(capture.visual())
-        center = ", ".join([f"{pt:.2f}" for pt in cc.rsc.trackedObjectToRealCenter(capture)])
+        center = ", ".join([f"{pt:.2f}" for pt in cc.rsc.changeSetToRealCenter(capture)])
         changeRow = f"""
             <div class="row mb-1">
                 <div class="col">
@@ -455,7 +452,7 @@ def buildObjectSettingsTable():
     print(f"Aware of {len(cm.memory)} objects")
     for idx, capture in enumerate(cm.newObjectBuffer):
         encodedBA = imageToBase64(capture.visual())
-        center = [f"{pt:.2f}" for pt in cc.rsc.trackedObjectToRealCenter(capture)]
+        center = [f"{pt:.2f}" for pt in cc.rsc.changeSetToRealCenter(capture)]
         changeRow = f"""
             <div class="row mb-1">
                 <div class="col">
@@ -466,7 +463,7 @@ def buildObjectSettingsTable():
                       </div>
                       <div class="form-group">
                         <label for="objectType">Object Type</label>
-                        <input name="objectType" list="mechTypeDataList" value="" required>
+                        <input name="objectType" list="objectTypeDataList" value="" required>
                       </div>
                       <input type="hidden" name="objectId" value="{capture.oid}">
                       <button type="submit" class="btn btn-secondary">Update Object</button>
@@ -478,10 +475,10 @@ def buildObjectSettingsTable():
                 </div>
             </div>"""
         changeRows.append(changeRow)
-    mechOptions = "\n".join([f'<option value="{mechName}">' for mechName in mc.MechFactories.keys()])
-    changeRows.insert(0, """
-            <datalist id="mechTypeDataList">
-                {mechOptions}
+    objOptions = "\n".join([f'<option value="{objType}">' for objType in mc.ObjectFactories.keys()])
+    changeRows.insert(0, f"""
+            <datalist id="objectTypeDataList">
+                {objOptions}
             </datalist>""")
     with open("templates/ChangeTable.html", "r") as f:
         template = f.read()
