@@ -1,7 +1,7 @@
 pygraphviz
 jupyterlab
 cogdb
-flask
+flask>=2.2.2
 ipynb
 pyzbar
 opencv-python

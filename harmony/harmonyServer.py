@@ -14,7 +14,6 @@ import threading
 import atexit
 from flask import Flask, render_template, Response, request, make_response
 from traceback import format_exc
-from ultralytics import YOLO
 
 CONSOLE_OUTPUT = "No Output Yet"
 
