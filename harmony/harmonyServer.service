@@ -1,0 +1,18 @@
+[Unit]
+Description=Harmony Controller Service
+After=harmonyServer.service
+
+[Service]
+User=musengdir
+ExecStart=/usr/bin/python3 /home/musengdir/prj/dma/harmony/harmonyServer.py
+Restart=always
+RestartSec=10                       
+StandardOutput=syslog               
+StandardError=syslog                
+SyslogIdentifier=dmaObserverServer
+WorkingDirectory=/home/musengdir/prj/dma/harmony
+Environment=PYTHONUNBUFFERED=1
+
+
+[Install]
+WantedBy=musengdirlti-user.target
