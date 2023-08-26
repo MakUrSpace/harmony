@@ -1,4 +1,11 @@
-# graphviz
-jupyter
 pygraphviz
+jupyterlab
 cogdb
+flask
+ipynb
+pyzbar
+opencv-python
+opencv-contrib-python
+imutils
+matplotlib
+ipython-autotime
