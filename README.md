@@ -5,6 +5,9 @@ Harmony integrates tabletop gaming utilities into a game recording and referreei
 
 1. Flash Raspbian & update `sudo apt update && sudo apt upgrade`
 1. Install python: `sudo apt install python3 python3-pip python3-dev`
+1. Install nodejs:
+    1. `curl -fsSL https://deb.nodesource.com/setup_current.x | sudo -E bash -`
+    1. `sudo apt-get install -y nodejs`
 1. Install Graphviz: `sudo apt-get install graphviz libgraphviz-dev pkg-config`
 1. Install Python Dependencies: `pip install -r requirements.txt`
 1. Write Harmony Server configuration: `vim ./harmony/observerConfiguration.json`
