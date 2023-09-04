@@ -1,6 +1,6 @@
 [Unit]
 Description=Harmony Controller Service
-After=harmonyServer.service
+After=network.service
 
 [Service]
 User=musengdir
@@ -15,4 +15,4 @@ Environment=PYTHONUNBUFFERED=1
 
 
 [Install]
-WantedBy=musengdirlti-user.target
+WantedBy=multi-user.target
