@@ -21,15 +21,16 @@
     </div>
     <div class="row" align="center">
         <div class="col">
-            <form method="post">
-                <input type="submit" value="Save State" hx-post="/config" hx-swap="none">
-            </form>
+            <input type="button" class="btn-primary" value="Save State" hx-post="/config" hx-swap="none">
         </div>
         <div class="col">
-            <input type="button" value="Calibrate Cameras" onclick="window.location.href='/calibrator'">
+            <input class="btn-secondary" type="button" value="Calibrate Cameras" onclick="window.location.href='/calibrator'">
         </div>
     </div>
     {cameraConfigRows}
+    <div class="row" align="center">
+        <input type="button" class="btn-primary" value="Add Camera" onclick="window.location.href='/config/new_camera'">
+    </div>
 </div>
 </body>
 <script>

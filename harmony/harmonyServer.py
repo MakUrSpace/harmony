@@ -75,18 +75,28 @@ def renderConsole():
             currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(lastObj)]
             consoleImage = cv2.putText(zeros, f'Last Action',
                 (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-            consoleImage = cv2.putText(zeros, f'Obj at {currentLocation}',
+
+            try:
+                lastMem = cm.memory[cm.memory.index(lastObj)]
+                objectIdentifier = f'{lastMem.objectType} {lastMem.name}'
+            except ValueError:
+                objectIdentifier = f'Unclassified Object'
+            objectLocation = f'at {currentLocation}'
+    
+            consoleImage = cv2.putText(zeros, objectIdentifier,
                 (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            consoleImage = cv2.putText(zeros, objectLocation,
+                (50, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             if not lastObj.isNewObject:
                 lastLocation = [f"{d:7.2f}" for d in cc.rsc.changeSetToRealCenter(lastObj.previousVersion())]
                 distanceMoved = cc.rsc.trackedObjectLastDistance(lastObj)
                 consoleImage = cv2.putText(zeros, f'Moved {distanceMoved:6.2f} mm',
-                    (50, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-                consoleImage = cv2.putText(zeros, f'From {lastLocation}',
                     (50, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                consoleImage = cv2.putText(zeros, f'From {lastLocation}',
+                    (50, 350), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             else:
                 consoleImage = cv2.putText(zeros, f'Added',
-                    (50, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                    (50, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
    
         ret, consoleImage = cv2.imencode('.jpg', zeros)
         yield (b'--frame\r\n'
@@ -171,14 +181,10 @@ def buildConfigurator():
         activeZone = json.dumps(cam.activeZone.tolist())
         cameraConfigRows.append(f"""
             <div class="row justify-content-center text-center">
-                <h3 class="mt-5">Camera {cam.camNum}</h3>
-                <div class="container">
-                    <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" height="375" id="cam{cam.camNum}" onclick="camClickListener({cam.camNum}, event)"></iframe>
-                </div>
-                <div class="container">
-                    <label for="az">Active Zone</label><br>
-                    <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camNum}_activezone" hx-swap="none"><br>
-                </div>
+                <h3 class="mt-5">Camera {cam.camNum} <input type="button" value="Delete" class="btn-error"></h3>
+                <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" height="375" id="cam{cam.camNum}" onclick="camClickListener({cam.camNum}, event)">
+                <label for="az">Active Zone</label><br>
+                <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camNum}_activezone" hx-swap="none"><br>
             </div>""")
     with open("templates/Configuration.html") as f:
         template = f.read()
