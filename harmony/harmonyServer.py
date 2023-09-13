@@ -15,8 +15,8 @@ import atexit
 from flask import Flask, render_template, Response, request, make_response
 from traceback import format_exc
 
-CONSOLE_OUTPUT = "No Output Yet"
 
+CONSOLE_OUTPUT = "No Output Yet"
 
 POOL_TIME = 0.1 #Seconds
 PORT = int(os.getenv("OBSERVER_PORT", "7000"))
@@ -174,6 +174,24 @@ def cameraActiveZoneWithObjects(camNum):
     return Response(genCameraFullViewWithActiveZone(int(camNum)), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+def buildCalibrationPlan():
+    calibCamHeaders = "".join([f"<th>Cam {i}</th>" for i in cameras.keys()])
+    calibFormFields = []
+    for ptNum, (activeCameras, calibCoordinates) in cm.cc.calibrationPlan.items():
+        checkboxes = "".join([f'<td><input type="checkbox" {"checked=true" if i in activeCameras else ""} id="calib{ptNum}Cam{i}" name="calib{ptNum}Cam{i}"></td>'
+                              for i, cam in cameras.items()])
+        coordinates = f'<td><input class="form-control" type="text" id="calib{ptNum}Coord" size="35" name="calib{ptNum}Coord" value="{calibCoordinates}"></td>'
+        calibFormFields.append("".join(["".join(checkboxes), coordinates]))
+
+    with open("templates/CalibrationForm.html") as f:
+        template = f.read()
+
+    for i, calib in enumerate(calibFormFields):
+        template = template.replace(f"{{calib{i}}}", calib)
+
+    return template.replace("{calibCamHeaders}", calibCamHeaders)
+
+
 def buildConfigurator():
     cameraConfigRows = []
     clickSubs = []
@@ -186,11 +204,14 @@ def buildConfigurator():
                 <label for="az">Active Zone</label><br>
                 <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camNum}_activezone" hx-swap="none"><br>
             </div>""")
+    calibrationForm = buildCalibrationPlan()
+
     with open("templates/Configuration.html") as f:
         template = f.read()
+    
     return template.replace(
-        "{cameraConfigRows}", "\n".join(cameraConfigRows)
-    )
+        "{calibrationPlanForm}", calibrationForm).replace(
+        "{cameraConfigRows}", "\n".join(cameraConfigRows))
 
     
 @observerApp.route('/config', methods=['GET'])
@@ -204,6 +225,22 @@ def updateConfig():
     CONSOLE_OUTPUT = "Saved Configuration"
     cc.saveConfiguration()
     return "success"
+
+
+@observerApp.route('/config/calibration_plan', methods=['POST'])
+def updateCalibrationPlan():
+    newCalibPlan = {i: [[], []] for i in range(6)}
+    for key, value in request.form.items():
+        calibPtNum = int(key[5])
+        if 'Cam' in key:
+            camNum = int(key[9])
+            newCalibPlan[calibPtNum][0].append(camNum)
+        elif 'Coord' in key:
+            newCalibPlan[calibPtNum][1] = json.loads(value)
+    cm.cc.calibrationPlan = newCalibPlan
+    global CONSOLE_OUTPUT
+    CONSOLE_OUTPUT = "Saved Calib Plan"
+    return buildCalibrationPlan()
 
 
 @observerApp.route('/config/cam<camNum>_activezone', methods=['POST'])
