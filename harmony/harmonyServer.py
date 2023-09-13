@@ -365,6 +365,22 @@ def cameraViewWithChangesResponse(camNum):
     return Response(genCameraWithChangesView(camNum), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+def fullCam(camNum):
+    camNum = int(camNum)
+    cam = cameras[camNum]
+    while True:
+        camImage = cam.mostRecentFrame.copy()
+        ret, camImage = cv2.imencode('.jpg', camImage)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+
+
+@observerApp.route('/control/fullCam/<camNum>')
+def genFullCam(camNum):
+    return Response(fullCam(camNum), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+
 def genCombinedCameraWithChangesView():
     while True:
         camImages = []
