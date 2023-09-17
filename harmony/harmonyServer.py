@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackImages, CaptureConfiguration, HarmonyMachine
+from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackImages, CaptureConfiguration, HarmonyMachine, RemoteCamera
 
 import threading
 import atexit
@@ -133,42 +133,46 @@ def getHTMX():
 
 def genCameraFullViewWithActiveZone(camName):
     while True:
-        cam = cameras[str(camName)]
-        img = cam.drawActiveZone(cam.mostRecentFrame)
-
-        h, w, _ = img.shape
-        dy, dx = 100, 100
-        rows, cols = int(h / dy), int(w / dx)
-        
-        # Draw vertical lines
-        for x in np.linspace(start=dx, stop=w-dx, num=cols-1):
-            x = int(round(x))
-            cv2.line(img, (x, 0), (x, h), color=(0, 0, 255), thickness=2)
-        
-        # Draw horizontal lines
-        for y in np.linspace(start=dy, stop=h-dy, num=rows-1):
-            y = int(round(y))
-            cv2.line(img, (0, y), (w, y), color=(0, 0, 255), thickness=2)
-        
-        gridImage = 255 * np.ones([1300, 2220, 3], dtype="uint8")
-        gridImage[100:1180, 200:2120] = img
-        
-        # Annotate with pixel numbers
-        for i in range(rows):
-            y = int(round(i * dy + dy)) + 120
-            x = 50
-            cv2.putText(gridImage, f"{(i+1) * dy:4}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 0, 0), 2, cv2.LINE_AA)
-        
-        for j in range(cols):
-            if j % 2 != 0:
-                continue
-            x = int(round(j * dx + dx / 2)) + 180
-            y = 1250
-            cv2.putText(gridImage, f"{(j+1) * dx:4}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 0, 0), 2, cv2.LINE_AA)
-
-        ret, gridImage = cv2.imencode('.jpg', gridImage)
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpg\r\n\r\n' + gridImage.tobytes() + b'\r\n')
+        try:
+            cam = cameras[str(camName)]
+            img = cam.drawActiveZone(cam.mostRecentFrame)
+    
+            h, w, _ = img.shape
+            dy, dx = 100, 100
+            rows, cols = int(h / dy), int(w / dx)
+            
+            # Draw vertical lines
+            for x in np.linspace(start=dx, stop=w-dx, num=cols-1):
+                x = int(round(x))
+                cv2.line(img, (x, 0), (x, h), color=(0, 0, 255), thickness=2)
+            
+            # Draw horizontal lines
+            for y in np.linspace(start=dy, stop=h-dy, num=rows-1):
+                y = int(round(y))
+                cv2.line(img, (0, y), (w, y), color=(0, 0, 255), thickness=2)
+            
+            gridImage = 255 * np.ones([1300, 2220, 3], dtype="uint8")
+            gridImage[100:1180, 200:2120] = img
+            
+            # Annotate with pixel numbers
+            for i in range(rows):
+                y = int(round(i * dy + dy)) + 120
+                x = 50
+                cv2.putText(gridImage, f"{(i+1) * dy:4}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 0, 0), 2, cv2.LINE_AA)
+            
+            for j in range(cols):
+                if j % 2 != 0:
+                    continue
+                x = int(round(j * dx + dx / 2)) + 180
+                y = 1250
+                cv2.putText(gridImage, f"{(j+1) * dx:4}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 0, 0), 2, cv2.LINE_AA)
+    
+            ret, gridImage = cv2.imencode('.jpg', gridImage)
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpg\r\n\r\n' + gridImage.tobytes() + b'\r\n')
+        except Exception as e:
+            print(f"Failed genCameraFullViewWithActiveZone for {camName} -- {e}")
+            yield (b'--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n')
     
     
 @observerApp.route('/config/camera/<camName>')
@@ -198,6 +202,8 @@ def buildConfigurator():
     cameraConfigRows = []
     clickSubs = []
     for cam in cameras.values():
+        if cam is None:
+            continue
         activeZone = json.dumps(cam.activeZone.tolist())
         cameraConfigRows.append(f"""
             <div class="row justify-content-center text-center">
@@ -267,6 +273,12 @@ def getNewCameraForm():
     return template
 
 
+def resetHarmonyMachine():
+    global cc, cm, cameras
+    cc = CaptureConfiguration()
+    cm = HarmonyMachine(cc)
+
+
 @observerApp.route('/config/new_camera', methods=['POST'])
 def addNewCamera():
     global CONSOLE_OUTPUT
@@ -274,37 +286,32 @@ def addNewCamera():
     camName = request.form.get("camName")
     camRot = request.form.get("camRot")
     camAddr = request.form.get("camAddr")
-    
-    addr = camDef['addr']
-    rot = camDef['rot']
-    az = np.float32(json.loads(camDef['az']))
-    cameras[camName] = RemoteCamera(address=camAddr, activeZone=[], camName=camName, rotate=camRot)
-
+    from IPython import embed; embed()
+    with data_lock:
+        cameras[camName] = RemoteCamera(address=camAddr, activeZone=[], camName=camName, rotate=camRot)
+        cm.cc.saveConfiguration()
+        resetHarmonyMachine()
     CONSOLE_OUPUT = f"Added Camera {camName}"
-    return buildConfigurator()
-
-
-def resetHarmonyMachine():
-    global cc, cm, cameras
-    cc = CaptureConfiguration()
-    cm = HarmonyMachine(cc)
+    return """<input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/config'">"""
 
 
 @observerApp.route('/config/reset', methods=['POST'])
 def requestHarmonyReset():
-    resetHarmonyMachine()
-    return """
-        <p>Reset Harmony Machine State</p><br>
-        <input type="button" class="btn-primary" value="Reset Harmony Machine" hx-post="/config/reset">"""
+    with data_lock: 
+        resetHarmonyMachine()
+    return "success"
 
 
 @observerApp.route('/config/delete_cam/<camName>', methods=['POST'])
 def deleteCamera(camName):
     global CONSOLE_OUTPUT
     CONSOLE_OUTPUT = ""
-    cameras.pop(camName)
+    with data_lock:
+        cameras.pop(camName)
+        cm.cc.saveConfiguration()
+        resetHarmonyMachine()
     CONSOLE_OUPUT = f"Delete Camera {camName}"
-    return buildConfigurator()
+    return """<input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/config'">"""
 
 
 @observerApp.route('/calibrator/start_calibration')
@@ -427,7 +434,6 @@ def fullCam(camName):
 @observerApp.route('/control/fullCam/<camName>')
 def genFullCam(camName):
     return Response(fullCam(camName), mimetype='multipart/x-mixed-replace; boundary=frame')
-
 
 
 def genCombinedCameraWithChangesView():

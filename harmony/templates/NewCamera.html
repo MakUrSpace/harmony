@@ -18,19 +18,12 @@
     <div class="container">
         <h1>New Camera</h1>
         <form method="post" action="/config/new_camera">
-          <div class="form-group">
             <label for="camName">Name</label>
-            <input type="text" class="form-control" id="camName" aria-describedby="camNameHelp" placeholder="0">
-            <small id="camNameHelp" class="form-text text-muted">A unique string value to identify the camera</small>
-          </div>
-          <div class="form-check">
-            <input type="number" class="form-check-input" id="camRot" min="0" max="360">
-            <label class="form-check-label" for="camRot">Rotation</label>
-          </div>
-          <div class="form-group">
+            <input type="text" class="form-control" name="camName" placeholder="0"><br>
+            <input type="number" class="form-check-input" name="camRot" min="0" max="360">
+            <label class="form-check-label" for="camRot">Rotation</label><br>
             <label for="camAddr">Address</label>
-            <input type="text" class="form-control" id="camAddr" placeholder="http://localhost:8080/snapshot">
-          </div>
-          <button type="submit" class="btn btn-primary">Submit</button>
+            <input type="text" class="form-control" name="camAddr" placeholder="http://localhost:8080/snapshot"><br>
+            <input type="submit" class="btn btn-primary" value="Add Camera">
         </form>
 </body>
