@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackImages
+from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackImages, CaptureConfiguration, HarmonyMachine
 
 import threading
 import atexit
@@ -131,9 +131,9 @@ def getHTMX():
     return Response(htmx, mimetype="application/javascript")
 
 
-def genCameraFullViewWithActiveZone(camNum):
+def genCameraFullViewWithActiveZone(camName):
     while True:
-        cam = cameras[int(camNum)]
+        cam = cameras[str(camName)]
         img = cam.drawActiveZone(cam.mostRecentFrame)
 
         h, w, _ = img.shape
@@ -171,9 +171,9 @@ def genCameraFullViewWithActiveZone(camNum):
                b'Content-Type: image/jpg\r\n\r\n' + gridImage.tobytes() + b'\r\n')
     
     
-@observerApp.route('/config/camera/<camNum>')
-def cameraActiveZoneWithObjects(camNum):
-    return Response(genCameraFullViewWithActiveZone(int(camNum)), mimetype='multipart/x-mixed-replace; boundary=frame')
+@observerApp.route('/config/camera/<camName>')
+def cameraActiveZoneWithObjects(camName):
+    return Response(genCameraFullViewWithActiveZone(str(camName)), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 def buildCalibrationPlan():
@@ -201,10 +201,10 @@ def buildConfigurator():
         activeZone = json.dumps(cam.activeZone.tolist())
         cameraConfigRows.append(f"""
             <div class="row justify-content-center text-center">
-                <h3 class="mt-5">Camera {cam.camNum} <input type="button" value="Delete" class="btn-error"></h3>
-                <img src="/config/camera/{cam.camNum}" title="{cam.camNum} Capture" height="375" id="cam{cam.camNum}" onclick="camClickListener({cam.camNum}, event)">
+                <h3 class="mt-5">Camera {cam.camName} <input type="button" value="Delete" class="btn-error" hx-post="/config/delete_cam/{cam.camName}"></h3>
+                <img src="/config/camera/{cam.camName}" title="{cam.camName} Capture" height="375" id="cam{cam.camName}" onclick="camClickListener({cam.camName}, event)">
                 <label for="az">Active Zone</label><br>
-                <input type="text" name="az" id="cam{cam.camNum}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camNum}_activezone" hx-swap="none"><br>
+                <input type="text" name="az" id="cam{cam.camName}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camName}_activezone" hx-swap="none"><br>
             </div>""")
     calibrationForm = buildCalibrationPlan()
 
@@ -235,8 +235,8 @@ def updateCalibrationPlan():
     for key, value in request.form.items():
         calibPtNum = int(key[5])
         if 'Cam' in key:
-            camNum = int(key[9])
-            newCalibPlan[calibPtNum][0].append(camNum)
+            camName = str(key[9])
+            newCalibPlan[calibPtNum][0].append(camName)
         elif 'Coord' in key:
             newCalibPlan[calibPtNum][1] = json.loads(value)
     cm.cc.calibrationPlan = newCalibPlan
@@ -245,19 +245,66 @@ def updateCalibrationPlan():
     return buildCalibrationPlan()
 
 
-@observerApp.route('/config/cam<camNum>_activezone', methods=['POST'])
-def updateCamActiveZone(camNum):
+@observerApp.route('/config/cam<camName>_activezone', methods=['POST'])
+def updateCamActiveZone(camName):
     global CONSOLE_OUTPUT
     CONSOLE_OUTPUT = ""
-    print(f"Received update Active Zone request for {camNum}")
+    print(f"Received update Active Zone request for {camName}")
     try:
         az = np.float32(json.loads(request.form.get(f"az")))
-        cam = cameras[int(camNum)]
+        cam = cameras[camName]
         cam.setActiveZone(az)
     except:
-        print(f"Unrecognized data: {camNum} - {az}")
-    CONSOLE_OUPUT = f"Updated {camNum} AZ"
+        print(f"Unrecognized data: {camName} - {az}")
+    CONSOLE_OUPUT = f"Updated {camName} AZ"
     return "success"
+
+
+@observerApp.route('/config/new_camera', methods=['GET'])
+def getNewCameraForm():
+    with open("templates/NewCamera.html", "r") as f:
+        template = f.read()
+    return template
+
+
+@observerApp.route('/config/new_camera', methods=['POST'])
+def addNewCamera():
+    global CONSOLE_OUTPUT
+    CONSOLE_OUTPUT = ""
+    camName = request.form.get("camName")
+    camRot = request.form.get("camRot")
+    camAddr = request.form.get("camAddr")
+    
+    addr = camDef['addr']
+    rot = camDef['rot']
+    az = np.float32(json.loads(camDef['az']))
+    cameras[camName] = RemoteCamera(address=camAddr, activeZone=[], camName=camName, rotate=camRot)
+
+    CONSOLE_OUPUT = f"Added Camera {camName}"
+    return buildConfigurator()
+
+
+def resetHarmonyMachine():
+    global cc, cm, cameras
+    cc = CaptureConfiguration()
+    cm = HarmonyMachine(cc)
+
+
+@observerApp.route('/config/reset', methods=['POST'])
+def requestHarmonyReset():
+    resetHarmonyMachine()
+    return """
+        <p>Reset Harmony Machine State</p><br>
+        <input type="button" class="btn-primary" value="Reset Harmony Machine" hx-post="/config/reset">"""
+
+
+@observerApp.route('/config/delete_cam/<camName>', methods=['POST'])
+def deleteCamera(camName):
+    global CONSOLE_OUTPUT
+    CONSOLE_OUTPUT = ""
+    cameras.pop(camName)
+    CONSOLE_OUPUT = f"Delete Camera {camName}"
+    return buildConfigurator()
 
 
 @observerApp.route('/calibrator/start_calibration')
@@ -288,7 +335,7 @@ def buildCalibrator():
         calibratorResult = "Not Calibrated"
     else:
         ims = []
-        for camNum, cons in cm.cc.rsc.converters.items():
+        for camName, cons in cm.cc.rsc.converters.items():
             if len(cons) == 1:
                 camImage = cons[0].showUnwarpedImage()
             else:
@@ -315,8 +362,8 @@ def buildCalibrator():
 def genCombinedCamerasView():
     while True:
         camImages = []
-        for camNum in cameras.keys():
-            camImage = cameras[camNum].mostRecentFrame.copy()
+        for camName in cameras.keys():
+            camImage = cameras[camName].mostRecentFrame.copy()
             camImages.append(camImage)
         camImage = vStackImages(camImages)
         camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
@@ -330,9 +377,9 @@ def combinedCamerasResponse():
     return Response(genCombinedCamerasView(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-def genCameraWithChangesView(camNum):
-    camNum = int(camNum)
-    cam = cameras[camNum]
+def genCameraWithChangesView(camName):
+    camName = str(camName)
+    cam = cameras[camName]
     while True:
         if cm.lastChanges is not None and not cm.lastChanges.empty:
             print("Has changes")
@@ -341,18 +388,18 @@ def genCameraWithChangesView(camNum):
         camImage = cam.mostRecentFrame.copy()
         # Paint known objects blue
         for memObj in cm.memory:
-            if memObj.changeSet[camNum].changeType not in ['delete', None]:
-                memContour = np.array([memObj.changeSet[camNum].changePoints], dtype=np.int32)
+            if memObj.changeSet[camName].changeType not in ['delete', None]:
+                memContour = np.array([memObj.changeSet[camName].changePoints], dtype=np.int32)
                 camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
         # Paint last changes red
         if cm.lastChanges is not None and not cm.lastChanges.empty:
-            lastChange = cm.lastChanges.changeSet[camNum]
+            lastChange = cm.lastChanges.changeSet[camName]
             if lastChange is not None and lastChange.changeType not in ['delete', None]:
                 lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
                 camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
         # Paint classification green
         if cm.lastClassification is not None and not cm.lastClassification.empty:
-            lastClass = cm.lastClassification.changeSet[camNum]
+            lastClass = cm.lastClassification.changeSet[camName]
             if lastClass is not None and lastClass.changeType not in ['delete', None]:
                 lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
                 camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
@@ -362,14 +409,14 @@ def genCameraWithChangesView(camNum):
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 
 
-@observerApp.route('/control/camWithChanges/<camNum>')
-def cameraViewWithChangesResponse(camNum):
-    return Response(genCameraWithChangesView(camNum), mimetype='multipart/x-mixed-replace; boundary=frame')
+@observerApp.route('/control/camWithChanges/<camName>')
+def cameraViewWithChangesResponse(camName):
+    return Response(genCameraWithChangesView(camName), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-def fullCam(camNum):
-    camNum = int(camNum)
-    cam = cameras[camNum]
+def fullCam(camName):
+    camName = str(camName)
+    cam = cameras[camName]
     while True:
         camImage = cam.mostRecentFrame.copy()
         ret, camImage = cv2.imencode('.jpg', camImage)
@@ -377,9 +424,9 @@ def fullCam(camNum):
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 
 
-@observerApp.route('/control/fullCam/<camNum>')
-def genFullCam(camNum):
-    return Response(fullCam(camNum), mimetype='multipart/x-mixed-replace; boundary=frame')
+@observerApp.route('/control/fullCam/<camName>')
+def genFullCam(camName):
+    return Response(fullCam(camName), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 
@@ -390,22 +437,22 @@ def genCombinedCameraWithChangesView():
             print("Has changes")
         if cm.lastClassification is not None:
             print("Has class")
-        for camNum in cameras.keys():
-            camImage = cameras[camNum].mostRecentFrame.copy()
+        for camName in cameras.keys():
+            camImage = cameras[camName].mostRecentFrame.copy()
             # Paint known objects blue
             for memObj in cm.memory:
-                if memObj.changeSet[camNum].changeType not in ['delete', None]:
-                    memContour = np.array([memObj.changeSet[camNum].changePoints], dtype=np.int32)
+                if memObj.changeSet[camName].changeType not in ['delete', None]:
+                    memContour = np.array([memObj.changeSet[camName].changePoints], dtype=np.int32)
                     camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
             # Paint last changes red
             if cm.lastChanges is not None and not cm.lastChanges.empty:
-                lastChange = cm.lastChanges.changeSet[camNum]
+                lastChange = cm.lastChanges.changeSet[camName]
                 if lastChange is not None and lastChange.changeType not in ['delete', None]:
                     lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
                     camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
             # Paint classification green
             if cm.lastClassification is not None and not cm.lastClassification.empty:
-                lastClass = cm.lastClassification.changeSet[camNum]
+                lastClass = cm.lastClassification.changeSet[camName]
                 if lastClass is not None and lastClass.changeType not in ['delete', None]:
                     lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
                     camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
@@ -467,7 +514,7 @@ def controlSetAction():
 def buildController():
     with open("templates/Controller.html", "r") as f:
         template = f.read()
-    cameraButtons = ' '.join([f'<input type="button" value="Camera {camNum}" onclick="liveCameraClick({camNum})">' for camNum in cameras.keys()])
+    cameraButtons = ' '.join([f'<input type="button" value="Camera {camName}" onclick="liveCameraClick({camName})">' for camName in cameras.keys()])
     template = template.replace("{cameraButtons}", cameraButtons)
     return template
 
