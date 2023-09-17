@@ -65,16 +65,18 @@ def renderConsole():
         shape = (400, 400)
         mid = [int(d / 2) for d in shape]
         zeros = np.zeros(shape, dtype="uint8")
-        
+
+        consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
+            (50, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'Status: {cm.mode:7} -- {cm.state:10}',
-            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            (50, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'Cycle {cm.cycleCounter}',
-            (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            (50, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         if len(cm.transitions) > 0:
             lastObj = cm.transitions[-1]['obj']
             currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(lastObj)]
             consoleImage = cv2.putText(zeros, f'Last Action',
-                (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
 
             try:
                 lastMem = cm.memory[cm.memory.index(lastObj)]
@@ -84,19 +86,19 @@ def renderConsole():
             objectLocation = f'at {currentLocation}'
     
             consoleImage = cv2.putText(zeros, objectIdentifier,
-                (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                (50, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             consoleImage = cv2.putText(zeros, objectLocation,
-                (50, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                (50, 280), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             if not lastObj.isNewObject:
                 lastLocation = [f"{d:7.2f}" for d in cc.rsc.changeSetToRealCenter(lastObj.previousVersion())]
                 distanceMoved = cc.rsc.trackedObjectLastDistance(lastObj)
                 consoleImage = cv2.putText(zeros, f'Moved {distanceMoved:6.2f} mm',
-                    (50, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                    (50, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
                 consoleImage = cv2.putText(zeros, f'From {lastLocation}',
-                    (50, 350), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                    (50, 380), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
             else:
                 consoleImage = cv2.putText(zeros, f'Added',
-                    (50, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                    (50, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
    
         ret, consoleImage = cv2.imencode('.jpg', zeros)
         yield (b'--frame\r\n'
@@ -279,7 +281,7 @@ def buildCalibrator():
     else:
         formattedPts = [f"> {pt}<br>" for pt in cm.calibrationPts]
         calibrationMonitor = f"""
-            <p>Calibration in Progress: {cm.mode == "calibrate"}<br>Progress {len(cm.calibrationPts)} / {cm.NUM_CALIB_PTS}<br>{formattedPts}<p>
+            <p>Calibration in Progress: {cm.mode == "calibrate"}<br>Progress {len(cm.calibrationPts)} / {cm.cc.numCalibrationPoints}<br>{formattedPts}<p>
         """
         
     if cm.cc.rsc == None:
