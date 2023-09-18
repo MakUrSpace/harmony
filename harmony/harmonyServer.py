@@ -207,10 +207,19 @@ def buildConfigurator():
         activeZone = json.dumps(cam.activeZone.tolist())
         cameraConfigRows.append(f"""
             <div class="row justify-content-center text-center">
-                <h3 class="mt-5">Camera {cam.camName} <input type="button" value="Delete" class="btn-error" hx-post="/config/delete_cam/{cam.camName}"></h3>
+                <h3 class="mt-5">Camera {cam.camName} <input type="button" value="Delete" class="btn-error" hx-post="/config/delete_cam/{cam.camName}" hx-swap="outerHTML"></h3>
                 <img src="/config/camera/{cam.camName}" title="{cam.camName} Capture" height="375" id="cam{cam.camName}" onclick="camClickListener({cam.camName}, event)">
                 <label for="az">Active Zone</label><br>
-                <input type="text" name="az" id="cam{cam.camName}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camName}_activezone" hx-swap="none"><br>
+                <div class="container">
+                    <div class="row">
+                        <div class="col">
+                            <input type="text" name="az" id="cam{cam.camName}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camName}_activezone" hx-swap="none">
+                        </div>
+                        <div class="col">    
+                            <input type="button" name="clearCam{cam.camName}AZ" value="Clear AZ" onclick="clearCamAZ({cam.camName}, event)">
+                        </div>
+                    </div>
+                </div>
             </div>""")
     calibrationForm = buildCalibrationPlan()
 
@@ -254,7 +263,6 @@ def updateCalibrationPlan():
 @observerApp.route('/config/cam<camName>_activezone', methods=['POST'])
 def updateCamActiveZone(camName):
     global CONSOLE_OUTPUT
-    CONSOLE_OUTPUT = ""
     print(f"Received update Active Zone request for {camName}")
     try:
         az = np.float32(json.loads(request.form.get(f"az")))
@@ -282,36 +290,40 @@ def resetHarmonyMachine():
 @observerApp.route('/config/new_camera', methods=['POST'])
 def addNewCamera():
     global CONSOLE_OUTPUT
-    CONSOLE_OUTPUT = ""
     camName = request.form.get("camName")
     camRot = request.form.get("camRot")
     camAddr = request.form.get("camAddr")
-    from IPython import embed; embed()
     with data_lock:
-        cameras[camName] = RemoteCamera(address=camAddr, activeZone=[], camName=camName, rotate=camRot)
+        cameras[camName] = RemoteCamera(address=camAddr, activeZone=[[0, 0], [0, 1], [1, 1,], [1, 0]], camName=camName, rotate=camRot)
+        cm.cc.rsc = None
         cm.cc.saveConfiguration()
         resetHarmonyMachine()
-    CONSOLE_OUPUT = f"Added Camera {camName}"
-    return """<input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/config'">"""
+    CONSOLE_OUTPUT = f"Added Camera {camName}"
+    return """<script>window.location = '/config';</script>
+              <input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/config'">"""
 
 
 @observerApp.route('/config/reset', methods=['POST'])
 def requestHarmonyReset():
+    global CONSOLE_OUTPUT
     with data_lock: 
         resetHarmonyMachine()
-    return "success"
+    CONSOLE_OUTPUT = "Reset Harmony"
+    return """<script>window.location.reload();</script>
+              <input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/config'">"""
 
 
 @observerApp.route('/config/delete_cam/<camName>', methods=['POST'])
 def deleteCamera(camName):
     global CONSOLE_OUTPUT
-    CONSOLE_OUTPUT = ""
     with data_lock:
         cameras.pop(camName)
+        cm.cc.rsc = None
         cm.cc.saveConfiguration()
         resetHarmonyMachine()
-    CONSOLE_OUPUT = f"Delete Camera {camName}"
-    return """<input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/config'">"""
+    CONSOLE_OUTPUT = f"Deleted Camera {camName}"
+    return """<script>window.location.reload();</script>
+              <input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/config'">"""
 
 
 @observerApp.route('/calibrator/start_calibration')
@@ -521,8 +533,8 @@ def buildController():
     with open("templates/Controller.html", "r") as f:
         template = f.read()
     cameraButtons = ' '.join([f'<input type="button" value="Camera {camName}" onclick="liveCameraClick({camName})">' for camName in cameras.keys()])
-    template = template.replace("{cameraButtons}", cameraButtons)
-    return template
+    defaultCam = list(cameras.keys())[0]
+    return template.replace("{defaultCamera}", defaultCam).replace("{cameraButtons}", cameraButtons)
 
 
 def buildObjectTable():

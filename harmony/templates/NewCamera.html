@@ -17,7 +17,7 @@
     </div>
     <div class="container">
         <h1>New Camera</h1>
-        <form method="post" action="/config/new_camera">
+        <form hx-post="/config/new_camera" hx-swap="outerHTML">
             <label for="camName">Name</label>
             <input type="text" class="form-control" name="camName" placeholder="0"><br>
             <input type="number" class="form-check-input" name="camRot" min="0" max="360">

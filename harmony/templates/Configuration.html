@@ -39,11 +39,16 @@
         <input type="button" class="btn-primary" value="Add Camera" onclick="window.location.href='/config/new_camera'">
     </div>
     <div class="container" align="right">
-        <input type="button" class="btn-primary" value="Reset Harmony Machine" hx-post="/config/reset">
+        <input type="button" class="btn-primary" value="Reset Harmony Machine" hx-post="/config/reset" hx-swap="innerHTML">
     </div>
 </div>
 </body>
 <script>
+    function clearCamAZ(camName, event) {
+        const formField = document.getElementById(`cam${camName}_ActiveZone`)
+        formField.value = '[]'
+    }
+    
     function camClickListener(camName, event) {
         const imgElem = document.getElementById(`cam${camName}`)
         bounds=imgElem.getBoundingClientRect();
