@@ -624,7 +624,14 @@ def postObjectSettings():
     return buildObjectSettingsTable()
 
 
+@observerApp.route('/dicewatcher', methods=['GET'])
+def diceWatcher():
+    with open("templates/DiceWatcher.html", "r") as f:
+        template = f.read()
+    return template
+
+
 if __name__ == "__main__":
     cm.cycle()
     print(f"Launching Observer Server on {PORT}")
-    observerApp.run(host="0.0.0.0", port=PORT)
+    observerApp.run(host="0.0.0.0", port=PORT, ssl_context="adhoc")

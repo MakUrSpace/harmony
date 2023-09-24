@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Load OpenCV.js -->
+<script async src="https://docs.opencv.org/master/opencv.js" onload="onOpenCvReady();" defer></script>
+<title>Dice Pip Counter</title>
+</head>
+<body>
+
+<div style="text-align: center;">
+    <div>
+        <video id="video" width="300" height="300" autoplay></video>
+    </div>
+    <button id="startbutton">Take a photo</button>
+    <div id="pip-count">Pip Count: -</div>
+    <canvas id="canvas" width="300" height="300"></canvas>
+</div>
+
+<script type="text/javascript">
+    function onOpenCvReady() {
+        document.getElementById('startbutton').disabled = false;
+    }
+
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvas');
+    let startbutton = document.getElementById('startbutton');
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+    .then(function(stream) {
+        video.srcObject = stream;
+    })
+    .catch(function(err) {
+        console.log("An error occurred: " + err);
+    });
+
+    startbutton.addEventListener('click', function(ev) {
+        takepicture();
+        ev.preventDefault();
+    }, false);
+
+    function takepicture() {
+        let context = canvas.getContext('2d');
+        context.drawImage(video, 0, 0, 300, 300);
+        let data = canvas.toDataURL('image/png');
+    
+        // Convert the captured frame to an OpenCV image
+        let src = cv.imread(canvas);
+        
+        // Convert the image to grayscale
+        let gray = new cv.Mat();
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    
+        // Threshold the image
+        let thresh = new cv.Mat();
+        cv.threshold(gray, thresh, 230, 255, cv.THRESH_BINARY_INV)
+        cv.bitwise_not(thresh, thresh)
+        cv.imshow('canvas', thresh);
+    
+        // Find contours
+        let contours = new cv.MatVector();
+        let hierarchy = new cv.Mat();
+        cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    
+        // Here we should filter contours based on appropriate size to identify the pips
+        // This is a simplistic approach and might require further tuning
+        let pipCount = 0;
+        let tA = 0;
+        let total = contours.size();
+        for (let i = 0; i < contours.size(); ++i) {
+            let cnt = contours.get(i);
+            let area = cv.contourArea(cnt, false);
+            tA += area
+            if (area > 10 && area < 200) {
+                pipCount += 1
+            }
+            cnt.delete();
+        }
+        tA = tA / total
+    
+        // Clean up
+        src.delete();
+        gray.delete();
+        thresh.delete();
+        contours.delete();
+        hierarchy.delete();
+    
+        // Display the pip count
+        document.getElementById('pip-count').textContent = `Pip Count: ${pipCount}`;
+    }
+</script>
+</body>
+</html>
