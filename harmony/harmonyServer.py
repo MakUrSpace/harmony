@@ -208,7 +208,7 @@ def buildConfigurator():
         cameraConfigRows.append(f"""
             <div class="row justify-content-center text-center">
                 <h3 class="mt-5">Camera {cam.camName} <input type="button" value="Delete" class="btn-error" hx-post="/config/delete_cam/{cam.camName}" hx-swap="outerHTML"></h3>
-                <img src="/config/camera/{cam.camName}" title="{cam.camName} Capture" height="375" id="cam{cam.camName}" onclick="camClickListener({cam.camName}, event)">
+                <img src="/config/camera/{cam.camName}" title="{cam.camName} Capture" height="375" id="cam{cam.camName}" onclick="camClickListener('{cam.camName}', event)">
                 <label for="az">Active Zone</label><br>
                 <div class="container">
                     <div class="row">
@@ -216,7 +216,16 @@ def buildConfigurator():
                             <input type="text" name="az" id="cam{cam.camName}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camName}_activezone" hx-swap="none">
                         </div>
                         <div class="col">    
-                            <input type="button" name="clearCam{cam.camName}AZ" value="Clear AZ" onclick="clearCamAZ({cam.camName}, event)">
+                            <input type="button" name="clearCam{cam.camName}AZ" value="Clear AZ" onclick="clearCamAZ('{cam.camName}', event)">
+                        </div>
+                        <div class="col">
+                            <label for="camType">Camera Type:</label>
+                            <select id="camType" name="camType" hx-post="/>
+                              <option value="field">Field</option>
+                              <option value="dice">Dice</option>
+                            </select>
+                        
+                            <input type="dropdown" name="clearCam{cam.camName}AZ" value="Clear AZ" onclick="clearCamAZ('{cam.camName}', event)">
                         </div>
                     </div>
                 </div>
@@ -634,4 +643,5 @@ def diceWatcher():
 if __name__ == "__main__":
     cm.cycle()
     print(f"Launching Observer Server on {PORT}")
-    observerApp.run(host="0.0.0.0", port=PORT, ssl_context="adhoc")
+    #observerApp.run(host="0.0.0.0", port=PORT, ssl_context="adhoc")
+    observerApp.run(host="0.0.0.0", port=PORT)
