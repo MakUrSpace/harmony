@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackImages, CaptureConfiguration, HarmonyMachine, RemoteCamera
+from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackImages, CaptureConfiguration, HarmonyMachine, HarmonyCamera
 
 import threading
 import atexit
@@ -135,41 +135,16 @@ def genCameraFullViewWithActiveZone(camName):
     while True:
         try:
             cam = cameras[str(camName)]
-            img = cam.drawActiveZone(cam.mostRecentFrame)
+            if cam.camType == "dice":  # Add dice roll result
+                diceRoll = cam.collectDiceRoll()
+                img = cam.drawActiveZone(cam.mostRecentFrame)
+                cv2.putText(img, f"Result: {diceRoll}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 168, 255), 3, cv2.LINE_AA)
+            else:
+                img = cam.drawActiveZone(cam.mostRecentFrame)
     
-            h, w, _ = img.shape
-            dy, dx = 100, 100
-            rows, cols = int(h / dy), int(w / dx)
-            
-            # Draw vertical lines
-            for x in np.linspace(start=dx, stop=w-dx, num=cols-1):
-                x = int(round(x))
-                cv2.line(img, (x, 0), (x, h), color=(0, 0, 255), thickness=2)
-            
-            # Draw horizontal lines
-            for y in np.linspace(start=dy, stop=h-dy, num=rows-1):
-                y = int(round(y))
-                cv2.line(img, (0, y), (w, y), color=(0, 0, 255), thickness=2)
-            
-            gridImage = 255 * np.ones([1300, 2220, 3], dtype="uint8")
-            gridImage[100:1180, 200:2120] = img
-            
-            # Annotate with pixel numbers
-            for i in range(rows):
-                y = int(round(i * dy + dy)) + 120
-                x = 50
-                cv2.putText(gridImage, f"{(i+1) * dy:4}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 0, 0), 2, cv2.LINE_AA)
-            
-            for j in range(cols):
-                if j % 2 != 0:
-                    continue
-                x = int(round(j * dx + dx / 2)) + 180
-                y = 1250
-                cv2.putText(gridImage, f"{(j+1) * dx:4}", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 0, 0), 2, cv2.LINE_AA)
-    
-            ret, gridImage = cv2.imencode('.jpg', gridImage)
+            ret, img = cv2.imencode('.jpg', img)
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpg\r\n\r\n' + gridImage.tobytes() + b'\r\n')
+                   b'Content-Type: image/jpg\r\n\r\n' + img.tobytes() + b'\r\n')
         except Exception as e:
             print(f"Failed genCameraFullViewWithActiveZone for {camName} -- {e}")
             yield (b'--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n')
@@ -205,6 +180,8 @@ def buildConfigurator():
         if cam is None:
             continue
         activeZone = json.dumps(cam.activeZone.tolist())
+        optionValues = f"""<option value="field" selected>Game Field</option><option value="dice">Dice</option>""" if cam.camType == "field" else \
+            f"""<option value="field">Game Field</option><option value="dice" selected>Dice</option>"""
         cameraConfigRows.append(f"""
             <div class="row justify-content-center text-center">
                 <h3 class="mt-5">Camera {cam.camName} <input type="button" value="Delete" class="btn-error" hx-post="/config/delete_cam/{cam.camName}" hx-swap="outerHTML"></h3>
@@ -213,19 +190,14 @@ def buildConfigurator():
                 <div class="container">
                     <div class="row">
                         <div class="col">
-                            <input type="text" name="az" id="cam{cam.camName}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camName}_activezone" hx-swap="none">
-                        </div>
-                        <div class="col">    
+                            <input type="text" name="az" id="cam{cam.camName}_ActiveZone" value="{activeZone}" size="50" hx-post="/config/cam{cam.camName}_activezone" hx-swap="none">   
                             <input type="button" name="clearCam{cam.camName}AZ" value="Clear AZ" onclick="clearCamAZ('{cam.camName}', event)">
                         </div>
-                        <div class="col">
-                            <label for="camType">Camera Type:</label>
-                            <select id="camType" name="camType" hx-post="/>
-                              <option value="field">Field</option>
-                              <option value="dice">Dice</option>
+                        <div class="col">    
+                            <label>Camera Type</label>
+                            <select name="camType" hx-post="/config/cam{cam.camName}_type" hx-swap="none">
+                              {optionValues}
                             </select>
-                        
-                            <input type="dropdown" name="clearCam{cam.camName}AZ" value="Clear AZ" onclick="clearCamAZ('{cam.camName}', event)">
                         </div>
                     </div>
                 </div>
@@ -283,6 +255,20 @@ def updateCamActiveZone(camName):
     return "success"
 
 
+@observerApp.route('/config/cam<camName>_type', methods=['POST'])
+def updateCamType(camName):
+    global CONSOLE_OUTPUT
+    print(f"Received update Active Zone request for {camName}")
+    try:
+        camType = str(request.form.get(f"camType"))
+        cam = cameras[camName]
+        cam.camType = camType 
+    except:
+        print(f"Unrecognized data: {camName} - {camType}")
+    CONSOLE_OUPUT = f"Updated {camName} type to {camType}"
+    return "success"
+
+
 @observerApp.route('/config/new_camera', methods=['GET'])
 def getNewCameraForm():
     with open("templates/NewCamera.html", "r") as f:
@@ -303,7 +289,7 @@ def addNewCamera():
     camRot = request.form.get("camRot")
     camAddr = request.form.get("camAddr")
     with data_lock:
-        cameras[camName] = RemoteCamera(address=camAddr, activeZone=[[0, 0], [0, 1], [1, 1,], [1, 0]], camName=camName, rotate=camRot)
+        cameras[camName] = HarmonyCamera(address=camAddr, activeZone=[[0, 0], [0, 1], [1, 1,], [1, 0]], camName=camName, rotate=camRot, camType="field")
         cm.cc.rsc = None
         cm.cc.saveConfiguration()
         resetHarmonyMachine()
@@ -542,7 +528,7 @@ def buildController():
     with open("templates/Controller.html", "r") as f:
         template = f.read()
     cameraButtons = ' '.join([f'<input type="button" value="Camera {camName}" onclick="liveCameraClick({camName})">' for camName in cameras.keys()])
-    defaultCam = list(cameras.keys())[0]
+    defaultCam = [camName for camName, cam in cameras.items() if cam.camType == 'field'][0]
     return template.replace("{defaultCamera}", defaultCam).replace("{cameraButtons}", cameraButtons)
 
 
