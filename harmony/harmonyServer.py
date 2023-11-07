@@ -8,7 +8,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackImages, CaptureConfiguration, HarmonyMachine, HarmonyCamera
+from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackImages, HarmonyConfiguration, HarmonyMachine, HarmonyCamera, QuantumObject
 
 import threading
 import atexit
@@ -34,12 +34,22 @@ def createCaptureApp():
         captureTimer.cancel()
 
     def cycleMachine():
+        global CONSOLE_OUTPUT
         with data_lock:
             if ENABLE_CYCLE:
-                cm.cycle()
+                try:
+                    cm.cycle()
+                    CONSOLE_OUTPUT = ""
+                except AssertionError as ae:
+                    diceAEStr = "Unable to distinguish 0 or 2 dice"
+                    if diceAEStr == str(ae)[:len(diceAEStr)]:
+                        CONSOLE_OUTPUT = "Shake dice tray"
+                except Exception as e:
+                    print(f"Unrecognized error: {e}")
+                    CONSOLE_OUTPUT = e
         # Set the next timeout to happen
         captureTimer = threading.Timer(POOL_TIME, cycleMachine, ())
-        captureTimer.start()   
+        captureTimer.start()
 
     def initialize():
         global captureTimer
@@ -66,39 +76,81 @@ def renderConsole():
         mid = [int(d / 2) for d in shape]
         zeros = np.zeros(shape, dtype="uint8")
 
-        consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
-            (50, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'Status: {cm.mode:7} -- {cm.state:10}',
-            (50, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'Cycle {cm.cycleCounter}',
-            (50, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        if len(cm.transitions) > 0:
-            lastObj = cm.transitions[-1]['obj']
-            currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(lastObj)]
-            consoleImage = cv2.putText(zeros, f'Last Action',
-                (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-
-            try:
-                lastMem = cm.memory[cm.memory.index(lastObj)]
-                objectIdentifier = f'{lastMem.objectType} {lastMem.name}'
-            except ValueError:
-                objectIdentifier = f'Unclassified Object'
-            objectLocation = f'at {currentLocation}'
-    
-            consoleImage = cv2.putText(zeros, objectIdentifier,
-                (50, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-            consoleImage = cv2.putText(zeros, objectLocation,
-                (50, 280), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-            if not lastObj.isNewObject:
-                lastLocation = [f"{d:7.2f}" for d in cc.rsc.changeSetToRealCenter(lastObj.previousVersion())]
-                distanceMoved = cc.rsc.trackedObjectLastDistance(lastObj)
+            (50, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
+            (50, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        consoleImage = cv2.putText(zeros, f'Mode: {cm.mode:7} {"(" + cm.actionState + ")" if cm.mode == "action" else ""}',
+            (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        consoleImage = cv2.putText(zeros, f'Board State: {cm.state:10}',
+            (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        
+        consoleImage = cv2.putText(zeros, f'Last Change',
+            (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        if cm.lastMemory is not None:
+            if 'newObject' in cm.lastMemory:
+                obj = cm.lastMemory['newObject']
+                currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(obj)]
+                objectIdentifier = f'New Object Added'
+                objectLocation = f'at {currentLocation}'
+                consoleImage = cv2.putText(zeros, objectIdentifier,
+                    (50, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                consoleImage = cv2.putText(zeros, objectLocation,
+                    (50, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            elif 'changedObject' in cm.lastMemory:
+                obj = cm.lastMemory['changedObject']
+                currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(obj)]
+                objectIdentifier = f'{obj.objectType} {obj.name}'
+                objectLocation = f'at {currentLocation}'
+                consoleImage = cv2.putText(zeros, objectIdentifier,
+                    (50, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                consoleImage = cv2.putText(zeros, objectLocation,
+                    (50, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                lastLocation = [f"{d:7.2f}" for d in cc.rsc.changeSetToRealCenter(obj.previousVersion())]
+                distanceMoved = cc.rsc.trackedObjectLastDistance(obj)
                 consoleImage = cv2.putText(zeros, f'Moved {distanceMoved:6.2f} mm',
-                    (50, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                    (50, 290), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
                 consoleImage = cv2.putText(zeros, f'From {lastLocation}',
-                    (50, 380), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-            else:
-                consoleImage = cv2.putText(zeros, f'Added',
-                    (50, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                    (50, 320), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            elif 'annotatedObject' in cm.lastMemory:
+                obj = cm.lastMemory['annotatedObject']
+                currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(obj)]
+                objectIdentifier = f'{obj.name} is {obj.objectType} '
+                objectLocation = f'at {currentLocation}'
+                consoleImage = cv2.putText(zeros, objectIdentifier,
+                    (50, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                consoleImage = cv2.putText(zeros, objectLocation,
+                    (50, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            elif 'selectedObject' in cm.lastMemory:
+                obj = cm.lastMemory['selectedObject']
+                currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(obj)]
+                action = f"{obj.name} selected"
+                line2 = "as actor" if len(cm.selectedObjects) == 1 else "as target"
+                consoleImage = cv2.putText(zeros, action,
+                    (50, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                consoleImage = cv2.putText(zeros, line2,
+                    (50, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            elif 'confirmedAction' in cm.lastMemory:
+                roll, sel0, sel1 = cm.lastMemory['confirmedAction']
+                action = f"{sel0.name} attacking"
+                line2 = f"{sel1.name} confirmed ({roll})"
+                consoleImage = cv2.putText(zeros, action,
+                    (50, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                consoleImage = cv2.putText(zeros, line2,
+                    (50, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            elif 'actedOn' in cm.lastMemory:
+                obj = cm.lastMemory['actedOn']
+                currentLocation = [f"{pt:7.2f}" for pt in cc.rsc.changeSetToRealCenter(obj)]
+                result, roll, actor = obj.actionHistory[list(obj.actionHistory.keys())[-1]]
+                action = f"{obj.name} {result} by {actor} ({roll})"
+                objectIdentifier = f'{obj.objectType} {obj.name}'
+                objectLocation = f'at {currentLocation}'
+                consoleImage = cv2.putText(zeros, objectIdentifier,
+                    (50, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                consoleImage = cv2.putText(zeros, objectLocation,
+                    (50, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+                consoleImage = cv2.putText(zeros, action,
+                    (50, 290), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
    
         ret, consoleImage = cv2.imencode('.jpg', zeros)
         yield (b'--frame\r\n'
@@ -131,17 +183,37 @@ def getHTMX():
     return Response(htmx, mimetype="application/javascript")
 
 
+def genDiceCameraView(camName):
+    while True:
+        try:
+            cam = cameras[str(camName)]
+            assert cam.camType == "dice"
+            try:
+                diceRoll = cam.collectDiceRoll()
+            except:
+                diceRoll = "Failed"
+            img = cam.drawActiveZone(cam.mostRecentFrame)
+            cv2.putText(img, f"Result: {diceRoll}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 168, 255), 3, cv2.LINE_AA)
+            ret, img = cv2.imencode('.jpg', img)
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpg\r\n\r\n' + img.tobytes() + b'\r\n')
+        except Exception as e:
+            print(f"Failed genCameraFullViewWithActiveZone for {camName} -- {e}")
+            yield (b'--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n')
+
+
+@observerApp.route('/config/dicewatcher', methods=['GET'])
+def dicewatcher():
+    return Response(genDiceCameraView("Dice"), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
 def genCameraFullViewWithActiveZone(camName):
     while True:
         try:
             cam = cameras[str(camName)]
-            if cam.camType == "dice":  # Add dice roll result
-                diceRoll = cam.collectDiceRoll()
-                img = cam.drawActiveZone(cam.mostRecentFrame)
-                cv2.putText(img, f"Result: {diceRoll}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 168, 255), 3, cv2.LINE_AA)
-            else:
-                img = cam.drawActiveZone(cam.mostRecentFrame)
-    
+            if cam.camType == "dice":
+                cam.capture()
+            img = cam.drawActiveZone(cam.mostRecentFrame)
             ret, img = cv2.imencode('.jpg', img)
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpg\r\n\r\n' + img.tobytes() + b'\r\n')
@@ -278,7 +350,7 @@ def getNewCameraForm():
 
 def resetHarmonyMachine():
     global cc, cm, cameras
-    cc = CaptureConfiguration()
+    cc = HarmonyConfiguration()
     cm = HarmonyMachine(cc)
 
 
@@ -303,7 +375,7 @@ def requestHarmonyReset():
     global CONSOLE_OUTPUT
     with data_lock: 
         resetHarmonyMachine()
-    CONSOLE_OUTPUT = "Reset Harmony"
+        CONSOLE_OUTPUT = "Harmony was reset!"
     return """<script>window.location.reload();</script>
               <input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/config'">"""
 
@@ -316,7 +388,7 @@ def deleteCamera(camName):
         cm.cc.rsc = None
         cm.cc.saveConfiguration()
         resetHarmonyMachine()
-    CONSOLE_OUTPUT = f"Deleted Camera {camName}"
+        CONSOLE_OUTPUT = f"Deleted Camera {camName}"
     return """<script>window.location.reload();</script>
               <input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/config'">"""
 
@@ -417,6 +489,13 @@ def genCameraWithChangesView(camName):
             if lastClass is not None and lastClass.changeType not in ['delete', None]:
                 lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
                 camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
+        # Paint Selected Objects Purple
+        if cm.selectedObjects is not None:
+            for idx, sel in enumerate(cm.selectedObjects):
+                color = (255, 255, 0) if idx == 0 else (255, 0, 255)
+                if sel.changeSet[camName].changeType not in ['delete', None]:
+                    memContour = np.array([sel.changeSet[camName].changePoints], dtype=np.int32)
+                    camImage = cv2.drawContours(camImage, memContour, -1, color, -1)
         camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
@@ -469,6 +548,13 @@ def genCombinedCameraWithChangesView():
                 if lastClass is not None and lastClass.changeType not in ['delete', None]:
                     lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
                     camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
+            # Paint Selected Objects Purple
+            if cm.selectedObjects is not None:
+                for idx, sel in enumerate(cm.selectedObjects):
+                    color = (255, 255, 0) if idx == 0 else (255, 0, 255)
+                    if sel.changeSet[camName].changeType not in ['delete', None]:
+                        memContour = np.array([sel.changeSet[camName].changePoints], dtype=np.int32)
+                        camImage = cv2.drawContours(camImage, memContour, -1, color, -1)
             camImages.append(camImage)
         camImage = vStackImages(camImages)
         camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
@@ -527,37 +613,64 @@ def controlSetAction():
 def buildController():
     with open("templates/Controller.html", "r") as f:
         template = f.read()
-    cameraButtons = ' '.join([f'<input type="button" value="Camera {camName}" onclick="liveCameraClick({camName})">' for camName in cameras.keys()])
+    cameraButtons = ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in cameras.keys()])
     defaultCam = [camName for camName, cam in cameras.items() if cam.camType == 'field'][0]
     return template.replace("{defaultCamera}", defaultCam).replace("{cameraButtons}", cameraButtons)
 
 
+def captureToChangeRow(capture):
+    encodedBA = imageToBase64(capture.visual())
+    name = capture.name if type(capture) == QuantumObject else "None"
+    objType = capture.objectType if type(capture) == QuantumObject else "None"
+    center = ", ".join([f"{pt:.2f}" for pt in cc.rsc.changeSetToRealCenter(capture)])
+    health = ""
+    if type(capture) == QuantumObject:
+        numHits = sum([True for act in capture.actionHistory.values() if act[0] == 'hit'])
+    else:
+        numHits = 0
+    for i in range(numHits):
+        health += "[x] "
+    for i in range(3 - numHits):
+        health += "[ ] "
+    changeRow = f"""
+        <div class="row mb-1">
+            <div class="col">
+                <div class="row">
+                    <div class="col">
+                        <p>{objType}</p>
+                    </div>
+                    <div class="col">
+                        <p>{name}</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col">
+                        <p>({center})</p>
+                    </div>
+                    <div class="col">
+                        <p>{health}</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <button class="btn btn-primary" onclick="window.location.href='/objectsettings/{capture.oid}'">Edit</button>
+                </div>
+            </div>
+            <div class="col">
+                <img class="img-fluid border border-secondary" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
+            </div>
+        </div>
+        <hr class="mt-2 mb-3"/>"""
+    return changeRow
+
+
 def buildObjectTable():
     changeRows = []
-    captureModals = []
-    print(f"Aware of {len(cm.memory)} objects")
+    print(f"Aware of {len(cm.memory) + len(cm.newObjectBuffer)} objects")
+    for capture in cm.newObjectBuffer:
+        changeRows.append(captureToChangeRow(capture))
+    changeRows.append("""<hr class="mt-4 mb-6 border-top"/>""")
     for capture in cm.memory:
-        encodedBA = imageToBase64(capture.visual())
-        center = ", ".join([f"{pt:.2f}" for pt in cc.rsc.changeSetToRealCenter(capture)])
-        changeRow = f"""
-            <div class="row mb-1">
-                <div class="col">
-                    <p>{"" if capture.name is None else capture.name}</p>
-                </div>
-                <div class="col">
-                    <p>({center})</p>
-                </div> 
-                <div class="col">
-                    <img class="img-fluid border border-secondary" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
-                </div>
-            </div>"""
-        changeRows.append(changeRow)
-    if len(cm.newObjectBuffer) > 0:
-        changeRows.insert(0, """
-            <div class="row">
-                <button type="button" class="btn btn-warning btn-sm" onclick="location.href='/objectsettings';">Assign New Objects</button>
-            </div>
-        """)
+        changeRows.append(captureToChangeRow(capture))
     return " ".join(changeRows)
 
 
@@ -566,64 +679,161 @@ def getObjectTable():
     return buildObjectTable()
 
 
-def buildObjectSettingsTable():
-    changeRows = []
-    captureModals = []
-    print(f"Aware of {len(cm.memory)} objects")
-    for idx, capture in enumerate(cm.newObjectBuffer):
-        encodedBA = imageToBase64(capture.visual())
-        center = [f"{pt:.2f}" for pt in cc.rsc.changeSetToRealCenter(capture)]
-        changeRow = f"""
-            <div class="row mb-1">
-                <div class="col">
-                    <form method="post">
-                      <div class="form-group">
-                        <label for="objectName">Object Name</label>
-                        <input type="text" name="objectName" value="" required>
-                      </div>
-                      <div class="form-group">
-                        <label for="objectType">Object Type</label>
-                        <input name="objectType" list="objectTypeDataList" value="" required>
-                      </div>
-                      <input type="hidden" name="objectId" value="{capture.oid}">
-                      <button type="submit" class="btn btn-secondary">Update Object</button>
-                    </form>
-                </div>
-                <div class="col">
-                    <p>{center}</p><br>
-                    <img class="img-fluid border border-secondary" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
-                </div>
-            </div>"""
-        changeRows.append(changeRow)
-    objOptions = "\n".join([f'<option value="{objType}">' for objType in mc.ObjectFactories.keys()])
-    changeRows.insert(0, f"""
-            <datalist id="objectTypeDataList">
-                {objOptions}
-            </datalist>""")
+@observerApp.route('/objectsettings/<objectId>', methods=['GET'])
+def getObjectInfo(objectId):
+    capture = None
+    for c in cm.newObjectBuffer + cm.memory:
+        if c.oid == objectId:
+            capture = c
+
     with open("templates/ChangeTable.html", "r") as f:
         template = f.read()
-    return template.replace("{changeTableBody}", " ".join(changeRows))
 
-
-@observerApp.route('/objectsettings', methods=['GET'])
-def getObjectSettingsTable():
-    return buildObjectSettingsTable()
+    if capture is None:
+        return template.replace("{changeTableBody}", f"Object {objectId} Not Found")
+    
+    objOptions = "\n".join([f'<option value="{objType}">' for objType in mc.ObjectFactories.keys()])
+    encodedBA = imageToBase64(capture.visual())
+    center = ", ".join([f"{pt:.2f}" for pt in cc.rsc.changeSetToRealCenter(capture)])
+    health = ""
+    if type(capture) == QuantumObject:
+        numHits = sum([True for act in capture.actionHistory.values() if act[0] == 'hit'])
+        name = capture.name
+        objectType = capture.objectType
+    else:
+        numHits = 0
+        name = ""
+        objectType = ""
+    for i in range(numHits):
+        health += "[x] "
+    for i in range(3 - numHits):
+        health += "[ ] "
+    body =  f"""
+    <div class="col">
+        <form hx-post="/objectsettings/{objectId}">
+            <div class="row">
+              <datalist id="objectTypeDataList">
+                {objOptions}
+              </datalist>
+              <div class="form-group col">
+                <label for="objectType">Object Type</label>
+                <input list="objectTypeDataList" class="form-control" name="objectType" value="{objectType}">
+              </div>
+              <div class="form-group col">
+                <label for="objectName">Object Name</label>
+                <input type="text" class="form-control" name="objectName" placeholder="{name}">
+              </div>
+            </div>
+            <div class="row">
+                <div class="col">
+                    <p>({center})</p>
+                </div>
+                <div class="col">
+                    <p>{health}</p>
+                </div>
+            </div>
+            <div class="row">
+                <button class="btn btn-primary">Update</button>
+            </div>
+        </form>
+    </div>
+    <div class="col">
+        <img class="img-fluid border border-secondary" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
+    </div>"""
+    template = template.replace("{changeTableBody}", body)
+    return template
     
     
-@observerApp.route('/objectsettings', methods=['POST'])
-def postObjectSettings():
+@observerApp.route('/objectsettings/<objectId>', methods=['POST'])
+def postObjectSettings(objectId):
     objName = request.form.get("objectName")
     objType = request.form.get("objectType")
-    oid = request.form.get("objectId")
-    cm.annotateObject(oid, objName, objType)
-    return buildObjectSettingsTable()
+    cm.annotateObject(objectId, objName, objType)
+    return buildController()
 
 
-@observerApp.route('/dicewatcher', methods=['GET'])
-def diceWatcher():
-    with open("templates/DiceWatcher.html", "r") as f:
+coords = {"real": "[]", **{cam.camName: "[]" for cam in cameras.values()}}
+
+    
+@observerApp.route('/annotatecams/<camName>/coord')
+def getCamCoord(camName):
+    global coords
+    assert camName in coords, f"{camName} not in coords"
+    return coords[camName]
+    
+    
+@observerApp.route('/annotatecams/<camName>/coord', methods=['POST'])
+def postCamCoord(camName):
+    global coords
+    camCoords = json.loads(coords[camName])
+    newCoord = [int(d) for d in request.get_json()]
+    camCoords.append(newCoord)
+    coords[camName] = json.dumps(camCoords)
+    realCoord = cm.cc.rsc.camCoordToRealSpace(camName, newCoord)
+    for cam in cameras.values():
+        if cam.camName == camName or cam.camType == "dice":
+            continue
+        camCoord = [int(d) for d in cm.cc.rsc.realCoordToCamSpace(cam.camName, realCoord)]
+        coords[cam.camName] = json.dumps(json.loads(coords[cam.camName]) + [camCoord])
+    coords['real'] = json.dumps(json.loads(coords['real']) + [[int(d) for d in realCoord]])
+    return json.dumps(coords)
+    
+    
+@observerApp.route('/annotatecams/clearcoord', methods=['POST'])
+def clearCamCoord():
+    global coords
+    coords = {"real": "[]", **{cam.camName: "[]" for cam in cameras.values()}}
+    return "Clear Coordinates"
+
+
+def genAnnotatedCamera(camName):
+    while True:
+        try:
+            cam = cameras[str(camName)]
+            camCoords = json.loads(coords[str(camName)])
+            if cam.camType == "dice":
+                cam.capture()
+            img = cam.drawActiveZone(cam.mostRecentFrame)
+            for coord in camCoords:
+                cv2.circle(img, coord, 8, (0, 0, 255), -1)
+            ret, img = cv2.imencode('.jpg', img)
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpg\r\n\r\n' + img.tobytes() + b'\r\n')
+        except Exception as e:
+            print(f"Failed genCameraFullViewWithActiveZone for {camName} -- {e}")
+            yield (b'--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n')
+    
+    
+@observerApp.route('/annotatecams/camera/<camName>')
+def annotationCamera(camName):
+    return Response(genAnnotatedCamera(str(camName)), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@observerApp.route('/annotatecams')
+def annotateCams():
+    cameraCols = []
+    coordinateFields = []
+    for cam in cameras.values():
+        if cam is None or cam.camType == "dice":
+            continue
+        cameraCols.append(f"""
+            <div class="col">
+                <h3 class="mt-5">Camera {cam.camName}</h3>
+                <img src="/annotatecams/camera/{cam.camName}" title="{cam.camName} Capture" width="100%" id="cam{cam.camName}" onclick="camClickListener('{cam.camName}', event)">
+            </div>""")
+        coordinateFields.append(f"""
+            <div class="row">
+                <h4 class="mt-5">{cam.camName} Coordinates: </h4>
+                <div id="cam{cam.camName}Coord" hx-get="/annotatecams/{cam.camName}/coord" hx-trigger="every 2s"></div>
+            </div>""")
+
+    with open("templates/CamAnnotater.html") as f:
         template = f.read()
-    return template
+    
+    return template.replace(
+        "{cameraColumns}", "\n".join(cameraCols)).replace(
+        "{coordinateFields}", "\n".join(coordinateFields)).replace(
+        "{realCoord}", coords['real'])
 
 
 if __name__ == "__main__":
