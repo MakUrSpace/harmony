@@ -12,14 +12,14 @@ from ipynb.fs.full.HarmonyEye import cc, cm, mc, cameras, hStackImages, vStackIm
 
 import threading
 import atexit
-from flask import Flask, render_template, Response, request, make_response
+from flask import Flask, render_template, Response, request, make_response, redirect
 from traceback import format_exc
 
 
 CONSOLE_OUTPUT = "No Output Yet"
 
 POOL_TIME = 0.1 #Seconds
-PORT = int(os.getenv("OBSERVER_PORT", "7000"))
+PORT = int(os.getenv("HARMONY_PORT", "7000"))
 
 ENABLE_CYCLE = True
 
@@ -710,6 +710,7 @@ def getObjectInfo(objectId):
         health += "[ ] "
     body =  f"""
     <div class="col">
+        <button class="btn btn-secondary" hx-delete="/objectsettings/{objectId}" hx-swap="outerHTML">Delete</button>
         <form hx-post="/objectsettings/{objectId}">
             <div class="row">
               <datalist id="objectTypeDataList">
@@ -749,7 +750,13 @@ def postObjectSettings(objectId):
     objName = request.form.get("objectName")
     objType = request.form.get("objectType")
     cm.annotateObject(objectId, objName, objType)
-    return buildController()
+    return redirect("/control", code=303)
+    
+    
+@observerApp.route('/objectsettings/<objectId>', methods=['DELETE'])
+def deleteObjectSettings(objectId):
+    cm.deleteObject(objectId)
+    return redirect("/control", code=303)
 
 
 coords = {"real": "[]", **{cam.camName: "[]" for cam in cameras.values()}}
