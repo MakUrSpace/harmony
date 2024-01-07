@@ -8,6 +8,7 @@
     <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="/bootstrap.min.css">
     <script src="/bootstrap.min.js"></script>
+    <script src="/htmx.min.js"></script>
     
     <style>
         table, th, td {
@@ -16,28 +17,26 @@
         }
     </style>
 
-    <title>Observer Control</title>
+    <title>Harmony Controller</title>
 </head>
 <body>
 <div class="container">
-    <h1 align="center">Observer Controller</h1>
-    <h3 text-align="right"><a href="/config">Config</a></h3>
+    <h1 align="center">Harmony Controller</h1>
+    <div class="container" align="right">
+        <input class="btn-info" type="button" value="Configuration" onclick="window.location.href='/config'">
+    </div>
     <div class="row">
         <div class="col">
             <div class="container">
-                <h2 class="mt-5">Capture Control
+                <h2 class="mt-5">Capture Control</h2>
                 <div class="btn-group" role="group" aria-label="Observer Capture Mode Control Buttons">
-                  <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" checked="" onclick="setPassive();">
-                  <label class="btn btn-outline-primary" for="passive">Passive</label>
-                  <input type="radio" class="btn-check" name="btnradio" id="active" autocomplete="off" onclick="setTracking();">
-                  <label class="btn btn-outline-primary" for="active">Active</label>
-                </div></h2>
-                <img class="img-fluid border border-primary" src="/console" style="border-radius: 50px;">
+                  <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" checked="">
+                  <label class="btn btn-outline-primary" for="passive" onclick="setPassive();">Passive</label>
+                  <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off">
+                  <label class="btn btn-outline-primary" for="track" onclick="setTrack();">Add</label>
+                </div>
+                <img class="img-fluid border border-primary" src="/control/observer_console" style="border-radius: 50px;">
             </div>
-        </div>
-        <div class="col">
-            <h3 class="mt-5">Virtual Map</h3>
-            <img class="img-fluid border border-primary" src="/control/minimap" style="border-radius: 5px;">
         </div>
     </div>
     <hr>
@@ -45,8 +44,8 @@
         <div class="col">
             <div class="container">
                 <div class="row justify-content-center">
-                    <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected 0)</h3>
-                    <img id="liveCam" class="img-responsive border border-primary bg-primary" src="/control/camWithChanges/0" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
+                    <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
+                    <img id="liveCam" class="img-responsive border border-primary bg-primary" src="/control/camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
                 </div>
                 <div class="row justify-content-center">
                     <script>
@@ -64,10 +63,10 @@
         <div class="col" align="center">
             <div class="container">
                 <div class="row justify-content-center">
-                    <h2 class="mt-5">Change Tracker</h2>
+                    <h2 class="mt-5">Object Tracker</h2>
                 </div>
                 <div class="row justify-content-center">
-                    <div id="changeTable"></div>
+                    <div id="changeTable" hx-get="/control/objects" hx-trigger="every 1s"></div>
                 </div>
             </div>
         </div>
@@ -75,35 +74,13 @@
 </div>
 </body>
 <script>
-    async function refreshChangeTable(){
-        const request = new Request("/objects");
-        await fetch(request)
-          .then((response) => {
-            if (response.status === 200) {
-                const element = document.getElementById("changeTable");
-                return response.text()
-            } else {
-              throw new Error("Failed to retreive change table");
-            }
-          })
-          .then((response) => {
-            const element = document.getElementById("changeTable");
-            element.innerHTML = response
-          })
-          .catch((error) => {
-            console.error(error);
-          });
-    }
-    
-    setInterval(refreshChangeTable, 1500);
-    
     async function setPassive(){
         const request = new Request("/control/set_passive");
         fetch(request)
     }
     
-    async function setTracking(){
-        const request = new Request("/control/set_tracking");
+    async function setTrack(){
+        const request = new Request("/control/set_track");
         fetch(request)
     }
 </script>

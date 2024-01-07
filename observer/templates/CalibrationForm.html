@@ -1,0 +1,38 @@
+<form hx-post="/config/calibration_plan">
+  <table align="center">
+      <thead>
+        <tr>
+          <th>Point #</th>
+          {calibCamHeaders}
+          <th>Real Coordinates</th>
+        </tr>
+      </thead>
+      <tbody> 
+        <tr>
+            <td>0</td>
+            {calib0}
+        </tr> 
+        <tr>
+            <td>1</td>
+            {calib1}
+        </tr> 
+        <tr>
+            <td>2</td>
+            {calib2}
+        </tr>
+        <tr>
+            <td>3</td>
+            {calib3}
+        </tr> 
+        <tr>
+            <td>4</td>
+            {calib4}
+        </tr> 
+        <tr>
+            <td>5</td>
+            {calib5}
+        </tr>     
+      </tbody>
+  </table>
+  <input type="submit" value="Save Calibration Plan">
+</form>

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <link rel="stylesheet" href="/bootstrap.min.css">
+    <script src="/bootstrap.min.js"></script>
+    <script src="/htmx.min.js"></script>
+
+    <title>Harmony New Camera</title>
+</head>
+<body>
+    <div class="container" align="right">
+        <input class="btn-info" type="button" value="Configuration" onclick="window.location.href='/config'">
+    </div>
+    <div class="container">
+        <h1>New Camera</h1>
+        <form hx-post="/config/new_camera" hx-swap="outerHTML">
+            <label for="camName">Name</label>
+            <input type="text" class="form-control" name="camName" placeholder="0"><br>
+            <input type="number" class="form-check-input" name="camRot" min="0" max="360">
+            <label class="form-check-label" for="camRot">Rotation</label><br>
+            <label for="camAddr">Address</label>
+            <input type="text" class="form-control" name="camAddr" placeholder="http://localhost:8080/snapshot"><br>
+            <input type="submit" class="btn btn-primary" value="Add Camera">
+        </form>
+</body>
