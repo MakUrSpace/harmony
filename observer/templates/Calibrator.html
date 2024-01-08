@@ -3,49 +3,84 @@
 <head>
     <!-- Required meta tags -->
     <meta charset="utf-8">
-    <meta http-equiv="refresh" content="5">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 
+    <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="/bootstrap.min.css">
     <script src="/bootstrap.min.js"></script>
-
+    <script src="/htmx.min.js"></script>
     
-    <title>Observer Calibrator</title>
+    <style>
+        table, th, td {
+          border: 1px solid black;
+          padding: 15px;
+        }
+    </style>
+
+    <title>Harmony Controller</title>
+    <script>
+        async function setPassive(){
+            const request = new Request("{calibratorURL}/set_passive");
+            fetch(request)
+        }
+        
+        async function setTrack(direction){
+            const request = new Request(`{calibratorURL}/set_track_${direction}`);
+            fetch(request)
+        }
+    </script>
 </head>
 <body>
-
 <div class="container">
-    <h1 align="center">Observer Calibrator</h1>
-    <h3><a href="/config">Configuration</a></h3>
-   
+    <h1 align="center">Harmony Controller</h1>
+    <div class="container" align="right">
+        <input class="btn-info" type="button" value="Configuration" onclick="window.location.href='/config'">
     </div>
-    <div class="row" align="center">
-        <div class="container">
-            <div class="row">
-                <input type="button" value="Start Calibration" onclick="startCalibration()">
+    <div class="row">
+        <div class="col">
+            <h2 class="mt-5">Capture Control</h2>
+            <div class="btn-group" role="group" aria-label="Observer Capture Mode Control Buttons">
+              <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" checked="" onclick="setPassive();">
+              <label class="btn btn-outline-primary" for="passive">Passive</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('first');">
+              <label class="btn btn-outline-primary" for="track">First Triangle</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('top');">
+              <label class="btn btn-outline-primary" for="track">Track Up</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('hypos');">
+              <label class="btn btn-outline-primary" for="track">Track Left</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('longs');">
+              <label class="btn btn-outline-primary" for="track">Track Right</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('shorts');">
+              <label class="btn btn-outline-primary" for="track">Track Down</label>
             </div>
-            <div class="row">
-                <input type="button" value="Abort Calibration" onclick="abortCalibration()">
+            <img class="img-fluid border border-primary" src="{calibratorURL}/observer_console" style="border-radius: 50px;">
+        </div>
+        <div class="col">
+            <div class="row justify-content-center">
+                <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
+                <img id="liveCam" class="img-responsive border border-primary bg-primary" src="{calibratorURL}/camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
+            </div>
+            <div class="row justify-content-center">
+                <script>
+                    function liveCameraClick(camNum){{
+                        var header = document.querySelector("#liveCamHeader")
+                        header.innerText = `Live Cameras (Selected ${camNum})`
+                        var img = document.querySelector("#liveCam")
+                        img.src = `{calibratorURL}/camWithChanges/${camNum}`
+                    }}
+                </script>
+                {cameraButtons}
+            </div>
+        </div>
+        <div class="col" align="center">
+            <div class="row justify-content-center">
+                <h2 class="mt-5">Object Tracker</h2>
+            </div>
+            <div class="row justify-content-center">
+                <div id="changeTable" hx-get="{calibratorURL}/objects" hx-trigger="every 1s"></div>
             </div>
         </div>
     </div>
-    <div class="row" align="center">
-        {calibrationMonitor}
-    </div>
-    <div class="row" align="center">
-        {calibratorResult}
-    </div>
 </div>
 </body>
-<script>
-    async function startCalibration(){
-        const request = new Request("/calibrator/start_calibration");
-        fetch(request)
-    }
-    
-    async function abortCalibration(){
-        const request = new Request("/calibrator/abort_calibration");
-        fetch(request)
-    }
-</script>
 </html>
