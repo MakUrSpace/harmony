@@ -14,7 +14,7 @@
 <body><div class="container">
     <h1 align="center">Calibrator</h1>
     <div class="container" align="right">
-        <input class="btn-info" type="button" value="Configurator" onclick="window.location.href='/configurator'">
+        <input class="btn btn-info" type="button" value="Configurator" onclick="window.location.href='/configurator'">
     </div>
     <div class="row">
         <div class="col">
@@ -34,7 +34,7 @@
               <label class="btn btn-outline-primary" for="track_shorts">Track Short</label>
             </div>
             <img class="img-fluid border border-primary" src="{calibratorURL}/observer_console" style="border-radius: 50px;">
-            <input type="btn" class="btn btn-secondary" name="commitbtn" id="commit" autocomplete="off" value="Commit Calibration" hx-post"{calibratorURL}/commit_calibration">
+            <input type="button" class="btn btn-secondary" name="commitbtn" id="commitbtn" value="Commit Calibration" hx-get="{calibratorURL}/commit_calibration">
         </div>
         <div class="col">
             <div class="row justify-content-center">

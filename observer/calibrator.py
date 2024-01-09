@@ -9,7 +9,7 @@ import argparse
 import json
 from io import BytesIO
 
-from ipynb.fs.full.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver
+from ipynb.fs.full.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver, CalibratedObserver
 
 import threading
 import atexit
@@ -230,7 +230,7 @@ def buildCalibrator():
             app.cm = CalibrationObserver(app.cc)
     with open("templates/Calibrator.html", "r") as f:
         template = f.read()
-    cameraButtons = ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
+    cameraButtons = ' '.join([f'''<input type="button" class="btn btn-primary" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
     defaultCam = [camName for camName, cam in app.cc.cameras.items()][0]
     return template.replace(
         "{defaultCamera}", defaultCam).replace(

@@ -15,7 +15,7 @@ from flask import Flask, Blueprint, render_template, Response, request, make_res
 from traceback import format_exc
 
 from configurator import configurator, setConfiguratorApp
-from calibratedObserver import calibratedObserver, CalibratedObserver, CalibratedCaptureConfiguration
+from calibrator import calibrator, CalibratedObserver, CalibratedCaptureConfiguration
 
 app = None
 
@@ -302,7 +302,7 @@ def getObjectTable():
 
 def minimapGenerator():
     while True:
-        camImage = app.cm.cc.buildMiniMap()
+        camImage = app.cm.cc.buildMiniMap(blueObjects=app.cm.memory)
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
