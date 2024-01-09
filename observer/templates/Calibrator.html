@@ -5,55 +5,36 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 
-    <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="/bootstrap.min.css">
     <script src="/bootstrap.min.js"></script>
     <script src="/htmx.min.js"></script>
-    
-    <style>
-        table, th, td {
-          border: 1px solid black;
-          padding: 15px;
-        }
-    </style>
 
-    <title>Harmony Controller</title>
-    <script>
-        async function setPassive(){
-            const request = new Request("{calibratorURL}/set_passive");
-            fetch(request)
-        }
-        
-        async function setTrack(direction){
-            const request = new Request(`{calibratorURL}/set_track_${direction}`);
-            fetch(request)
-        }
-    </script>
+    <title>Observer Calibrator</title>
 </head>
-<body>
-<div class="container">
-    <h1 align="center">Harmony Controller</h1>
+<body><div class="container">
+    <h1 align="center">Calibrator</h1>
     <div class="container" align="right">
-        <input class="btn-info" type="button" value="Configuration" onclick="window.location.href='/config'">
+        <input class="btn-info" type="button" value="Configurator" onclick="window.location.href='/configurator'">
     </div>
     <div class="row">
         <div class="col">
             <h2 class="mt-5">Capture Control</h2>
             <div class="btn-group" role="group" aria-label="Observer Capture Mode Control Buttons">
-              <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" checked="" onclick="setPassive();">
+              <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" checked="" hx-get="{calibratorURL}set_passive">
               <label class="btn btn-outline-primary" for="passive">Passive</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('first');">
-              <label class="btn btn-outline-primary" for="track">First Triangle</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('top');">
-              <label class="btn btn-outline-primary" for="track">Track Up</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('hypos');">
-              <label class="btn btn-outline-primary" for="track">Track Left</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('longs');">
-              <label class="btn btn-outline-primary" for="track">Track Right</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" onclick="setTrack('shorts');">
-              <label class="btn btn-outline-primary" for="track">Track Down</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_first" autocomplete="off" hx-get="{calibratorURL}set_track_first">
+              <label class="btn btn-outline-primary" for="track_first">First (Reset)</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_top" autocomplete="off" hx-get="{calibratorURL}set_track_top">
+              <label class="btn btn-outline-primary" for="track_top">Track Top</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_hypos" autocomplete="off" hx-get="{calibratorURL}set_track_hypos">
+              <label class="btn btn-outline-primary" for="track_hypos">Track Hypos</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_longs" autocomplete="off" hx-get="{calibratorURL}set_track_longs">
+              <label class="btn btn-outline-primary" for="track_longs">Track Longs</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_shorts" autocomplete="off" hx-get="{calibratorURL}set_track_shorts">
+              <label class="btn btn-outline-primary" for="track_shorts">Track Short</label>
             </div>
             <img class="img-fluid border border-primary" src="{calibratorURL}/observer_console" style="border-radius: 50px;">
+            <input type="btn" class="btn btn-secondary" name="commitbtn" id="commit" autocomplete="off" value="Commit Calibration" hx-post"{calibratorURL}/commit_calibration">
         </div>
         <div class="col">
             <div class="row justify-content-center">
@@ -72,6 +53,8 @@
                 {cameraButtons}
             </div>
         </div>
+    </div>
+    <div class="row">
         <div class="col" align="center">
             <div class="row justify-content-center">
                 <h2 class="mt-5">Object Tracker</h2>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <link rel="stylesheet" href="/bootstrap.min.css">
+    <script src="/bootstrap.min.js"></script>
+    <script src="/htmx.min.js"></script>
+
+    <style>
+        table, th, td {
+          border: 1px solid black;
+          padding: 15px;
+        }
+    </style>
+    
+    <title>Observer</title>
+</head>
+<body><div class="container">
+    <h1 align="center">Observer</h1>
+    <div class="container" align="right">
+        <input class="btn-info" type="button" value="Configurator" onclick="window.location.href='/configurator'">
+    </div>
+    <div class="row">
+        <div class="col">
+            <h2 class="mt-5">Capture Control</h2>
+            <div class="btn-group" role="group" aria-label="Observer Capture Mode Control Buttons">
+              <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" checked="" hx-get="{observerURL}set_passive">
+              <label class="btn btn-outline-primary" for="passive">Passive</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" hx-get="{observerURL}set_track">
+              <label class="btn btn-outline-primary" for="track">Track</label>
+            </div>
+            <img class="img-fluid border border-primary" src="{observerURL}observer_console" style="border-radius: 50px;">
+        </div>
+        <div class="col">
+            <h3 class="mt-5">Virtual Map</h3>
+            <img class="img-fluid border border-primary" src="{observerURL}minimap" style="border-radius: 5px;">
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <div class="row justify-content-center">
+                <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
+                <img id="liveCam" class="img-responsive border border-primary bg-primary" src="{observerURL}camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
+            </div>
+            <div class="row justify-content-center">
+                <script>
+                    function liveCameraClick(camNum){{
+                        var header = document.querySelector("#liveCamHeader")
+                        header.innerText = `Live Cameras (Selected ${camNum})`
+                        var img = document.querySelector("#liveCam")
+                        img.src = `{observerURL}/camWithChanges/${camNum}`
+                    }}
+                </script>
+                {cameraButtons}
+            </div>
+        </div>
+        <div class="col" align="center">
+            <div class="row justify-content-center">
+                <h2 class="mt-5">Object Tracker</h2>
+            </div>
+            <div class="row justify-content-center">
+                <div id="changeTable" hx-get="{observerURL}/objects" hx-trigger="every 1s"></div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
