@@ -14,20 +14,18 @@
 <body>
 <div class="container">
     <h1 align="center">Configurator</h1>
-    <div class="container" align="right">
-        <input class="btn-info" type="button" value="Observer" onclick="window.location.href='/'">
-    </div>
     <div class="row" align="center">
-        <div class="col">
-            <input type="button" class="btn-primary" value="Save State" hx-post="{configuratorURL}" hx-swap="none">
+        <div class="col" align="left">
+            <input type="button" class="btn btn-primary" value="Save State" hx-post="{configuratorURL}" hx-swap="none">
+            <input class="btn btn-secondary" type="button" value="Calibrate Cameras" onclick="window.location.href='{configuratorURL}calibrator'">
         </div>
-        <div class="col">
-            <input class="btn-secondary" type="button" value="Calibrate Cameras" onclick="window.location.href='{configuratorURL}calibrator'">
+        <div class="col" align="right">
+            <input class="btn btn-info" type="button" value="Observer" onclick="window.location.href='/'">
         </div>
     </div>
     {cameraConfigRows}
     <div class="container" align="right" style="margin-top: 1rem">
-        <input type="button" class="btn-primary" value="Add Camera" onclick="window.location.href='{configuratorURL}new_camera'">
+        <input type="button" class="btn btn-primary" value="Add Camera" onclick="window.location.href='{configuratorURL}new_camera'">
     </div>
 </div>
 </body>

@@ -23,6 +23,8 @@ ENABLE_CYCLE = True
 DATA_LOCK = threading.Lock()
 
 app = None
+calibrator = Blueprint('calibrator', __name__, template_folder='templates')
+
 
 captureTimer = threading.Timer(0,lambda x: None,())    
 def registerCaptureService(app):
@@ -35,8 +37,9 @@ def registerCaptureService(app):
         with DATA_LOCK:
             if ENABLE_CYCLE:
                 try:
-                    app.cm.cycle()
-                    CONSOLE_OUTPUT = ""
+                    cmOut = app.cm.cycle()
+                    if cmOut is not None:
+                        CONSOLE_OUTPUT = f"({app.cm.cycleCounter%100})-{cmOut}"
                 except Exception as e:
                     print(f"Unrecognized error: {e}")
                     CONSOLE_OUTPUT = e
@@ -55,9 +58,6 @@ def registerCaptureService(app):
     return app
 
 
-calibrator = Blueprint('calibrator', __name__, template_folder='templates')
-
-
 def imageToBase64(img):
     return base64.b64encode(cv2.imencode('.jpg', img)[1]).decode()
 
@@ -65,21 +65,20 @@ def imageToBase64(img):
 def renderConsole():
     while True:
         cam = list(app.cc.cameras.values())[0]
-        shape = (400, 400)
+        shape = (170, 400)
         mid = [int(d / 2) for d in shape]
         zeros = np.zeros(shape, dtype="uint8")
 
         consoleImage = cv2.putText(zeros, f'Cycle {app.cm.cycleCounter}',
             (50, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
+        mode =  f'Mode: {app.cm.mode:7}' + ('' if app.cm.dowel_position is None else f'-{app.cm.dowel_position}')
+        consoleImage = cv2.putText(zeros, mode,
             (50, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'Mode: {app.cm.mode:7} {"(" + app.cm.dowel_position + ")" if app.cm.mode == "track" else ""}',
-            (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'Board State: {app.cm.state:10}',
-            (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        
-        consoleImage = cv2.putText(zeros, f'Last Change',
-            (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
+            (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 2, cv2.LINE_AA)
+        print(f"LO: {CONSOLE_OUTPUT}")
 
         ret, consoleImage = cv2.imencode('.jpg', zeros)
         yield (b'--frame\r\n'
@@ -218,16 +217,26 @@ def controlSetTrack(position):
 @calibrator.route('/commit_calibration')
 def commitCalibration():
     app.cm.buildRealSpaceConverter()
-    CONSOLE_OUTPUT = "Calibration stored"
+    CONSOLE_OUTPUT = f"{app.cm.cycleCounter} - Calibration stored"
     app.cc.saveConfiguration()
     return redirect(url_for('.buildCalibrator'), code=303)
+
+
+def resetCalibrationObserver():
+    with DATA_LOCK:
+        app.cm = CalibrationObserver(app.cc)
+
+
+@calibrator.route('/reset')
+def requestResetCalibrationObserver():
+    resetCalibrationObserver()
+    return "reset successful!", 200
 
 
 @calibrator.route('/')
 def buildCalibrator():
     if type(app.cm) is not CalibrationObserver:
-        with DATA_LOCK:
-            app.cm = CalibrationObserver(app.cc)
+        resetCalibrationObserver()
     with open("templates/Calibrator.html", "r") as f:
         template = f.read()
     cameraButtons = ' '.join([f'''<input type="button" class="btn btn-primary" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
@@ -241,7 +250,7 @@ def buildCalibrator():
 def captureToChangeRow(capture):
     encodedBA = imageToBase64(capture.visual())
     name = "None"
-    objType = "None"
+    realTriangle = {camName: ctp[-1] for camName, ctp in capture.calibTriPts.items()}
     center = ", ".join(["0", "0"])
     health = ""
     numHits = 0
@@ -253,23 +262,7 @@ def captureToChangeRow(capture):
         <div class="row mb-1">
             <div class="col">
                 <div class="row">
-                    <div class="col">
-                        <p>{objType}</p>
-                    </div>
-                    <div class="col">
-                        <p>{name}</p>
-                    </div>
-                </div>
-                <div class="row">
-                    <div class="col">
-                        <p>({center})</p>
-                    </div>
-                    <div class="col">
-                        <p>{health}</p>
-                    </div>
-                </div>
-                <div class="row">
-                    <button class="btn btn-primary" onclick="window.location.href='{url_for('.buildCalibrator')}objectsettings/{capture.oid}'">Edit</button>
+                    <p>Realspace Coord:<br>{realTriangle}</p>
                 </div>
             </div>
             <div class="col">

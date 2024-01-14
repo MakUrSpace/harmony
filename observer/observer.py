@@ -15,45 +15,13 @@ from flask import Flask, Blueprint, render_template, Response, request, make_res
 from traceback import format_exc
 
 from configurator import configurator, setConfiguratorApp
-from calibrator import calibrator, CalibratedObserver, CalibratedCaptureConfiguration
+from calibrator import calibrator, CalibratedObserver, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK
 
 app = None
 
 CONSOLE_OUTPUT = "No Output Yet"
 POOL_TIME = 0.1 #Seconds
 PORT = int(os.getenv("OBSERVER_PORT", "7000"))
-ENABLE_CYCLE = True
-DATA_LOCK = threading.Lock()
-
-captureTimer = threading.Timer(0,lambda x: None,())    
-def registerCaptureService(app):
-    def interrupt():
-        global captureTimer
-        captureTimer.cancel()
-
-    def cycleMachine():
-        global CONSOLE_OUTPUT
-        with DATA_LOCK:
-            if ENABLE_CYCLE:
-                try:
-                    app.cm.cycle()
-                    CONSOLE_OUTPUT = ""
-                except Exception as e:
-                    print(f"Unrecognized error: {e}")
-                    CONSOLE_OUTPUT = e
-        # Set the next timeout to happen
-        captureTimer = threading.Timer(POOL_TIME, cycleMachine, ())
-        captureTimer.start()
-
-    def initialize():
-        global captureTimer
-        captureTimer = threading.Timer(POOL_TIME, cycleMachine, ())
-        captureTimer.start()
-
-    initialize()
-    # When you kill Flask (SIGTERM), cancels the timer
-    atexit.register(interrupt)
-    return app
 
 
 observer = Blueprint('observer', __name__, template_folder='templates')
@@ -66,21 +34,18 @@ def imageToBase64(img):
 def renderConsole():
     while True:
         cam = list(app.cc.cameras.values())[0]
-        shape = (400, 400)
+        shape = (170, 400)
         mid = [int(d / 2) for d in shape]
         zeros = np.zeros(shape, dtype="uint8")
 
         consoleImage = cv2.putText(zeros, f'Cycle {app.cm.cycleCounter}',
             (50, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
-            (50, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'Mode: {app.cm.mode:7}',
-            (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+            (50, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'Board State: {app.cm.state:10}',
+            (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
             (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        
-        consoleImage = cv2.putText(zeros, f'Last Change',
-            (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
 
         ret, consoleImage = cv2.imencode('.jpg', zeros)
         yield (b'--frame\r\n'
@@ -215,14 +180,6 @@ def controlSetTrack():
     return "success"
 
 
-@observer.route('/commit_calibration')
-def commitCalibration():
-    app.cm.buildRealSpaceConverter()
-    CONSOLE_OUTPUT = "Calibration stored"
-    app.cc.saveConfiguration()
-    return redirect(url_for('.buildObserver'), code=303)
-
-
 @observer.route('/reset')
 def resetObserver():
     with DATA_LOCK:
@@ -242,7 +199,8 @@ def buildObserver():
     return template.replace(
         "{defaultCamera}", defaultCam).replace(
         "{cameraButtons}", cameraButtons).replace(
-        "{observerURL}", url_for('.buildObserver'))
+        "{observerURL}", url_for('.buildObserver')).replace(
+        "{configuratorURL}", '/configurator')
 
 
 def captureToChangeRow(capture):
@@ -256,34 +214,16 @@ def captureToChangeRow(capture):
         health += "[x] "
     for i in range(3 - numHits):
         health += "[ ] "
-    changeRow = f"""
-        <div class="row mb-1">
-            <div class="col">
-                <div class="row">
-                    <div class="col">
-                        <p>{objType}</p>
-                    </div>
-                    <div class="col">
-                        <p>{name}</p>
-                    </div>
-                </div>
-                <div class="row">
-                    <div class="col">
-                        <p>({center})</p>
-                    </div>
-                    <div class="col">
-                        <p>{health}</p>
-                    </div>
-                </div>
-                <div class="row">
-                    <button class="btn btn-primary" onclick="window.location.href='{url_for('.buildObserver')}objectsettings/{capture.oid}'">Edit</button>
-                </div>
-            </div>
-            <div class="col">
-                <img class="img-fluid border border-secondary" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
-            </div>
-        </div>
-        <hr class="mt-2 mb-3"/>"""
+    with open("templates/TrackedObjectRow.html") as f:
+        changeRowTemplate = f.read()
+    moveDistance = app.cm.cc.rsc.trackedObjectLastDistance(capture)
+    moveDistance = "None" if moveDistance is None else f"{moveDistance:6.0f} mm"
+    changeRow = changeRowTemplate.replace(
+        "{objectName}", capture.oid).replace(
+        "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.cc.rsc.changeSetToRealCenter(capture)])).replace(
+        "{moveDistance}", moveDistance).replace(
+        "{observerURL}", url_for(".buildObserver")).replace(
+        "{encodedBA}", imageToBase64(capture.visual()))
     return changeRow
 
 
@@ -298,11 +238,83 @@ def buildObjectTable():
 @observer.route('/objects', methods=['GET'])
 def getObjectTable():
     return buildObjectTable()
+    
+    
+@observer.route('/objects/<objectId>', methods=['GET'])
+def getObjectSettings(objectId):
+    cap = None
+    for capture in app.cm.memory:
+        if capture.oid == objectId:
+            cap = capture
+            break
+    if cap is None:
+        return f"{objectId} Not found", 404
+
+    objectName = cap.oid
+    observerURL = url_for(".buildObserver")
+    with open("templates/TrackedObjectUpdater.html") as f:
+        template = f.read()
+    return template.replace(
+        "{observerURL}", observerURL).replace(
+        "{objectName}", cap.oid)
+
+
+@observer.route('/objects/<objectId>', methods=['POST'])
+def updateObjectSettings(objectId):
+    cap = None
+    for capture in app.cm.memory:
+        if capture.oid == objectId:
+            cap = capture
+            break
+    if cap is None:
+        return f"{objectId} Not found", 404
+    newName = request.form["objectName"]
+    if newName != cap.oid:
+        cap.oid = newName
+    return f"""<div id="objectTable" hx-get="{url_for(".buildObserver")}/objects" hx-trigger="every 1s"></div>"""
+    
+    
+@observer.route('/objects/<objectId>', methods=['DELETE'])
+def deleteObjectSettings(objectId):
+    app.cm.deleteObject(objectId)
+    return f"""<div id="objectTable" hx-get="{url_for(".buildObserver")}/objects" hx-trigger="every 1s"></div>"""
+
+
+@observer.route('/object_distances/<objectId>', methods=['GET'])
+def getObjectDistances(objectId):
+    cap = None
+    for capture in app.cm.memory:
+        if capture.oid == objectId:
+            cap = capture
+            break
+    if cap is None:
+        return f"{objectId} Not found", 404
+
+    with open("templates/ObjectDistanceCard.html") as f:
+        cardTemplate = f.read()
+    objDistCards = []
+    for target in app.cm.memory:
+        if target.oid == cap.oid:
+            continue
+        else:
+            objDistCards.append(cardTemplate.replace(
+                "{targetName}", target.oid).replace(
+                "{encodedBA}", imageToBase64(target.visual())).replace(
+                "{objectDistance}", f"{app.cm.cc.rsc.distanceBetweenObjects(cap, target):6.0f} mm"))
+                
+    with open("templates/ObjectDistanceTable.html") as f:
+        template = f.read()
+    return template.replace(
+        "{observerURL}", url_for(".buildObserver")).replace(
+        "{objectName}", cap.oid).replace(
+        "{objectDistanceCards}", "\n".join(objDistCards))
 
 
 def minimapGenerator():
     while True:
-        camImage = app.cm.cc.buildMiniMap(blueObjects=app.cm.memory)
+        camImage = app.cm.cc.buildMiniMap(
+            blueObjects=app.cm.memory,
+            greenObjects=[app.cm.lastClassification] if app.cm.lastClassification is not None else None)
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')

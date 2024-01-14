@@ -23,14 +23,14 @@ def buildConfigurator():
         optionValues = f"""<option value="field" selected>Game Field</option><option value="dice">Dice</option>"""
         cameraConfigRows.append(f"""
             <div class="row justify-content-center text-center">
-                <h3 class="mt-5">Camera {cam.camName} <input type="button" value="Delete" class="btn-error" hx-post="{url_for('.config')}delete_cam/{cam.camName}" hx-swap="outerHTML"></h3>
+                <h3 class="mt-5">Camera {cam.camName} <input type="button" value="Delete" class="btn btn-danger" hx-post="{url_for('.config')}delete_cam/{cam.camName}" hx-swap="outerHTML"></h3>
                 <img src="{url_for('.config')}camera/{cam.camName}" title="{cam.camName} Capture" height="375" id="cam{cam.camName}" onclick="camClickListener('{cam.camName}', event)">
                 <label for="az">Active Zone</label><br>
                 <div class="container">
                     <div class="row">
                         <div class="col">
                             <input type="text" name="az" id="cam{cam.camName}_ActiveZone" value="{activeZone}" size="50" hx-post="{url_for('.config')}cam{cam.camName}_activezone" hx-swap="none">   
-                            <input type="button" name="clearCam{cam.camName}AZ" value="Clear AZ" onclick="clearCamAZ('{cam.camName}', event)">
+                            <input type="button" class="btn btn-secondary" name="clearCam{cam.camName}AZ" value="Clear AZ" onclick="clearCamAZ('{cam.camName}', event)">
                         </div>
                         <div class="col">    
                             <label>Camera Type</label>
@@ -113,7 +113,7 @@ def updateCamType(camName):
 def getNewCameraForm():
     with open("templates/NewCamera.html", "r") as f:
         template = f.read()
-    return template
+    return template.replace("{configuratorURL}", url_for(".config"))
 
 
 @configurator.route('/new_camera', methods=['POST'])
