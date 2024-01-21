@@ -18,7 +18,8 @@
     
     <title>Observer</title>
 </head>
-<body><div class="container">
+<body>
+<div class="container">
     <h1 align="center">Observer</h1>
     <div class="container">
         <div class="row">
@@ -33,46 +34,41 @@
     <div class="row">
         <div class="col" style="min-width: 500px">
             <h2 class="mt-5">Capture Control</h2>
-            <div class="btn-group" role="group" aria-label="Observer Capture Mode Control Buttons">
-              <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" checked="" hx-get="{observerURL}set_passive">
-              <label class="btn btn-outline-primary" for="passive">Passive</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" hx-get="{observerURL}set_track">
-              <label class="btn btn-outline-primary" for="track">Track</label>
+            <div class="container" hx-get="{observerURL}get_mode_controller" hx-trigger="every 1.5s" id="modeController">
             </div>
             <div class="container">
-                <img class="img-fluid border border-primary" src="{observerURL}observer_console" style="border-radius: 50px;">
+                <img class="img-fluid border border-info border-3" src="{observerURL}observer_console" style="border-radius: 50px; border-width: 3">
             </div>
-            <h3 class="mt-5">Virtual Map</h3>
-            <div class="container">
-                <img class="img-fluid border border-primary" src="{observerURL}minimap" style="border-radius: 5px;">
+
+            <div class="container justify-content-center">
+                <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
+                <img id="liveCam" class="img-responsive border border-3 border-primary bg-primary" src="{observerURL}camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
+            </div>
+            <div class="container justify-content-center">
+                <script>
+                function liveCameraClick(camNum){{
+                    var header = document.querySelector("#liveCamHeader")
+                    header.innerText = `Live Cameras (Selected ${camNum})`
+                    var img = document.querySelector("#liveCam")
+                    img.src = `{observerURL}/camWithChanges/${camNum}`
+                }}
+                </script>
+                {cameraButtons}
             </div>
         </div>
-        <div class="col" align="center" style="min-width: 500px">
+	<div class="col" align="center" style="min-width: 500px">
             <div class="row justify-content-center">
                 <h2 class="mt-5">Object Tracker</h2>
             </div>
             <hr class="mt-2 mb-3">
             <div class="row justify-content-center">
                 <div id="objectInteractor" class="container">
-                    <div id="objectTable" hx-get="{observerURL}/objects" hx-trigger="every 1s"></div>
+                    <div id="objectTable" hx-get="{observerURL}objects" hx-trigger="every 1s"></div>
                 </div>
             </div>
-            <div class="row justify-content-center">
-                <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
-                <img id="liveCam" class="img-responsive bg-primary" src="{observerURL}camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
-            </div>
-            <div class="row justify-content-center">
-                <script>
-                    function liveCameraClick(camNum){{
-                        var header = document.querySelector("#liveCamHeader")
-                        header.innerText = `Live Cameras (Selected ${camNum})`
-                        var img = document.querySelector("#liveCam")
-                        img.src = `{observerURL}/camWithChanges/${camNum}`
-                    }}
-                </script>
-                {cameraButtons}
-            </div>
         </div>
+    </div>
+    <div class="row">
     </div>
 </div>
 </body>

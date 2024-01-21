@@ -109,6 +109,8 @@ def genCameraWithChangesView(camName):
 
 @observer.route('/camWithChanges/<camName>')
 def cameraViewWithChangesResponse(camName):
+    if camName == "VirtualMap":
+        return Response(minimapGenerator(), mimetype='multipart/x-mixed-replace; boundary=frame')
     return Response(genCameraWithChangesView(camName), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
@@ -166,25 +168,42 @@ def combinedCamerasWithChangesResponse():
     return Response(genCombinedCameraWithChangesView(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+@observer.route('/reset')
+def resetObserver():
+    with DATA_LOCK:
+        app.cm = CalibratedObserver(app.cc)
+    return 'success'
+
+
 @observer.route('/set_passive')
 def controlSetPassive():
     with DATA_LOCK:
         app.cm.passiveMode()
-    return "success"
+    return buildModeController()
         
 
 @observer.route('/set_track')
 def controlSetTrack():
     with DATA_LOCK:
         app.cm.trackMode()
-    return "success"
+    return buildModeController()
 
 
-@observer.route('/reset')
-def resetObserver():
-    with DATA_LOCK:
-        app.cm = CalibratedObserver(app.cc)
-    return 'success'
+def buildModeController():
+    return """  <div class="btn-group" role="group" aria-label="Observer Capture Mode Control Buttons">
+                  <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" {passiveChecked}hx-get="{observerURL}set_passive" hx-target="#modeController">
+                  <label class="btn btn-outline-primary" for="passive">Passive</label>
+                  <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" {activeChecked}hx-get="{observerURL}set_track" hx-target="#modeController">
+                  <label class="btn btn-outline-primary" for="track">Track</label>
+                </div>""".replace(
+        "{observerURL}", url_for(".buildObserver")).replace(
+        "{passiveChecked}", 'checked=""' if app.cm.mode == "passive" else '').replace(
+        "{activeChecked}", 'checked=""' if app.cm.mode == "track" else '')
+
+
+@observer.route('/get_mode_controller')
+def getModeController():
+    return buildModeController()
 
 
 @observer.route('/')
@@ -194,7 +213,7 @@ def buildObserver():
             app.cm = CalibratedObserver(app.cc)
     with open("templates/Observer.html", "r") as f:
         template = f.read()
-    cameraButtons = ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
+    cameraButtons = '<input type="button" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">' + ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
     defaultCam = [camName for camName, cam in app.cc.cameras.items()][0]
     return template.replace(
         "{defaultCamera}", defaultCam).replace(
@@ -323,6 +342,11 @@ def minimapGenerator():
 @observer.route('/minimap')
 def minimapResponse():
     return Response(minimapGenerator(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+def setObserverApp(newApp):
+    global app
+    app = newApp
 
 
 if __name__ == "__main__":

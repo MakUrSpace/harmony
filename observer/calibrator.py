@@ -203,7 +203,7 @@ def combinedCamerasWithChangesResponse():
 def controlSetPassive():
     with DATA_LOCK:
         app.cm.passiveMode()
-    return "success"
+    return buildModeController()
         
 
 @calibrator.route('/set_track_<position>')
@@ -211,13 +211,45 @@ def controlSetTrack(position):
     assert position in ['first', 'top', 'hypos', 'longs', 'shorts'], f"Unrecognzed dowel position: {position}"
     with DATA_LOCK:
         app.cm.trackMode(dowel_position=position)
-    return "success"
+    return buildModeController()
+
+
+def buildModeController():
+    return """
+            <div class="btn-group" role="group" aria-label="Observer Capture Mode Control Buttons">
+              <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" {passiveChecked}hx-get="{calibratorURL}set_passive">
+              <label class="btn btn-outline-primary" for="passive">Passive</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_first" autocomplete="off" {firstChecked}hx-get="{calibratorURL}set_track_first">
+              <label class="btn btn-outline-primary" for="track_first">First (Reset)</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_top" autocomplete="off" {topChecked}hx-get="{calibratorURL}set_track_top">
+              <label class="btn btn-outline-primary" for="track_top">Track Top</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_hypos" autocomplete="off" {hyposChecked}hx-get="{calibratorURL}set_track_hypos">
+              <label class="btn btn-outline-primary" for="track_hypos">Track Hypos</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_longs" autocomplete="off" {longsChecked}hx-get="{calibratorURL}set_track_longs">
+              <label class="btn btn-outline-primary" for="track_longs">Track Longs</label>
+              <input type="radio" class="btn-check" name="btnradio" id="track_shorts" autocomplete="off" {shortsChecked}hx-get="{calibratorURL}set_track_shorts">
+              <label class="btn btn-outline-primary" for="track_shorts">Track Short</label>
+            </div>""".replace(
+        "{calibratorURL}", url_for(".buildCalibrator")).replace(
+        "{passiveChecked}", 'checked=""' if app.cm.mode == "passive" else '').replace(
+        "{firstChecked}", 'checked=""' if app.cm.mode == "track" and app.cm.dowel_position == "first" else '').replace(
+        "{topChecked}", 'checked=""' if app.cm.mode == "track" and app.cm.dowel_position == "top" else '').replace(
+        "{hyposChecked}", 'checked=""' if app.cm.mode == "track" and app.cm.dowel_position == "hypos" else '').replace(
+        "{longsChecked}", 'checked=""' if app.cm.mode == "track" and app.cm.dowel_position == "longs" else '').replace(
+        "{shortsChecked}", 'checked=""' if app.cm.mode == "track" and app.cm.dowel_position == "shorts" else '')
+
+
+@calibrator.route('/get_mode_controller')
+def getModeController():
+    return buildModeController()
 
 
 @calibrator.route('/commit_calibration')
 def commitCalibration():
     app.cm.buildRealSpaceConverter()
-    CONSOLE_OUTPUT = f"{app.cm.cycleCounter} - Calibration stored"
+    with DATA_LOCK:
+        global CONSOLE_OUTPUT
+        CONSOLE_OUTPUT = f"{app.cm.cycleCounter} - Calibration stored"
     app.cc.saveConfiguration()
     return redirect(url_for('.buildCalibrator'), code=303)
 

@@ -43,23 +43,11 @@
         </div>
         <div class="col">
             <h2 class="mt-5">Capture Control</h2>
-            <div class="btn-group" role="group" aria-label="Observer Capture Mode Control Buttons">
-              <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" checked="" hx-get="{calibratorURL}set_passive">
-              <label class="btn btn-outline-primary" for="passive">Passive</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track_first" autocomplete="off" hx-get="{calibratorURL}set_track_first">
-              <label class="btn btn-outline-primary" for="track_first">First (Reset)</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track_top" autocomplete="off" hx-get="{calibratorURL}set_track_top">
-              <label class="btn btn-outline-primary" for="track_top">Track Top</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track_hypos" autocomplete="off" hx-get="{calibratorURL}set_track_hypos">
-              <label class="btn btn-outline-primary" for="track_hypos">Track Hypos</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track_longs" autocomplete="off" hx-get="{calibratorURL}set_track_longs">
-              <label class="btn btn-outline-primary" for="track_longs">Track Longs</label>
-              <input type="radio" class="btn-check" name="btnradio" id="track_shorts" autocomplete="off" hx-get="{calibratorURL}set_track_shorts">
-              <label class="btn btn-outline-primary" for="track_shorts">Track Short</label>
+            <div class="container" id="modeController" hx-get="{calibratorURL}get_mode_controller" hx-trigger="every 1.5s">
             </div>
             <div class="container">
                 <div class="row">
-                    <img class="img-fluid border border-primary" src="{calibratorURL}/observer_console" style="border-radius: 50px;">
+                    <img class="img-fluid border border-primary" src="{calibratorURL}observer_console" style="border-radius: 50px;">
                 </div>
                 <div class="row">
                     <input type="button" class="btn btn-success" name="commitbtn" id="commitbtn" value="Commit Calibration" hx-get="{calibratorURL}/commit_calibration">
@@ -73,7 +61,7 @@
                 <h2 class="mt-5">Calibration Object Table</h2>
             </div>
             <div class="row justify-content-center">
-                <div id="changeTable" hx-get="{calibratorURL}/objects" hx-trigger="every 1s"></div>
+                <div id="changeTable" hx-get="{calibratorURL}objects" hx-trigger="every 1s"></div>
             </div>
         </div>
     </div>
