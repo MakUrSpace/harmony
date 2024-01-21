@@ -1,0 +1,16 @@
+<h1>Updating {objectName}</h1>
+<div class="container border border-primary">
+    <div class="row" align="right">
+        <input class="btn btn-info" type="button" value="Return to table" hx-target="#objectInteractor" hx-get='{observerURL}objects'">
+    </div>
+    <div class="row">
+        <form hx-post="{observerURL}objects/{objectName}" hx-target="#objectInteractor">
+            <label for="objectName">Name</label>
+            <input type="text" class="form-control" name="objectName" placeholder="{objectName}"><br>
+            <input type="submit" class="btn btn-primary" value="Update">
+        </form>
+    </div>
+    <div class="row" align="right">
+        <input class="btn btn-info" type="button" value="Delete Object" hx-target="#objectInteractor" hx-delete='{observerURL}objects/{objectName}'">
+    </div>
+</div>

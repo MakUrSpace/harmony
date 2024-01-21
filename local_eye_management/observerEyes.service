@@ -3,7 +3,7 @@ Description=DMA Observer Camera Service
 After=cam0-camera-streamer
 
 [Service]
-ExecStart=/usr/bin/python3 /home/musengdir/prj/dma/observer/observerEyes.py
+ExecStart=/usr/bin/python3 /home/musengdir/prj/dma/local_eye_management/observerEyes.py
 Restart=always
 RestartSec=10                       
 StandardOutput=syslog               
