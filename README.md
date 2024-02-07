@@ -26,23 +26,15 @@ Harmony integrates tabletop gaming utilities into a game recording and referreei
 Any USB cameras need to be setup as IP cameras for Harmony to access them. Harmony suggests [ayufan's camera-streamer](https://github.com/ayufan/camera-streamer) and offers systemd service files for it.
 
 #### Install camera-streamer
-Instructions for debian package install from [https://github.com/ayufan/camera-streamer/releases/tag/v0.2.6](https://github.com/ayufan/camera-streamer/releases/tag/v0.2.6)
+Instructions for debian package install from [https://github.com/ayufan/camera-streamer/releases/tag/v0.2.6](https://github.com/ayufan/camera-streamer/releases/tag/v0.2.8)
 ```
-https://github.com/ayufan/camera-streamer/releases/tag/v0.2.6if [[ -e /etc/default/raspberrypi-kernel ]]; then
-  PACKAGE=camera-streamer-raspi_0.2.6.bullseye_$(dpkg --print-architecture).deb
+if [[ -e /etc/default/raspberrypi-kernel ]]; then
+  PACKAGE=camera-streamer-raspi_0.2.8.bullseye_$(dpkg --print-architecture).deb
 else
-  PACKAGE=camera-streamer-generic_0.2.6.bullseye_$(dpkg --print-architecture).deb
+  PACKAGE=camera-streamer-generic_0.2.8.bullseye_$(dpkg --print-architecture).deb
 fi
-wget "https://github.com/ayufan/camera-streamer/releases/download/v0.2.6/$PACKAGE"
-sudo apt install "$PWD/$PACKAGE](https://github.com/ayufan/camera-streamer/releases/tag/v0.2.6)
-```
-https://github.com/ayufan/camera-streamer/releases/tag/v0.2.6if [[ -e /etc/default/raspberrypi-kernel ]]; then
-  PACKAGE=camera-streamer-raspi_0.2.6.bullseye_$(dpkg --print-architecture).deb
-else
-  PACKAGE=camera-streamer-generic_0.2.6.bullseye_$(dpkg --print-architecture).deb
-fi
-wget "https://github.com/ayufan/camera-streamer/releases/download/v0.2.6/$PACKAGE"
-sudo apt install "$PWD/$PACKAGE"
+wget "https://github.com/ayufan/camera-streamer/releases/download/v0.2.8/$PACKAGE"
+sudo apt install "$PWD/$PACKAGE](https://github.com/ayufan/camera-streamer/releases/tag/v0.2.8)
 ```
 
 #### Configure Cameras
@@ -57,3 +49,7 @@ Harmony is built on:
 * [CogDB](https://cogdb.io/intro/)
 * [OpenCV](https://opencv.org/)
 
+### Install dependencies
+* `sudo apt-get install build-essential cmake pkg-config libjpeg-dev libtiff5-dev libjasper-dev libpng-dev libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev libfontconfig1-dev libcairo2-dev libgdk-pixbuf2.0-dev libpango1.0-dev libgtk2.0-dev libgtk-3-dev libatlas-base-dev gfortran libhdf5-dev libhdf5-serial-dev libhdf5-103 python3-pyqt5 python3-dev graphviz libgraphviz-dev -y`
+
+#### Install graphs

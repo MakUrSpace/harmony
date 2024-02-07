@@ -1,0 +1,10 @@
+requests
+flask
+ipynb
+pyzbar
+opencv-python
+opencv-contrib-python
+imutils
+matplotlib
+ipython-autotime
+uvicorn

@@ -3,9 +3,8 @@ Description=camera-streamer web camera
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/camera-streamer \
+ExecStart=/usr/bin/camera-streamer \
   --camera-path=/dev/video0 \
-  --camera-format=JPEG \
   --camera-width=1920 --camera-height=1080 \
   --camera-fps=30 \
   ; use two memory buffers to optimise usage
@@ -16,7 +15,8 @@ ExecStart=/usr/local/bin/camera-streamer \
   --camera-video.height=720 \
   ; the stream is 853x480
   --camera-stream.height=480 \
-  --http-port=8080
+  --http-port=8080 \
+  --http-listen=0.0.0.0
 
 
 DynamicUser=yes
