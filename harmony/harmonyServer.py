@@ -240,17 +240,65 @@ def captureToChangeRow(capture):
     return changeRow
 
 
-def buildObjectTable():
+def buildObjectTable(filter=None):
     changeRows = []
     print(f"Aware of {len(app.cm.memory)} objects")
     for capture in app.cm.memory:
+        if filter is not None and getattr(capture, 'objectType', None) != filter:
+            continue
         changeRows.append(captureToChangeRow(capture))
     return " ".join(changeRows)
 
 
 @harmony.route('/objects', methods=['GET'])
 def getObjectTable():
-    return buildObjectTable()
+    filter = request.args.get('filter', None)
+    return buildObjectTable(filter=filter)
+
+
+def buildObjectsFilter(filter=None):
+    assert filter in [None, 'None', 'Terrain', 'Building', 'Unit'], f"Unrecognized filter type: {filter}"
+
+    noneSelected, terrainSelected, buildingSelected, unitSelected = "", "", "", ""
+    if filter == 'None' or filter is None:
+        filterQuery = ''
+        noneSelected = ' checked="checked"'
+    elif filter == 'Terrain':
+        filterQuery = '?filter=Terrain'
+        terrainSelected = ' checked="checked"'
+    elif filter == 'Building':
+        filterQuery = '?filter=Building'
+        buildingSelected = ' checked="checked"'
+    elif filter == 'Unit':
+        filterQuery = '?filter=Unit'
+        unitSelected = ' checked="checked"'
+        
+    template = """
+    <div id="objectFilter"class="btn-group" role="group" aria-label="Objects Table Filter Select Buttons">
+      <input type="radio" class="btn-check" name="objectFilterradio" id="None" autocomplete="off" {noneSelected} hx-get="{harmonyURL}objects_filter" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="None">None</label>
+      <input type="radio" class="btn-check" name="objectFilterradio" id="Terrain" autocomplete="off" {terrainSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Terrain" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="Terrain">Terrain</label>
+      <input type="radio" class="btn-check" name="objectFilterradio" id="Building" autocomplete="off" {buildingSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Building" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="Building">Building</label>
+      <input type="radio" class="btn-check" name="objectFilterradio" id="Unit" autocomplete="off" {unitSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Unit" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="Unit">Unit</label>
+    </div>
+    <div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>"""
+    template = template.replace(
+        "{harmonyURL}", url_for(".buildHarmony")).replace(
+        "{filter}", filterQuery).replace(
+        "{noneSelected}", noneSelected).replace(
+        "{terrainSelected}", terrainSelected).replace(
+        "{buildingSelected}", buildingSelected).replace(
+        "{unitSelected}", unitSelected).replace(
+        "{objectRows}", buildObjectTable(filter))
+    return template
+
+
+@harmony.route('/objects_filter', methods=['GET'])
+def getObjectTableContainer():
+    return buildObjectsFilter(request.args.get('objectFilter', None))
     
     
 @harmony.route('/objects/<objectId>', methods=['GET'])
@@ -284,13 +332,39 @@ def updateObjectSettings(objectId):
     newName = request.form["objectName"]
     if newName != cap.oid:
         cap.oid = newName
-    return f"""<div id="objectTable" hx-get="{url_for(".buildHarmony")}/objects" hx-trigger="every 1s"></div>"""
+    for key, value in request.form.items():
+        if key == 'objectName':
+            continue
+        setattr(cap, key, value)
+    return buildObjectsFilter()
     
     
 @harmony.route('/objects/<objectId>', methods=['DELETE'])
 def deleteObjectSettings(objectId):
     app.cm.deleteObject(objectId)
-    return f"""<div id="objectTable" hx-get="{url_for(".buildHarmony")}/objects" hx-trigger="every 1s"></div>"""
+    return buildObjectsFilter()
+
+
+@harmony.route('/objects/<objectId>/type', methods=['POST'])
+def updateObjectType(objectId):
+    newType = request.form["objectType"]
+    cap = None
+    for capture in app.cm.memory:
+        if capture.oid == objectId:
+            cap = capture
+            break
+    if newType == "Terrain":
+        settings = {"Rating": getattr(cap, "Rating", "1"), "Elevation": getattr(cap, "Elevation", "5")}
+    elif newType == "Building":
+        settings = {"Class": getattr(cap, "Class", "Residential"), "Elevation": getattr(cap, "Elevation", "5")}
+    elif newType == "Unit":
+        settings = {"Class": getattr(cap, "Class", "Atlas")}
+    else:
+        return f"Invalid Object Type Request", 405
+    return "<br>".join([
+        f"""<label for="{key}">{key}</label><input type="text" class="form-control" name="{key}" value="{value}">"""
+        for key, value in settings.items()])
+    
 
 
 @harmony.route('/object_distances/<objectId>', methods=['GET'])
@@ -350,7 +424,6 @@ if __name__ == "__main__":
     app = Flask(__name__)
     app.cc = CalibratedCaptureConfiguration()
     app.cc.capture()
-    app.register_blueprint(observer, url_prefix='/observer')
     app.register_blueprint(configurator, url_prefix='/configurator')
     app.register_blueprint(harmony, url_prefix='/harmony')
     app.cm = CalibratedObserver(app.cc)

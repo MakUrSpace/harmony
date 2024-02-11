@@ -63,7 +63,7 @@
             <hr class="mt-2 mb-3">
             <div class="row justify-content-center">
                 <div id="objectInteractor" class="container">
-                    <div id="objectTable" hx-get="{harmonyURL}objects" hx-trigger="every 1s"></div>
+                    <div id="objectFilterRetriever" hx-get="{harmonyURL}objects_filter" hx-trigger="every 1s" hx-target="#objectInteractor"></div>
                 </div>
             </div>
         </div>

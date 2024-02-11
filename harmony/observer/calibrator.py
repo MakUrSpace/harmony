@@ -78,7 +78,6 @@ def renderConsole():
             (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
             (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 2, cv2.LINE_AA)
-        print(f"LO: {CONSOLE_OUTPUT}")
 
         ret, consoleImage = cv2.imencode('.jpg', zeros)
         yield (b'--frame\r\n'
