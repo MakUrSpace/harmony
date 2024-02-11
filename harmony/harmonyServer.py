@@ -302,7 +302,7 @@ def getObjectTableContainer():
     
     
 @harmony.route('/objects/<objectId>', methods=['GET'])
-def getObjectSettings(objectId):
+def getObject(objectId):
     cap = None
     for capture in app.cm.memory:
         if capture.oid == objectId:
@@ -312,12 +312,12 @@ def getObjectSettings(objectId):
         return f"{objectId} Not found", 404
 
     objectName = cap.oid
-    harmonyURL = url_for(".buildHarmony")
     with open("harmony_templates/TrackedObjectUpdater.html") as f:
         template = f.read()
     return template.replace(
-        "{harmonyURL}", harmonyURL).replace(
-        "{objectName}", cap.oid)
+        "{harmonyURL}", url_for(".buildHarmony")).replace(
+        "{objectName}", cap.oid).replace(
+        "{objectSettings}", buildObjectSettings(cap))
 
 
 @harmony.route('/objects/<objectId>', methods=['POST'])
@@ -345,6 +345,54 @@ def deleteObjectSettings(objectId):
     return buildObjectsFilter()
 
 
+def buildObjectSettings(obj):
+    objType = getattr(obj, 'objectType', 'None')
+    terrainSelected, buildingSelected, unitSelected = '', '', ''
+    if objType == "Terrain":
+        settings = {"Rating": getattr(obj, "Rating", "1"), "Elevation": getattr(obj, "Elevation", "5")}
+        terrainSelected = " selected='selected'"
+    elif objType == "Building":
+        settings = {"Class": getattr(obj, "Class", "Residential"), "Elevation": getattr(obj, "Elevation", "5")}
+        buildingSelected = " selected='selected'"
+    elif objType == "Unit":
+        settings = {"Class": getattr(obj, "Class", "Atlas")}
+        unitSelected = " selected='selected'"
+    else:
+        settings = {}
+
+    objectSettings = "<br>".join([
+        f"""<label for="{key}">{key}</label><input type="text" class="form-control" name="{key}" value="{value}">"""
+        for key, value in settings.items()])
+
+    return """
+    <select name="objectType" id="objectType" hx-target="#objectSettings" hx-post='{harmonyURL}objects/{objectName}/type'>
+      <option value="None">None</option>
+      <option value="Terrain" {terrainSelected}>Terrain</option>
+      <option value="Building" {buildingSelected}>Building</option>
+      <option value="Unit" {unitSelected}>Unit</option>
+    </select><br>
+    {objectSettings}
+    """.replace(
+        "{harmonyURL}", url_for(".buildHarmony")).replace(
+        "{objectName}", obj.oid).replace(
+        "{objectSettings}", objectSettings).replace(
+        "{terrainSelected}", terrainSelected).replace(
+        "{buildingSelected}", buildingSelected).replace(
+        "{unitSelected}", unitSelected)
+
+
+@harmony.route('/objects/<objectId>/settings', methods=['GET'])
+def getObjectSettings(objectId):
+    cap = None
+    for capture in app.cm.memory:
+        if capture.oid == objectId:
+            cap = capture
+            break
+    if cap is None:
+        return 404
+    return buildObjectSettings(cap)
+
+
 @harmony.route('/objects/<objectId>/type', methods=['POST'])
 def updateObjectType(objectId):
     newType = request.form["objectType"]
@@ -353,17 +401,14 @@ def updateObjectType(objectId):
         if capture.oid == objectId:
             cap = capture
             break
-    if newType == "Terrain":
-        settings = {"Rating": getattr(cap, "Rating", "1"), "Elevation": getattr(cap, "Elevation", "5")}
-    elif newType == "Building":
-        settings = {"Class": getattr(cap, "Class", "Residential"), "Elevation": getattr(cap, "Elevation", "5")}
-    elif newType == "Unit":
-        settings = {"Class": getattr(cap, "Class", "Atlas")}
-    else:
-        return f"Invalid Object Type Request", 405
-    return "<br>".join([
-        f"""<label for="{key}">{key}</label><input type="text" class="form-control" name="{key}" value="{value}">"""
-        for key, value in settings.items()])
+    if cap is None:
+        return 404
+
+    assert newType in ["None", "Terrain", "Building", "Unit"], f"Unrecognized object type: {newType}"
+
+    with DATA_LOCK:
+        cap.objectType = newType
+    return buildObjectSettings(cap)
     
 
 

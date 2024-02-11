@@ -8,13 +8,7 @@
             <label for="objectName">Name</label>
             <input type="text" class="form-control" name="objectName" value="{objectName}"><br>
             <label for="objectType">Type</label>
-            <select name="objectType" id="objectType" hx-target="#objectSettings" hx-post='{harmonyURL}objects/{objectName}/type'>
-              <option value="None">None</option>
-              <option value="Terrain">Terrain</option>
-              <option value="Building">Building</option>
-              <option value="Unit">Unit</option>
-            </select><br>
-            <div id="objectSettings"></div>
+            <div id="objectSettings">{objectSettings}</div>
             <input type="submit" class="btn btn-primary" value="Update">
         </form>
     </div>
