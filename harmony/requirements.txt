@@ -1,5 +1,6 @@
 requests
 flask
+gunicorn
 ipynb
 pyzbar
 opencv-python

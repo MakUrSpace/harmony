@@ -19,6 +19,71 @@ from observer.calibrator import calibrator, CalibratedObserver, CalibratedCaptur
 
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
+ROUND = 0
+
+
+class GameState:
+    states = ["Movement", "Declare", "Resolve"]
+    state = "Movement"
+    round = 0
+
+    @classmethod
+    def reset(cls):
+        cls.round = 0
+        cls.state = "Movement"
+
+    @classmethod
+    def nextState(cls):
+        currentState = cls.state
+        newState = currentState
+        if newState == "Movement":
+            newState = "Declare"
+        elif newState == "Declare":
+            newState = "Resolve"
+        elif newState == "Resolve":
+            newState = "Movement"
+            cls.round += 1
+        cls.state = newState
+
+    @classmethod
+    def gameStateButton(cls):
+        gs = cls.state
+        if gs == "Movement":
+            button = """<input type="button" class="btn btn-info" name="commitMovement" id="passive" hx-get="{harmonyURL}commit_movement" hx-swap="outerHTML" value="Commit Movement">"""
+        elif gs == "Declare":
+            button = """<input type="button" class="btn btn-info" name="resolveActions" id="passive" hx-get="{harmonyURL}declare_actions" hx-swap="outerHTML" value="Declare Actions">"""
+        elif gs == "Resolve":
+            button = """<input type="button" class="btn btn-danger" name="resolveActions" id="passive" hx-get="{harmonyURL}resolve_actions" hx-swap="outerHTML" value="Resolve Actions">"""
+        return button.replace("{harmonyURL}", url_for(".buildHarmony"))
+
+
+@harmony.route('/get_game_controller')
+def getGameController():
+    return GameState.gameStateButton()
+
+
+@harmony.route('/commit_movement', methods=['GET'])
+def commitMovement():
+    with DATA_LOCK:
+        app.cm.passiveMode()
+    GameState.nextState()
+    return GameState.gameStateButton()
+
+
+@harmony.route('/declare_actions', methods=['GET'])
+def declareActions():
+    with DATA_LOCK:
+        app.cm.passiveMode()
+    GameState.nextState()
+    return GameState.gameStateButton()
+
+
+@harmony.route('/resolve_actions', methods=['GET'])
+def resolveActions():
+    with DATA_LOCK:
+        app.cm.trackMode()
+    GameState.nextState()
+    return GameState.gameStateButton()
 
 
 def imageToBase64(img):
@@ -28,7 +93,7 @@ def imageToBase64(img):
 def renderConsole():
     while True:
         cam = list(app.cc.cameras.values())[0]
-        shape = (170, 400)
+        shape = (200, 400)
         mid = [int(d / 2) for d in shape]
         zeros = np.zeros(shape, dtype="uint8")
 
@@ -40,6 +105,8 @@ def renderConsole():
             (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
             (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        consoleImage = cv2.putText(zeros, f'Round: {GameState.round:3}-{GameState.state}',
+            (50, 185), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
 
         ret, consoleImage = cv2.imencode('.jpg', zeros)
         yield (b'--frame\r\n'
@@ -166,6 +233,8 @@ def combinedCamerasWithChangesResponse():
 def resetharmony():
     with DATA_LOCK:
         app.cm = CalibratedObserver(app.cc)
+        app.gm = GameState
+        app.gm.reset()
     return 'success'
 
 
@@ -205,6 +274,8 @@ def buildHarmony():
     if type(app.cm) is not CalibratedObserver:
         with DATA_LOCK:
             app.cm = CalibratedObserver(app.cc)
+            app.gm = GameState
+            app.gm.reset()
     with open("harmony_templates/Harmony.html", "r") as f:
         template = f.read()
     cameraButtons = '<input type="button" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">' + ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
@@ -412,8 +483,8 @@ def updateObjectType(objectId):
     
 
 
-@harmony.route('/object_distances/<objectId>', methods=['GET'])
-def getObjectDistances(objectId):
+@harmony.route('/object_actions/<objectId>', methods=['GET'])
+def getObjectActions(objectId):
     cap = None
     for capture in app.cm.memory:
         if capture.oid == objectId:
@@ -422,24 +493,32 @@ def getObjectDistances(objectId):
     if cap is None:
         return f"{objectId} Not found", 404
 
-    with open("harmony_templates/ObjectDistanceCard.html") as f:
+    with open("harmony_templates/ObjectActionCard.html") as f:
         cardTemplate = f.read()
-    objDistCards = []
+    objActCards = []
     for target in app.cm.memory:
         if target.oid == cap.oid:
             continue
         else:
-            objDistCards.append(cardTemplate.replace(
+            objActCards.append(cardTemplate.replace(
+                "{harmonyURL}", url_for(".buildHarmony")).replace(
+                "{objectName}", cap.oid).replace(
                 "{targetName}", target.oid).replace(
                 "{encodedBA}", imageToBase64(target.visual())).replace(
                 "{objectDistance}", f"{app.cm.cc.rsc.distanceBetweenObjects(cap, target):6.0f} mm"))
-                
-    with open("harmony_templates/ObjectDistanceTable.html") as f:
+
+    objActCards.append("""
+    <div class="row mb-1 border border-secondary border-2">
+        <input class="btn btn-danger" value="Take No Action" id="no_action" hx-post="{harmonyURL}no_action/{objectId}">
+    </div>
+    """.replace("{harmonyURL}", url_for(".buildHarmony")).replace("{objectName}", cap.oid))
+    
+    with open("harmony_templates/ObjectActions.html") as f:
         template = f.read()
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{objectName}", cap.oid).replace(
-        "{objectDistanceCards}", "\n".join(objDistCards))
+        "{objectActionCards}", "\n".join(objActCards))
 
 
 def minimapGenerator():
