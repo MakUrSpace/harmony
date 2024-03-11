@@ -22,20 +22,18 @@
               </thead>
               <tbody>
                 <tr>
-                  <th scope="row">2</th>
-                  <td>2</td>
-                  <td>2</td>
-                  <td>0</td>
-                  <td>2</td>
+                  <td>{skill}</td>
+                  <td>{attackerMovementModifier}</td>
+                  <td>{targetMovementModifier}</td>
+                  <td>{other}</td>
+                  <td>{range}</td>
                   <td>=</td>
-                  <td>8</td>
+                  <td>{targetNumber}</td>
                 </tr>
               </tbody>
             </table>
         </div>
     </div>
-    <div class="col">
-        <input class="btn btn-warning" value="Declare Attack" id="declare_{targetName}" hx-post="{harmonyURL}declare_attack/{targetName}">
-    </div>
+    {declare}
 </div>
 <hr class="mt-2 mb-3">

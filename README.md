@@ -28,13 +28,9 @@ Any USB cameras need to be setup as IP cameras for Harmony to access them. Harmo
 #### Install camera-streamer
 Instructions for debian package install from [https://github.com/ayufan/camera-streamer/releases/tag/v0.2.6](https://github.com/ayufan/camera-streamer/releases/tag/v0.2.8)
 ```
-if [[ -e /etc/default/raspberrypi-kernel ]]; then
-  PACKAGE=camera-streamer-raspi_0.2.8.bullseye_$(dpkg --print-architecture).deb
-else
-  PACKAGE=camera-streamer-generic_0.2.8.bullseye_$(dpkg --print-architecture).deb
-fi
+PACKAGE=camera-streamer-$(test -e /etc/default/raspberrypi-kernel && echo raspi || echo generic)_0.2.8.$(. /etc/os-release; echo $VERSION_CODENAME)_$(dpkg --print-architecture).deb
 wget "https://github.com/ayufan/camera-streamer/releases/download/v0.2.8/$PACKAGE"
-sudo apt install "$PWD/$PACKAGE](https://github.com/ayufan/camera-streamer/releases/tag/v0.2.8)
+sudo apt install "$PWD/$PACKAGE"
 ```
 
 #### Configure Cameras

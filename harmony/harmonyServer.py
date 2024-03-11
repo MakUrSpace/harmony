@@ -7,7 +7,8 @@ from matplotlib.figure import Figure
 import base64
 import argparse
 import json
-from io import BytesIO 
+from io import BytesIO
+from dataclasses import dataclass
 
 import threading
 import atexit
@@ -15,7 +16,8 @@ from flask import Flask, Blueprint, render_template, Response, request, make_res
 from traceback import format_exc
 
 from observer.configurator import configurator, setConfiguratorApp
-from observer.calibrator import calibrator, CalibratedObserver, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
+from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
+from ipynb.fs.full.HarmonyMachine import HarmonyMachine 
 
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
@@ -23,35 +25,46 @@ ROUND = 0
 
 
 class GameState:
-    states = ["Movement", "Declare", "Resolve"]
-    state = "Movement"
+    states = ["Add", "Movement", "Declare", "Resolve"]
+    state = "Add"
     round = 0
+    declaredActions = {}
 
     @classmethod
     def reset(cls):
         cls.round = 0
-        cls.state = "Movement"
+        cls.state = "Add"
+        cls.declaredActions = {}
 
     @classmethod
-    def nextState(cls):
+    def nextState(cls, currentState=None):
+        if currentState is not None:
+            assert currentState == cls.state, "GameState mismatch. Cannot progress in this manner"
         currentState = cls.state
         newState = currentState
-        if newState == "Movement":
+        if newState == "Add":
+            newState = "Movement"
+            cls.movements = []
+        elif newState == "Movement":
             newState = "Declare"
+            cls.declaredActions = {}
         elif newState == "Declare":
             newState = "Resolve"
         elif newState == "Resolve":
             newState = "Movement"
+            cls.declaredActions = {}
             cls.round += 1
         cls.state = newState
 
     @classmethod
     def gameStateButton(cls):
         gs = cls.state
-        if gs == "Movement":
+        if gs == "Add":
+            button = """<input type="button" class="btn btn-info" name="commitAdditions" id="passive" hx-get="{harmonyURL}commit_additions" hx-swap="outerHTML" value="Start Game">"""
+        elif gs == "Movement":
             button = """<input type="button" class="btn btn-info" name="commitMovement" id="passive" hx-get="{harmonyURL}commit_movement" hx-swap="outerHTML" value="Commit Movement">"""
         elif gs == "Declare":
-            button = """<input type="button" class="btn btn-info" name="resolveActions" id="passive" hx-get="{harmonyURL}declare_actions" hx-swap="outerHTML" value="Declare Actions">"""
+            button = """<input type="button" class="btn btn-info" name="declareActions" id="passive" hx-get="{harmonyURL}declare_actions" hx-swap="outerHTML" value="Declare Actions">"""
         elif gs == "Resolve":
             button = """<input type="button" class="btn btn-danger" name="resolveActions" id="passive" hx-get="{harmonyURL}resolve_actions" hx-swap="outerHTML" value="Resolve Actions">"""
         return button.replace("{harmonyURL}", url_for(".buildHarmony"))
@@ -62,11 +75,18 @@ def getGameController():
     return GameState.gameStateButton()
 
 
+@harmony.route('/commit_additions')
+def commitAdditions():
+    with DATA_LOCK:
+        GameState.nextState("Add")
+    return GameState.gameStateButton()
+
+
 @harmony.route('/commit_movement', methods=['GET'])
 def commitMovement():
     with DATA_LOCK:
         app.cm.passiveMode()
-    GameState.nextState()
+        GameState.nextState("Movement")
     return GameState.gameStateButton()
 
 
@@ -74,7 +94,7 @@ def commitMovement():
 def declareActions():
     with DATA_LOCK:
         app.cm.passiveMode()
-    GameState.nextState()
+        GameState.nextState("Declare")
     return GameState.gameStateButton()
 
 
@@ -82,7 +102,7 @@ def declareActions():
 def resolveActions():
     with DATA_LOCK:
         app.cm.trackMode()
-    GameState.nextState()
+        GameState.nextState("Resolve")
     return GameState.gameStateButton()
 
 
@@ -232,7 +252,7 @@ def combinedCamerasWithChangesResponse():
 @harmony.route('/reset')
 def resetharmony():
     with DATA_LOCK:
-        app.cm = CalibratedObserver(app.cc)
+        app.cm = HarmonyMachine(app.cc)
         app.gm = GameState
         app.gm.reset()
     return 'success'
@@ -271,9 +291,9 @@ def getModeController():
 
 @harmony.route('/')
 def buildHarmony():
-    if type(app.cm) is not CalibratedObserver:
+    if type(app.cm) is not HarmonyMachine:
         with DATA_LOCK:
-            app.cm = CalibratedObserver(app.cc)
+            app.cm = HarmonyMachine(app.cc)
             app.gm = GameState
             app.gm.reset()
     with open("harmony_templates/Harmony.html", "r") as f:
@@ -307,13 +327,14 @@ def captureToChangeRow(capture):
         "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.cc.rsc.changeSetToRealCenter(capture)])).replace(
         "{moveDistance}", moveDistance).replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
-        "{encodedBA}", imageToBase64(capture.visual()))
+        "{encodedBA}", imageToBase64(capture.visual())).replace(
+        "{actions}", "" if getattr(capture, 'objectType', None) != "Unit" else f"""<button class="btn btn-primary" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Object Actions</button>""").replace(
+        "{edit}", "" if GameState.state != "Add" else f"""<button class="btn btn-info" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}">Edit</button>""")
     return changeRow
 
 
 def buildObjectTable(filter=None):
     changeRows = []
-    print(f"Aware of {len(app.cm.memory)} objects")
     for capture in app.cm.memory:
         if filter is not None and getattr(capture, 'objectType', None) != filter:
             continue
@@ -327,7 +348,14 @@ def getObjectTable():
     return buildObjectTable(filter=filter)
 
 
+def buildObjectActionResolver():
+    return f"""<div id="objectActionResolver" hx-get="{url_for(".buildHarmony")}objects_filter" hx-trigger="every 1s"><p>{json.dumps(GameState.declaredActions, indent=4)}</p></div>"""
+
+
 def buildObjectsFilter(filter=None):
+    if GameState.state == "Resolve":
+        return buildObjectActionResolver()
+
     assert filter in [None, 'None', 'Terrain', 'Building', 'Unit'], f"Unrecognized filter type: {filter}"
 
     noneSelected, terrainSelected, buildingSelected, unitSelected = "", "", "", ""
@@ -355,7 +383,8 @@ def buildObjectsFilter(filter=None):
       <input type="radio" class="btn-check" name="objectFilterradio" id="Unit" autocomplete="off" {unitSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Unit" hx-target="#objectInteractor">
       <label class="btn btn-outline-primary" for="Unit">Unit</label>
     </div>
-    <div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>"""
+    <div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>
+    <div id="objectInteractorRetrieval" hx-target="#objectInteractor" hx-get="{harmonyURL}objects_filter" hx-trigger="every 1s">"""
     template = template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{filter}", filterQuery).replace(
@@ -364,12 +393,24 @@ def buildObjectsFilter(filter=None):
         "{buildingSelected}", buildingSelected).replace(
         "{unitSelected}", unitSelected).replace(
         "{objectRows}", buildObjectTable(filter))
-    return template
+    return """<div class="row ">
+                <h2 class="mt-5">Object Tracker</h2>
+            </div>""" + template
+
+
+def getInteractor():
+    if GameState.state == "Resolve":
+        return buildObjectActionResolver()
+    else:
+        return buildObjectsFilter
 
 
 @harmony.route('/objects_filter', methods=['GET'])
 def getObjectTableContainer():
-    return buildObjectsFilter(request.args.get('objectFilter', None))
+    if GameState.state != "Resolve":
+        return buildObjectsFilter(request.args.get('objectFilter', None))
+    else:
+        return buildObjectActionResolver()
     
     
 @harmony.route('/objects/<objectId>', methods=['GET'])
@@ -414,6 +455,18 @@ def updateObjectSettings(objectId):
 def deleteObjectSettings(objectId):
     app.cm.deleteObject(objectId)
     return buildObjectsFilter()
+    
+    
+@harmony.route('/objects/<objectId>/declare_attack/<targetId>', methods=['POST'])
+def declareAttackOnTarget(objectId, targetId):
+    GameState.declaredActions[objectId] = {"target": targetId}
+    return buildObjectActions(objectId)
+    
+    
+@harmony.route('/objects/<objectId>/declare_no_action', methods=['POST'])
+def declareNoAction(objectId):
+    GameState.declaredActions[objectId] = {}
+    return buildObjectActions(objectId)
 
 
 def buildObjectSettings(obj):
@@ -426,7 +479,7 @@ def buildObjectSettings(obj):
         settings = {"Class": getattr(obj, "Class", "Residential"), "Elevation": getattr(obj, "Elevation", "5")}
         buildingSelected = " selected='selected'"
     elif objType == "Unit":
-        settings = {"Class": getattr(obj, "Class", "Atlas")}
+        settings = {"Class": getattr(obj, "Class", "Atlas"), "Skill": str(getattr(obj, "Skill", 4))}
         unitSelected = " selected='selected'"
     else:
         settings = {}
@@ -482,9 +535,7 @@ def updateObjectType(objectId):
     return buildObjectSettings(cap)
     
 
-
-@harmony.route('/object_actions/<objectId>', methods=['GET'])
-def getObjectActions(objectId):
+def buildObjectActions(objectId):
     cap = None
     for capture in app.cm.memory:
         if capture.oid == objectId:
@@ -500,25 +551,50 @@ def getObjectActions(objectId):
         if target.oid == cap.oid:
             continue
         else:
+            declare = ""
+            if GameState.state == "Declare":
+                disabled = "" if cap.oid not in GameState.declaredActions or target.oid != GameState.declaredActions[cap.oid].get('target', None) else "disabled"
+                declare = f"""
+                <div class="col">
+                    <input {disabled} type="button" class="btn btn-warning" value="Declare Attack" id="declare_{target.oid}" hx-target="#objectInteractor" hx-post="{url_for(".buildHarmony")}objects/{cap.oid}/declare_attack/{target.oid}">
+                </div>"""
+
+            aMM = -1 if app.cm.cc.rsc.trackedObjectLastDistance(cap) < 10 else 1
+            tMM = -1 if app.cm.cc.rsc.trackedObjectLastDistance(target) < 10 else 1
+            targetNumber = cap.skill + aMM + tMM + 0
             objActCards.append(cardTemplate.replace(
                 "{harmonyURL}", url_for(".buildHarmony")).replace(
                 "{objectName}", cap.oid).replace(
                 "{targetName}", target.oid).replace(
                 "{encodedBA}", imageToBase64(target.visual())).replace(
-                "{objectDistance}", f"{app.cm.cc.rsc.distanceBetweenObjects(cap, target):6.0f} mm"))
+                "{objectDistance}", f"{app.cm.cc.rsc.distanceBetweenObjects(cap, target):6.0f} mm").replace(
+                "{declare}", declare)).replace(
+                "{skill}", str(cap.Skill)).replace(
+                "{attackerMovementModifier}", str(aMM)).replace(
+                "{targetMovementModifier}", str(tMM)).replace(
+                "{other}", "0").replace(
+                "{targetNumber}", str(targetNumber))
 
-    objActCards.append("""
-    <div class="row mb-1 border border-secondary border-2">
-        <input class="btn btn-danger" value="Take No Action" id="no_action" hx-post="{harmonyURL}no_action/{objectId}">
-    </div>
-    """.replace("{harmonyURL}", url_for(".buildHarmony")).replace("{objectName}", cap.oid))
+    if GameState.state == "Declare":
+        disabled = "" if cap.oid not in GameState.declaredActions or GameState.declaredActions[cap.oid] != {} else "disabled"
+        objActCards.append(f"""
+        <div class="row mb-1 border border-secondary border-2">
+            <input {disabled} type="button" class="btn btn-danger" value="Take No Action" id="no_action" hx-target="#objectInteractor" hx-post="{url_for(".buildHarmony")}objects/{cap.oid}/declare_no_action">
+        </div>
+        """.replace("{harmonyURL}", url_for(".buildHarmony")).replace("{objectName}", cap.oid))
     
     with open("harmony_templates/ObjectActions.html") as f:
         template = f.read()
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{objectName}", cap.oid).replace(
+        "{objectIcon}", imageToBase64(cap.icon)).replace(
         "{objectActionCards}", "\n".join(objActCards))
+
+
+@harmony.route('/objects/<objectId>/actions', methods=['GET'])
+def getObjectActions(objectId):
+    return buildObjectActions(objectId)
 
 
 def minimapGenerator():
@@ -543,14 +619,14 @@ def setHarmonyApp(newApp):
 
 if __name__ == "__main__":
     from flask import Flask, redirect, Response, Blueprint
-    from observer.observer import CalibratedCaptureConfiguration, observer, configurator, CalibratedObserver, registerCaptureService, setConfiguratorApp, setObserverApp
+    from observer.observer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
     
     app = Flask(__name__)
     app.cc = CalibratedCaptureConfiguration()
     app.cc.capture()
     app.register_blueprint(configurator, url_prefix='/configurator')
     app.register_blueprint(harmony, url_prefix='/harmony')
-    app.cm = CalibratedObserver(app.cc)
+    app.cm = HarmonyMachine(app.cc)
     setConfiguratorApp(app)
     setObserverApp(app)
     

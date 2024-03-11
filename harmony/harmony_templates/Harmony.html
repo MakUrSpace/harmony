@@ -56,19 +56,11 @@
                 {cameraButtons}
             </div>
         </div>
-	<div class="col" align="center" style="min-width: 500px">
-            <div class="row justify-content-center">
-                <h2 class="mt-5">Object Tracker</h2>
-            </div>
-            <hr class="mt-2 mb-3">
-            <div class="row justify-content-center">
-                <div id="objectInteractor" class="container">
-                    <div id="objectFilterRetriever" hx-get="{harmonyURL}objects_filter" hx-trigger="every 1s" hx-target="#objectInteractor"></div>
-                </div>
+    	<div class="col justify-content-center" align="center" style="min-width: 500px">
+            <div id="objectInteractor" class="container">
+                <div id="objectFilterRetriever" hx-get="{harmonyURL}objects_filter" hx-trigger="every 1s" hx-target="#objectInteractor"></div>
             </div>
         </div>
-    </div>
-    <div class="row">
     </div>
 </div>
 </body>
