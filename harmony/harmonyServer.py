@@ -547,6 +547,8 @@ def buildObjectActions(objectId):
     with open("harmony_templates/ObjectActionCard.html") as f:
         cardTemplate = f.read()
     objActCards = []
+    objMovement = app.cm.cc.rsc.trackedObjectLastDistance(cap)
+    aMM = -1 if objMovement is None or objMovement < 10 else 1
     for target in app.cm.memory:
         if target.oid == cap.oid:
             continue
@@ -559,21 +561,26 @@ def buildObjectActions(objectId):
                     <input {disabled} type="button" class="btn btn-warning" value="Declare Attack" id="declare_{target.oid}" hx-target="#objectInteractor" hx-post="{url_for(".buildHarmony")}objects/{cap.oid}/declare_attack/{target.oid}">
                 </div>"""
 
-            aMM = -1 if app.cm.cc.rsc.trackedObjectLastDistance(cap) < 10 else 1
-            tMM = -1 if app.cm.cc.rsc.trackedObjectLastDistance(target) < 10 else 1
-            targetNumber = cap.skill + aMM + tMM + 0
+            targetDistance = app.cm.cc.rsc.distanceBetweenObjects(cap, target)
+            targetRange = "short" if targetDistance < 155 else "medium" if targetDistance < 610 else "long"
+            rangeModifier = 0 if "short" else 2 if "medium" else 4
+
+            tMM = app.cm.cc.rsc.trackedObjectLastDistance(target)
+            tMM = -1 if tMM is None or tMM < 10 else 1
+            targetNumber = int(cap.Skill) + aMM + tMM + 0 + rangeModifier
             objActCards.append(cardTemplate.replace(
                 "{harmonyURL}", url_for(".buildHarmony")).replace(
                 "{objectName}", cap.oid).replace(
                 "{targetName}", target.oid).replace(
                 "{encodedBA}", imageToBase64(target.visual())).replace(
-                "{objectDistance}", f"{app.cm.cc.rsc.distanceBetweenObjects(cap, target):6.0f} mm").replace(
-                "{declare}", declare)).replace(
-                "{skill}", str(cap.Skill)).replace(
+                "{objectDistance}", f"{targetRange.capitalize()} ({targetDistance / 25.4:6.1f} in)").replace(
+                "{declare}", declare).replace(
+                "{skill}", cap.Skill).replace(
                 "{attackerMovementModifier}", str(aMM)).replace(
                 "{targetMovementModifier}", str(tMM)).replace(
+                "{range}", str(rangeModifier)).replace(
                 "{other}", "0").replace(
-                "{targetNumber}", str(targetNumber))
+                "{targetNumber}", str(targetNumber)))
 
     if GameState.state == "Declare":
         disabled = "" if cap.oid not in GameState.declaredActions or GameState.declaredActions[cap.oid] != {} else "disabled"
