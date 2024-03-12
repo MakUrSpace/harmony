@@ -60,13 +60,13 @@ class GameState:
     def gameStateButton(cls):
         gs = cls.state
         if gs == "Add":
-            button = """<input type="button" class="btn btn-info" name="commitAdditions" id="passive" hx-get="{harmonyURL}commit_additions" hx-swap="outerHTML" value="Start Game">"""
+            button = """<input type="button" class="btn btn-info" name="commitAdditions" id="passive" hx-get="{harmonyURL}commit_additions" hx-target="#objectInteractor" value="Start Game">"""
         elif gs == "Movement":
-            button = """<input type="button" class="btn btn-info" name="commitMovement" id="passive" hx-get="{harmonyURL}commit_movement" hx-swap="outerHTML" value="Commit Movement">"""
+            button = """<input type="button" class="btn btn-info" name="commitMovement" id="passive" hx-get="{harmonyURL}commit_movement" hx-target="#objectInteractor" value="Commit Movement">"""
         elif gs == "Declare":
-            button = """<input type="button" class="btn btn-info" name="declareActions" id="passive" hx-get="{harmonyURL}declare_actions" hx-swap="outerHTML" value="Declare Actions">"""
+            button = """<input type="button" class="btn btn-info" name="declareActions" id="passive" hx-get="{harmonyURL}declare_actions" hx-target="#objectInteractor" value="Declare Actions">"""
         elif gs == "Resolve":
-            button = """<input type="button" class="btn btn-danger" name="resolveActions" id="passive" hx-get="{harmonyURL}resolve_actions" hx-swap="outerHTML" value="Resolve Actions">"""
+            button = """<input type="button" class="btn btn-danger" name="resolveActions" id="passive" hx-get="{harmonyURL}resolve_actions" hx-target="#objectInteractor" value="Resolve Actions">"""
         return button.replace("{harmonyURL}", url_for(".buildHarmony"))
 
 
@@ -79,7 +79,7 @@ def getGameController():
 def commitAdditions():
     with DATA_LOCK:
         GameState.nextState("Add")
-    return GameState.gameStateButton()
+    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
 @harmony.route('/commit_movement', methods=['GET'])
@@ -87,7 +87,7 @@ def commitMovement():
     with DATA_LOCK:
         app.cm.passiveMode()
         GameState.nextState("Movement")
-    return GameState.gameStateButton()
+    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
 @harmony.route('/declare_actions', methods=['GET'])
@@ -95,7 +95,7 @@ def declareActions():
     with DATA_LOCK:
         app.cm.passiveMode()
         GameState.nextState("Declare")
-    return GameState.gameStateButton()
+    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
 @harmony.route('/resolve_actions', methods=['GET'])
@@ -103,7 +103,7 @@ def resolveActions():
     with DATA_LOCK:
         app.cm.trackMode()
         GameState.nextState("Resolve")
-    return GameState.gameStateButton()
+    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
 def imageToBase64(img):
@@ -357,7 +357,7 @@ def buildObjectsFilter(filter=None):
         return buildObjectActionResolver()
 
     assert filter in [None, 'None', 'Terrain', 'Building', 'Unit'], f"Unrecognized filter type: {filter}"
-
+    buildObjectsFilter.filter = filter
     noneSelected, terrainSelected, buildingSelected, unitSelected = "", "", "", ""
     if filter == 'None' or filter is None:
         filterQuery = ''
@@ -383,8 +383,7 @@ def buildObjectsFilter(filter=None):
       <input type="radio" class="btn-check" name="objectFilterradio" id="Unit" autocomplete="off" {unitSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Unit" hx-target="#objectInteractor">
       <label class="btn btn-outline-primary" for="Unit">Unit</label>
     </div>
-    <div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>
-    <div id="objectInteractorRetrieval" hx-target="#objectInteractor" hx-get="{harmonyURL}objects_filter" hx-trigger="every 1s">"""
+    <div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>"""
     template = template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{filter}", filterQuery).replace(
