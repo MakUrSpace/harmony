@@ -4,6 +4,7 @@
         <input class="btn btn-info" type="button" value="Return to table" hx-target="#objectInteractor" hx-get='{harmonyURL}objects'">
     </div>
     <div class="row">
+        <img class="img-fluid border border-info border-2" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
         <form hx-post="{harmonyURL}objects/{objectName}" hx-target="#objectInteractor">
             <label for="objectName">Name</label>
             <input type="text" class="form-control" name="objectName" value="{objectName}"><br>

@@ -428,7 +428,8 @@ def getObject(objectId):
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{objectName}", cap.oid).replace(
-        "{objectSettings}", buildObjectSettings(cap))
+        "{objectSettings}", buildObjectSettings(cap)).replace(
+        "{encodedBA}", imageToBase64(cap.visual()))
 
 
 @harmony.route('/objects/<objectId>', methods=['POST'])
