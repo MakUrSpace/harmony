@@ -122,6 +122,11 @@ def addNewCamera():
     camName = request.form.get("camName")
     camRot = request.form.get("camRot")
     camAddr = request.form.get("camAddr")
+    try:
+        camAuth = json.loads(request.form.get("camAuth"))
+    except:
+        camAuth = None
+    
     app.cc.cameras[camName] = RemoteCamera(address=camAddr, activeZone=[[0, 0], [0, 1], [1, 1,], [1, 0]], camName=camName, rotate=camRot)
     app.cc.rsc = None
     app.cc.saveConfiguration()
