@@ -17,45 +17,14 @@ from traceback import format_exc
 
 from observer.configurator import configurator, setConfiguratorApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
-from ipynb.fs.full.HarmonyMachine import HarmonyMachine 
+from ipynb.fs.full.HarmonyMachine import HarmonyMachine, GameState 
 
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
 ROUND = 0
 
 
-class GameState:
-    states = ["Add", "Movement", "Declare", "Resolve"]
-    state = "Add"
-    round = 0
-    declaredActions = {}
-
-    @classmethod
-    def reset(cls):
-        cls.round = 0
-        cls.state = "Add"
-        cls.declaredActions = {}
-
-    @classmethod
-    def nextState(cls, currentState=None):
-        if currentState is not None:
-            assert currentState == cls.state, "GameState mismatch. Cannot progress in this manner"
-        currentState = cls.state
-        newState = currentState
-        if newState == "Add":
-            newState = "Movement"
-            cls.movements = []
-        elif newState == "Movement":
-            newState = "Declare"
-            cls.declaredActions = {}
-        elif newState == "Declare":
-            newState = "Resolve"
-        elif newState == "Resolve":
-            newState = "Movement"
-            cls.declaredActions = {}
-            cls.round += 1
-        cls.state = newState
-
+class GameState(GameState):
     @classmethod
     def gameStateButton(cls):
         gs = cls.state
