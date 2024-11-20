@@ -9,6 +9,8 @@ import argparse
 import json
 from io import BytesIO
 from dataclasses import dataclass
+from typing import Callable
+from functools import wraps
 
 import threading
 import atexit
@@ -296,7 +298,7 @@ def captureToChangeRow(capture):
         "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.cc.rsc.changeSetToRealCenter(capture)])).replace(
         "{moveDistance}", moveDistance).replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
-        "{encodedBA}", imageToBase64(capture.visual())).replace(
+        "{encodedBA}", imageToBase64(capture.visual(withContours=False))).replace(
         "{actions}", "" if getattr(capture, 'objectType', None) != "Unit" else f"""<button class="btn btn-primary" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Object Actions</button>""").replace(
         "{edit}", "" if GameState.state != "Add" else f"""<button class="btn btn-info" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}">Edit</button>""")
     return changeRow
@@ -379,17 +381,32 @@ def getObjectTableContainer():
         return buildObjectsFilter(request.args.get('objectFilter', None))
     else:
         return buildObjectActionResolver()
+
+
+def findObject(objectId):
+    for capture in app.cm.memory:
+        if capture.oid == objectId:
+            return capture
+    raise Exception(f"Unable to find object: {object_id}")
+
+
+def findObjectIdOr404(objectId_endpoint: Callable) -> Callable:
+    @wraps(objectId_endpoint)
+    def findOr404_endpoint(**kwargs):
+        try:
+            objectId = kwargs.pop("objectId")
+            return objectId_endpoint(cap=findObject(objectId=objectId), **kwargs)
+        except KeyError as ke:
+            error = f"{objectId} Not found"
+            print(error)
+            return error, 404
+    return findOr404_endpoint
     
     
 @harmony.route('/objects/<objectId>', methods=['GET'])
-def getObject(objectId):
-    cap = None
-    for capture in app.cm.memory:
-        if capture.oid == objectId:
-            cap = capture
-            break
-    if cap is None:
-        return f"{objectId} Not found", 404
+@findObjectIdOr404
+def getObject(cap):
+    footprint_enabled = request.args.get('footprint', "false") == "true"
 
     objectName = cap.oid
     with open("harmony_templates/TrackedObjectUpdater.html") as f:
@@ -398,18 +415,13 @@ def getObject(objectId):
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{objectName}", cap.oid).replace(
         "{objectSettings}", buildObjectSettings(cap)).replace(
-        "{encodedBA}", imageToBase64(cap.visual()))
+        "{footprintToggleState}", str(not footprint_enabled).lower()).replace(
+        "{encodedBA}", imageToBase64(cap.visual(withContours=footprint_enabled)))
 
 
 @harmony.route('/objects/<objectId>', methods=['POST'])
-def updateObjectSettings(objectId):
-    cap = None
-    for capture in app.cm.memory:
-        if capture.oid == objectId:
-            cap = capture
-            break
-    if cap is None:
-        return f"{objectId} Not found", 404
+@findObjectIdOr404
+def updateObjectSettings(cap):
     newName = request.form["objectName"]
     if newName != cap.oid:
         cap.oid = newName
@@ -421,21 +433,24 @@ def updateObjectSettings(objectId):
     
     
 @harmony.route('/objects/<objectId>', methods=['DELETE'])
-def deleteObjectSettings(objectId):
-    app.cm.deleteObject(objectId)
+@findObjectIdOr404
+def deleteObjectSettings(cap):
+    app.cm.deleteObject(cap.oid)
     return buildObjectsFilter()
     
     
 @harmony.route('/objects/<objectId>/declare_attack/<targetId>', methods=['POST'])
-def declareAttackOnTarget(objectId, targetId):
+@findObjectIdOr404
+def declareAttackOnTarget(cap, targetId):
     GameState.declaredActions[objectId] = {"target": targetId}
-    return buildObjectActions(objectId)
+    return buildObjectActions(cap)
     
     
 @harmony.route('/objects/<objectId>/declare_no_action', methods=['POST'])
-def declareNoAction(objectId):
-    GameState.declaredActions[objectId] = {}
-    return buildObjectActions(objectId)
+@findObjectIdOr404
+def declareNoAction(cap):
+    GameState.declaredActions[cap.oid] = {}
+    return buildObjectActions(cap)
 
 
 def buildObjectSettings(obj):
@@ -475,27 +490,15 @@ def buildObjectSettings(obj):
 
 
 @harmony.route('/objects/<objectId>/settings', methods=['GET'])
-def getObjectSettings(objectId):
-    cap = None
-    for capture in app.cm.memory:
-        if capture.oid == objectId:
-            cap = capture
-            break
-    if cap is None:
-        return 404
+@findObjectIdOr404
+def getObjectSettings(cap):
     return buildObjectSettings(cap)
 
 
 @harmony.route('/objects/<objectId>/type', methods=['POST'])
-def updateObjectType(objectId):
+@findObjectIdOr404
+def updateObjectType(cap):
     newType = request.form["objectType"]
-    cap = None
-    for capture in app.cm.memory:
-        if capture.oid == objectId:
-            cap = capture
-            break
-    if cap is None:
-        return 404
 
     assert newType in ["None", "Terrain", "Building", "Unit"], f"Unrecognized object type: {newType}"
 
@@ -504,15 +507,7 @@ def updateObjectType(objectId):
     return buildObjectSettings(cap)
     
 
-def buildObjectActions(objectId):
-    cap = None
-    for capture in app.cm.memory:
-        if capture.oid == objectId:
-            cap = capture
-            break
-    if cap is None:
-        return f"{objectId} Not found", 404
-
+def buildObjectActions(cap):
     with open("harmony_templates/ObjectActionCard.html") as f:
         cardTemplate = f.read()
     objActCards = []
@@ -569,8 +564,30 @@ def buildObjectActions(objectId):
 
 
 @harmony.route('/objects/<objectId>/actions', methods=['GET'])
-def getObjectActions(objectId):
-    return buildObjectActions(objectId)
+@findObjectIdOr404
+def getObjectActions(cap):
+    return buildObjectActions(cap)
+    
+
+@harmony.route('/objects/<objectId>/footprint_editor', methods=['GET'])
+@findObjectIdOr404
+def buildFootprintEditor(cap):
+    objectName = cap.oid
+    with open("harmony_templates/TrackedObjectFootprintEditor.html") as f:
+        template = f.read()
+
+    return template.replace(
+        "{harmonyURL}", url_for(".buildHarmony")).replace(
+        "{objectName}", cap.oid).replace(
+        "{encodedBA}", imageToBase64(cap.visual(withContours=True)))
+    return ""
+    
+
+@harmony.route('/objects/<objectId>/margin', methods=['POST'])
+@findObjectIdOr404
+def objectVisualWithMargin(cap):
+    margin = int(request.form["objectMargin"])
+    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(cap.visual(withContours=True, margin=margin))}" style="border-radius: 10px;">"""
 
 
 def minimapGenerator():
@@ -581,7 +598,7 @@ def minimapGenerator():
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
-    
+
 
 @harmony.route('/minimap')
 def minimapResponse():
