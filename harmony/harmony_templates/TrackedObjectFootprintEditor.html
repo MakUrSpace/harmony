@@ -5,18 +5,19 @@
     </div>
     <div class="row" align="right">
         <label for="objectMargin">Image Object Margin</label>
-        <input type="number" class="form-control" name="objectMargin" value="5" min="0" max="200" hx-post='{harmonyURL}objects/{objectName}/margin', hx-target="#objectImageDiv">
+        <input type="number" class="form-control" name="objectMargin" value="50" min="50" max="200" hx-post='{harmonyURL}objects/{objectName}/margin', hx-target="#objectImageDiv">
     </div>
     <div class="row" align="right">
         <input type="button" class="btn btn-secondary" name="clearAddition" value="Clear Addition" onclick="clearAddition(event)">
     </div>
     <div class="row" id="objectImageDiv">
-        <img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
+        <img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" onclick="imageClickListener(event)" style="border-radius: 10px;">
     </div>
     <div class="row"><br></div>
     <div class="col">
-        <form hx-post="{harmonyURL}objects/{objectName}/addition" hx-target="#objectImageDiv">
-            <input hidden=true type="text" name="additionPolygon" id="additionPolygon" value="{objectAddition}" size="50" hx-post="{harmonyURL}objects/{objectName}/addition" hx-target="#objectImageDiv">  
+        <form hx-post="{harmonyURL}objects/{objectName}/submit_addition" hx-target="#objectImageDiv">
+            <input hidden=true type="text" name="additionPolygon" id="additionPolygon" value="{objectAddition}" hx-post="{harmonyURL}objects/{objectName}/project_addition" hx-target="#objectImageDiv">
+            <input hidden=true type="text" name="camName" id="camName" value="{camName}">  
             <input type="submit" class="btn btn-primary" name="submitAlteration" value="Submit Add Area">
         </form>
     </div>
@@ -26,7 +27,7 @@
             additionPolygonField.value = '[]'
         }
         
-        function camClickListener(event) {
+        function imageClickListener(event) {
             const imgElem = document.getElementById(`objectImage`)
             bounds=imgElem.getBoundingClientRect();
             const left=bounds.left;

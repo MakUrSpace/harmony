@@ -579,7 +579,8 @@ def buildFootprintEditor(cap):
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{objectName}", cap.oid).replace(
-        "{encodedBA}", imageToBase64(cap.visual(withContours=True)))
+        "{encodedBA}", imageToBase64(cap.visual(withContours=True, margin=50))).replace(
+        "{camName}", '0')
     return ""
     
 
@@ -587,6 +588,42 @@ def buildFootprintEditor(cap):
 @findObjectIdOr404
 def objectVisualWithMargin(cap):
     margin = int(request.form["objectMargin"])
+    cap.margin = margin
+    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(cap.visual(withContours=True, margin=50))}" style="border-radius: 10px;"  onclick="imageClickListener(event)">"""
+    
+
+@harmony.route('/objects/<objectId>/project_addition', methods=['POST'])
+@findObjectIdOr404
+def projectAdditionOntoObject(cap):
+    #margin = getattr(cap, "margin", 5)
+    margin = 50
+    addition_points = json.loads(request.form["additionPolygon"])
+    addition_points = np.int32(addition_points)
+    print(f"Received addition points: {addition_points}")
+    projected_image = cap.visual(withContours=True, margin=margin)
+    projected_image = cv2.polylines(projected_image, [addition_points], isClosed=True, color=(255,255,0), thickness=3)
+    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(projected_image)}" style="border-radius: 10px;"  onclick="imageClickListener(event)">"""
+    
+
+@harmony.route('/objects/<objectId>/submit_addition', methods=['POST'])
+@findObjectIdOr404
+def combineObjectWithAddition(cap):
+    # margin = getattr(cap, "margin", 5)
+    margin = 50
+    addition_points = json.loads(request.form["additionPolygon"])
+    camName = request.form["camName"]
+    cam = app.cc.cameras[camName]
+    change = cap.changeSet[camName]
+    x, y, w, h = cap.changeSet['0'].clipBox
+    adjusted_addition_points = [[pt[0] + x - margin, pt[1] + y - margin] for pt in addition_points]
+    adjusted_addition_points = np.int32(adjusted_addition_points)
+    height, width = cam.mostRecentFrame.shape[:2]
+    blank_image = np.zeros([height, width], np.uint8)
+    contour_image = cv2.drawContours(blank_image.copy(), change.changeContours, -1, (255), -1)
+    projected_addition_and_contours = cv2.polylines(contour_image, [adjusted_addition_points], isClosed=True, color=(255), thickness=3)
+    _, thresh = cv2.threshold(projected_addition_and_contours, 127, 255, 0)
+    newChangeContours = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+    cap.changeSet[camName].overrideChangeContours(newChangeContours)
     return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(cap.visual(withContours=True, margin=margin))}" style="border-radius: 10px;">"""
 
 
