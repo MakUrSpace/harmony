@@ -142,6 +142,38 @@ def genCameraWithChangesView(camName):
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 
 
+def oldGenCameraWithChangesView(camName):
+    camName = str(camName)
+    cam = app.cc.cameras[camName]
+    while True:
+        if app.cm.lastChanges is not None and not app.cm.lastChanges.empty:
+            print("Has changes")
+        if app.cm.lastClassification is not None:
+            print("Has class")
+        camImage = cam.cropToActiveZone(cam.mostRecentFrame.copy())
+        # Paint known objects blue
+        for memObj in app.cm.memory:
+            if memObj.changeSet[camName].changeType not in ['delete', None]:
+                memContour = np.array([memObj.changeSet[camName].changePoints], dtype=np.int32)
+                camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
+        # Paint last changes red
+        if app.cm.lastChanges is not None and not app.cm.lastChanges.empty:
+            lastChange = app.cm.lastChanges.changeSet[camName]
+            if lastChange is not None and lastChange.changeType not in ['delete', None]:
+                lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
+                camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
+        # Paint classification green
+        if app.cm.lastClassification is not None and not app.cm.lastClassification.empty:
+            lastClass = app.cm.lastClassification.changeSet[camName]
+            if lastClass is not None and lastClass.changeType not in ['delete', None]:
+                lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
+                camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
+        camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
+        ret, camImage = cv2.imencode('.jpg', camImage)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+
+
 @harmony.route('/camWithChanges/<camName>')
 def cameraViewWithChangesResponse(camName):
     if camName == "VirtualMap":
@@ -623,6 +655,12 @@ def minimapGenerator():
 @harmony.route('/minimap')
 def minimapResponse():
     return Response(minimapGenerator(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@harmony.route('/undo_last_change')
+def undoLastChange():
+    app.cm.undoLastChange()
+    return "Success"
 
 
 def setHarmonyApp(newApp):

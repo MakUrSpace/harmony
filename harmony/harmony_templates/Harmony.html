@@ -39,7 +39,14 @@
             <div class="container">
                 <img class="img-fluid border border-info border-3" src="{harmonyURL}harmony_console" style="border-radius: 50px; border-width: 3">
             </div>
-            <div class="container" hx-get="{harmonyURL}get_game_controller" hx-trigger="every 1.5s" id="gameController"></div>
+            <div class="container">
+                <div class="row">
+                    <div class="col" hx-get="{harmonyURL}get_game_controller" hx-trigger="every 1.5s" id="gameController"></div>
+                    <div class="col">
+                        <input type="button" class="btn btn-danger float-end" name="undoChange" id="passive" hx-get="{harmonyURL}undo_last_change" hx-swap="none" value="Undo Last Change">
+                    </div>
+                </div>
+            </div>
             <div class="container justify-content-center">
                 <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
                 <img id="liveCam" class="img-responsive border border-3 border-primary bg-primary" src="{harmonyURL}camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
