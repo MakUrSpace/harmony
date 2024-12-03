@@ -278,7 +278,11 @@ def buildHarmony():
     with open("harmony_templates/Harmony.html", "r") as f:
         template = f.read()
     cameraButtons = '<input type="button" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">' + ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
-    defaultCam = [camName for camName, cam in app.cc.cameras.items()][0]
+    defaultCam = [camName for camName, cam in app.cc.cameras.items()]
+    if len(defaultCam) == 0:
+        defaultCam = "None"
+    else:
+        defaultCam = defaultCam[0]
     return template.replace(
         "{defaultCamera}", defaultCam).replace(
         "{cameraButtons}", cameraButtons).replace(

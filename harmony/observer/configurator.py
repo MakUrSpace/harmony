@@ -127,7 +127,7 @@ def addNewCamera():
     except:
         camAuth = None
     
-    app.cc.cameras[camName] = RemoteCamera(address=camAddr, activeZone=[[0, 0], [0, 1], [1, 1,], [1, 0]], camName=camName, rotate=camRot)
+    app.cc.cameras[camName] = RemoteCamera(address=camAddr, activeZone=[[0, 0], [0, 1], [1, 1,], [1, 0]], camName=camName, rotate=camRot, auth=camAuth)
     app.cc.rsc = None
     app.cc.saveConfiguration()
     app.cc.capture()
