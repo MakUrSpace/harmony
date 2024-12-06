@@ -30,10 +30,10 @@ def gameStateButton(gameState):
         button = """<input type="button" class="btn btn-info" name="commitAdditions" id="passive" hx-get="{harmonyURL}commit_additions" hx-target="#objectInteractor" value="Start Game">"""
     elif gameState == "Move":
         button = """<input type="button" class="btn btn-info" name="commitMovement" id="passive" hx-get="{harmonyURL}commit_movement" hx-target="#objectInteractor" value="Commit Movement">"""
-    elif gameState == "Declare":
-        button = """<input type="button" class="btn btn-info" name="declareActions" id="passive" hx-get="{harmonyURL}declare_actions" hx-target="#objectInteractor" value="Declare Actions">"""
-    elif gameState == "Resolve":
-        button = """<input type="button" class="btn btn-danger" name="resolveActions" id="passive" hx-get="{harmonyURL}resolve_actions" hx-target="#objectInteractor" value="Resolve Actions">"""
+    elif gameState == "Action":
+        button = """<input type="button" class="btn btn-info" name="commitActions" id="passive" hx-get="{harmonyURL}commit_actions" hx-target="#objectInteractor" value="Commit Actions">"""
+    else:
+        raise Exception(f"Unknown gameState: {gameState}")
     return button.replace("{harmonyURL}", url_for(".buildHarmony"))
 
 
@@ -57,19 +57,11 @@ def commitMovement():
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
-@harmony.route('/declare_actions', methods=['GET'])
-def declareActions():
+@harmony.route('/commit_actions', methods=['GET'])
+def commitActions():
     with DATA_LOCK:
-        app.cm.passiveMode()
-        app.gm.newPhase("Declare")
-    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
-
-
-@harmony.route('/resolve_actions', methods=['GET'])
-def resolveActions():
-    with DATA_LOCK:
-        app.cm.trackMode()
-        app.gm.newPhase("Resolve")
+        app.cm.activeMode()
+        app.gm.newPhase("Action")
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
@@ -548,7 +540,7 @@ def buildObjectActions(cap):
                 "{other}", "0").replace(
                 "{targetNumber}", str(action.targetNumber)))
 
-    if app.cm.GameState.getPhase() == "Declare":
+    if app.cm.GameState.getPhase() == "Action":
         # TODO: fix with new game state disabled = "" if cap.oid not in GameState.declaredActions or GameState.declaredActions[cap.oid] != {} else "disabled"
         disabled= ""
         objActCards.append(f"""
