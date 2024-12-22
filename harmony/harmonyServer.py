@@ -30,6 +30,8 @@ def gameStateButton(gameState):
         button = """<input type="button" class="btn btn-info" name="commitAdditions" id="passive" hx-get="{harmonyURL}commit_additions" hx-target="#objectInteractor" value="Start Game">"""
     elif gameState == "Move":
         button = """<input type="button" class="btn btn-info" name="commitMovement" id="passive" hx-get="{harmonyURL}commit_movement" hx-target="#objectInteractor" value="Commit Movement">"""
+    elif gameState == "Declare":
+        button = """<input type="button" class="btn btn-info" name="declareActions" id="passive" hx-get="{harmonyURL}declare_actions" hx-target="#objectInteractor" value="Declare Actions">"""
     elif gameState == "Action":
         button = """<input type="button" class="btn btn-info" name="commitActions" id="passive" hx-get="{harmonyURL}commit_actions" hx-target="#objectInteractor" value="Commit Actions">"""
     else:
@@ -39,13 +41,13 @@ def gameStateButton(gameState):
 
 @harmony.route('/get_game_controller')
 def getGameController():
-    return gameStateButton(app.gm.getPhase())
+    return gameStateButton(app.cm.GameState.getPhase())
 
 
 @harmony.route('/commit_additions')
 def commitAdditions():
     with DATA_LOCK:
-        app.gm.newPhase("Add")
+        app.cm.GameState.newPhase("Add")
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
@@ -53,7 +55,15 @@ def commitAdditions():
 def commitMovement():
     with DATA_LOCK:
         app.cm.passiveMode()
-        app.gm.newPhase("Move")
+        app.cm.GameState.newPhase("Move")
+    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
+
+
+@harmony.route('/declare_actions', methods=['GET'])
+def declareActions():
+    with DATA_LOCK:
+        app.cm.passiveMode()
+        GameState.nextState("Declare")
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
@@ -61,9 +71,9 @@ def commitMovement():
 def commitActions():
     with DATA_LOCK:
         app.cm.activeMode()
-        app.gm.newPhase("Action")
+        app.cm.GameState.newPhase("Action")
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
-
+    
 
 def imageToBase64(img):
     return base64.b64encode(cv2.imencode('.jpg', img)[1]).decode()
@@ -84,7 +94,7 @@ def renderConsole():
             (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
             (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'Round: {app.gm.getRoundCount():3}-{app.gm.getPhase()}',
+        consoleImage = cv2.putText(zeros, f'Round: {app.cm.GameState.getRoundCount():3}-{app.cm.GameState.getPhase()}',
             (50, 185), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
 
         ret, consoleImage = cv2.imencode('.jpg', zeros)
@@ -228,7 +238,6 @@ def resetHarmony():
     with DATA_LOCK:
         app.cm = HarmonyMachine(app.cc)
         app.cm.reset()
-        app.gm = app.cm.GameState
     return 'success'
 
 
@@ -250,7 +259,14 @@ def buildModeController():
     return """  <div class="btn-group" role="group" aria-label="harmony Capture Mode Control Buttons">
                   <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" {passiveChecked}hx-get="{harmonyURL}set_passive" hx-target="#modeController">
                   <label class="btn btn-outline-primary" for="passive">Passive</label>
-                  <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" {activeChecked}hx-get="{harmonyURL}set_track" hx-target="#modeController">
+                  <input type="radio" class="btn-check" name
+
+@harmony.route('/declare_actions', methods=['GET'])
+def declareActions():
+    with DATA_LOCK:
+        app.cm.passiveMode()
+        GameState.nextState("Declare")
+    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))="btnradio" id="track" autocomplete="off" {activeChecked}hx-get="{harmonyURL}set_track" hx-target="#modeController">
                   <label class="btn btn-outline-primary" for="track">Track</label>
                 </div>""".replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
@@ -325,7 +341,7 @@ def getObjectTable():
 
 def buildObjectActionResolver():
     table = ""
-    for objAction in app.cm.GameState.declaredEvents:
+    for objAction in qs.GameState.getDeclaredEvents():
         value = "" if objAction.result is None else objAction.result
         table += f"""<input class="number" id="objectActionResolver" hx-post="{url_for(".buildHarmony")}objects/{objAction.cap.oid}/take_action" value="{value}">"""
     return table
