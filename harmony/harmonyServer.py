@@ -38,7 +38,6 @@ def gameStateButton(gameState):
     else:
         print(f"Unknown gameState: {gameState}")
         button = ""
-        print(f"Hmmm -- {app.cm.GameState.getPhase()}")
     return button.replace("{harmonyURL}", url_for(".buildHarmony"))
 
 
@@ -97,7 +96,11 @@ def renderConsole():
             (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
             (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'Round: {app.cm.GameState.getRoundCount():3}-{app.cm.GameState.getPhase()}',
+        try:
+            roundCount = app.cm.GameState.getRoundCount()
+        except TypeError:
+            roundCount = "N/A"
+        consoleImage = cv2.putText(zeros, f'Round: {roundCount:3}-{app.cm.GameState.getPhase()}',
             (50, 185), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
 
         ret, consoleImage = cv2.imencode('.jpg', zeros)
@@ -239,7 +242,6 @@ def combinedCamerasWithChangesResponse():
 @harmony.route('/reset')
 def resetHarmony():
     with DATA_LOCK:
-        app.cm = HarmonyMachine(app.cc)
         app.cm.reset()
     return 'success'
 
@@ -415,11 +417,11 @@ def findObjectIdOr404(objectId_endpoint: Callable) -> Callable:
     def findOr404_endpoint(**kwargs):
         try:
             objectId = kwargs.pop("objectId")
-            return objectId_endpoint(cap=app.cm.findObject(objectId=objectId), **kwargs)
         except KeyError as ke:
             error = f"{objectId} Not found"
             print(error)
             return error, 404
+        return objectId_endpoint(cap=app.cm.findObject(objectId=objectId), **kwargs)
     return findOr404_endpoint
     
     
@@ -442,17 +444,22 @@ def getObject(cap):
 @harmony.route('/objects/<objectId>', methods=['POST'])
 @findObjectIdOr404
 def updateObjectSettings(cap):
-    newName = request.form["objectName"]
+    print("Update object called!!!")
+    objectKwargs = request.form.to_dict()
+    newName = objectKwargs.pop("objectName")
     #TODO: rename game object
     if newName != cap.oid:
         cap.oid = newName
-    objectKwargs = {}
-    cm.classifyObject(objectId=cap.oid, objectType=, objectSubType=, objectKwargs=)
-    for key, value in request.form.items():
-        if key == 'objectName':
-            continue
-        setattr(cap, key, value)
-    # TODO: create/update MC objects
+
+    objectType = objectKwargs.pop('objectType')
+    objectSubType = objectKwargs.pop('Class')
+    app.cm.classifyObject(
+        objectId=cap.oid,
+        objectType=objectType,
+        objectSubType=objectSubType,
+        objectKwargs=objectKwargs)
+
+    print(f"{cap.oid} created!!!")
     return buildObjectsFilter()
     
     
@@ -481,6 +488,8 @@ def declareNoAction(cap):
 def buildObjectSettings(obj):
     objType = getattr(obj, 'objectType', 'None')
     terrainSelected, buildingSelected, unitSelected = '', '', ''
+
+    # TODO: build settings from QuantumSystem constructors
     if objType == "Terrain":
         settings = {"Rating": getattr(obj, "Rating", "1"), "Elevation": getattr(obj, "Elevation", "5")}
         terrainSelected = " selected='selected'"
@@ -685,6 +694,7 @@ def create_harmony_app():
     app = Flask(__name__)
     app.cc = CalibratedCaptureConfiguration()
     app.cc.capture()
+    app.cm = HarmonyMachine(app.cc)
     app.register_blueprint(configurator, url_prefix='/configurator')
     app.register_blueprint(harmony, url_prefix='/harmony')
     resetHarmony()
