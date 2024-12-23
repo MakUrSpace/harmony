@@ -1,9 +1,5 @@
 import os
-import cv2
 from math import ceil
-import numpy as np
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from matplotlib.figure import Figure
 import base64
 import argparse
 import json
@@ -11,13 +7,18 @@ from io import BytesIO
 from dataclasses import dataclass
 from typing import Callable
 from functools import wraps
-
 import threading
 import atexit
-from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for
 from traceback import format_exc
 
+import cv2
+import numpy as np
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
+from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for
+
 from observer.configurator import configurator, setConfiguratorApp
+from observer.observer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
 from ipynb.fs.full.HarmonyMachine import HarmonyMachine, ObjectAction
 
@@ -35,7 +36,9 @@ def gameStateButton(gameState):
     elif gameState == "Action":
         button = """<input type="button" class="btn btn-info" name="commitActions" id="passive" hx-get="{harmonyURL}commit_actions" hx-target="#objectInteractor" value="Commit Actions">"""
     else:
-        raise Exception(f"Unknown gameState: {gameState}")
+        print(f"Unknown gameState: {gameState}")
+        button = ""
+        print(f"Hmmm -- {app.cm.GameState.getPhase()}")
     return button.replace("{harmonyURL}", url_for(".buildHarmony"))
 
 
@@ -440,8 +443,11 @@ def getObject(cap):
 @findObjectIdOr404
 def updateObjectSettings(cap):
     newName = request.form["objectName"]
+    #TODO: rename game object
     if newName != cap.oid:
         cap.oid = newName
+    objectKwargs = {}
+    cm.classifyObject(objectId=cap.oid, objectType=, objectSubType=, objectKwargs=)
     for key, value in request.form.items():
         if key == 'objectName':
             continue
@@ -461,7 +467,7 @@ def deleteObjectSettings(cap):
 @findObjectIdOr404
 def declareAttackOnTarget(cap, targetId):
     target = findObject(targetId)
-    app.cm.GameState.declareAction(ObjectAction(cap=cap, target=targetId, result=None))
+    app.cm.declareEvent(eventType="Attack", eventFaction="Undeclared", eventObject=cap.oid, eventValue=targetId, eventResult="null")
     return buildObjectActions(cap)
     
     
@@ -590,6 +596,8 @@ def objectTakeAction(cap):
 @harmony.route('/objects/<objectId>/footprint_editor', methods=['GET'])
 @findObjectIdOr404
 def buildFootprintEditor(cap):
+    from flask import Flask, redirect, Response, Blueprint
+    from observer.observer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
     objectName = cap.oid
     with open("harmony_templates/TrackedObjectFootprintEditor.html") as f:
         template = f.read()
@@ -671,9 +679,8 @@ def setHarmonyApp(newApp):
     app = newApp
 
 
-if __name__ == "__main__":
-    from flask import Flask, redirect, Response, Blueprint
-    from observer.observer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
+def create_harmony_app():
+    global app
     
     app = Flask(__name__)
     app.cc = CalibratedCaptureConfiguration()
@@ -707,6 +714,12 @@ if __name__ == "__main__":
         return Response(htmx, mimetype="application/javascript")
     
     registerCaptureService(app)
+
+    return app
+
+
+if __name__ == "__main__":
+    create_harmony_app()
     PORT = 7000
     print(f"Launching harmony Server on {PORT}")
     app.run(host="0.0.0.0", port=PORT)
