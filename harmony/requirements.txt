@@ -2,12 +2,10 @@ requests
 flask
 gunicorn
 ipynb
-pyzbar
 opencv-python
 opencv-contrib-python
 imutils
 matplotlib
 ipython-autotime
 uvicorn
-cogdb
 pygraphviz
