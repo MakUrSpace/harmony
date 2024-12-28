@@ -4,6 +4,6 @@ digraph DMA {
 	foo -> bar [label=System color=black len=2]
 	4 [color=purple]
 	foo -> 4 [label=IntegerSystem color=black len=2]
-	"[1, 2, 3]" [color=red]
+	"[1, 2, 3]" [color=chartreuse4]
 	bar -> "[1, 2, 3]" [label=IntegerArraySystem color=coral len=2]
 }
