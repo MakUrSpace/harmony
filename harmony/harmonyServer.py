@@ -20,7 +20,7 @@ from flask import Flask, Blueprint, render_template, Response, request, make_res
 from observer.configurator import configurator, setConfiguratorApp
 from observer.observer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
-from ipynb.fs.full.HarmonyMachine import HarmonyMachine, ObjectAction
+from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, qs
 
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
@@ -65,14 +65,14 @@ def commitMovement():
 def declareActions():
     with DATA_LOCK:
         app.cm.passiveMode()
-        GameState.nextState("Declare")
+        app.cm.GameState.newPhase("Declare")
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
 @harmony.route('/commit_actions', methods=['GET'])
 def commitActions():
     with DATA_LOCK:
-        app.cm.activeMode()
+        app.cm.trackMode()
         app.cm.GameState.newPhase("Action")
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
     
@@ -239,6 +239,18 @@ def combinedCamerasWithChangesResponse():
     return Response(genCombinedCameraWithChangesView(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+def generateGameGraph():
+    graph = qs.render()
+    yield (b'--frame\r\n'
+           b'Content-Type: image/svg\r\n\r\n' + graph.pipe(encoding='utf-8') + b'\r\n')
+
+
+@harmony.route('/gamegraph')
+def game_graph_stream():
+    return Response(generateGameGraph(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+
 @harmony.route('/reset')
 def resetHarmony():
     with DATA_LOCK:
@@ -264,14 +276,7 @@ def buildModeController():
     return """  <div class="btn-group" role="group" aria-label="harmony Capture Mode Control Buttons">
                   <input type="radio" class="btn-check" name="btnradio" id="passive" autocomplete="off" {passiveChecked}hx-get="{harmonyURL}set_passive" hx-target="#modeController">
                   <label class="btn btn-outline-primary" for="passive">Passive</label>
-                  <input type="radio" class="btn-check" name
-
-@harmony.route('/declare_actions', methods=['GET'])
-def declareActions():
-    with DATA_LOCK:
-        app.cm.passiveMode()
-        GameState.nextState("Declare")
-    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))="btnradio" id="track" autocomplete="off" {activeChecked}hx-get="{harmonyURL}set_track" hx-target="#modeController">
+                  <input type="radio" class="btn-check" name="btnradio" id="track" autocomplete="off" {activeChecked}hx-get="{harmonyURL}set_track" hx-target="#modeController">
                   <label class="btn btn-outline-primary" for="track">Track</label>
                 </div>""".replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
@@ -290,7 +295,7 @@ def buildHarmony():
         resetHarmony()
     with open("harmony_templates/Harmony.html", "r") as f:
         template = f.read()
-    cameraButtons = '<input type="button" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">' + ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
+    cameraButtons = '<input type="button" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">' + ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()]) + ' <input type="button" value="Game Graph" onclick="gameGraph()">'
     defaultCam = [camName for camName, cam in app.cc.cameras.items()]
     if len(defaultCam) == 0:
         defaultCam = "None"
@@ -444,20 +449,19 @@ def getObject(cap):
 @harmony.route('/objects/<objectId>', methods=['POST'])
 @findObjectIdOr404
 def updateObjectSettings(cap):
-    print("Update object called!!!")
     objectKwargs = request.form.to_dict()
     newName = objectKwargs.pop("objectName")
-    #TODO: rename game object
-    if newName != cap.oid:
-        cap.oid = newName
 
     objectType = objectKwargs.pop('objectType')
-    objectSubType = objectKwargs.pop('Class')
-    app.cm.classifyObject(
+    objectSubType = objectKwargs.pop('objectSubType')
+    cap = app.cm.classifyObject(
         objectId=cap.oid,
         objectType=objectType,
         objectSubType=objectSubType,
         objectKwargs=objectKwargs)
+
+    if newName != cap.oid:
+        cap.rename(newName)
 
     print(f"{cap.oid} created!!!")
     return buildObjectsFilter()
@@ -473,7 +477,6 @@ def deleteObjectSettings(cap):
 @harmony.route('/objects/<objectId>/declare_attack/<targetId>', methods=['POST'])
 @findObjectIdOr404
 def declareAttackOnTarget(cap, targetId):
-    target = findObject(targetId)
     app.cm.declareEvent(eventType="Attack", eventFaction="Undeclared", eventObject=cap.oid, eventValue=targetId, eventResult="null")
     return buildObjectActions(cap)
     
@@ -489,22 +492,36 @@ def buildObjectSettings(obj):
     objType = getattr(obj, 'objectType', 'None')
     terrainSelected, buildingSelected, unitSelected = '', '', ''
 
-    # TODO: build settings from QuantumSystem constructors
+    text_box_template = """<label for="{key}">{key}</label><input type="text" class="form-control" name="{key}" value="{value}">"""
+
+    objectSettings = []
     if objType == "Terrain":
-        settings = {"Rating": getattr(obj, "Rating", "1"), "Elevation": getattr(obj, "Elevation", "5")}
+        objectSettings.append(text_box_template.format(key="Rating", value=1))
+        objectSettings.append(text_box_template.format(key="Elevation", value=5))
         terrainSelected = " selected='selected'"
     elif objType == "Building":
-        settings = {"Class": getattr(obj, "Class", "Residential"), "Elevation": getattr(obj, "Elevation", "5")}
+        objectSettings.append(text_box_template.format(key="Elevation", value=5))
+        
+        structureTypes = """<select name="objectSubType" id="objectSubType">"""
+        for structureType in HarmonyObject.objectFactories['Structure'].keys(): 
+            structureTypes += f"""<option value="{structureType}">{structureType}</option>"""
+        structureTypes += "</select>"
+        objectSettings.append(structureTypes)
+        
         buildingSelected = " selected='selected'"
     elif objType == "Unit":
-        settings = {"Class": getattr(obj, "Class", "Atlas"), "Skill": str(getattr(obj, "Skill", 4))}
+        unitTypes = """<select name="objectSubType" id="objectSubType">"""
+        for unitType in HarmonyObject.objectFactories['Unit'].keys(): 
+            unitTypes += f"""<option value="{unitType}">{unitType}</option>"""
+        unitTypes += "</select>"
+        objectSettings.append(unitTypes)
+        objectSettings.append(text_box_template.format(key="Skill", value=4))
+
         unitSelected = " selected='selected'"
     else:
         settings = {}
 
-    objectSettings = "<br>".join([
-        f"""<label for="{key}">{key}</label><input type="text" class="form-control" name="{key}" value="{value}">"""
-        for key, value in settings.items()])
+    objectSettings = "<br>".join(objectSettings)
 
     return """
     <select name="objectType" id="objectType" hx-target="#objectSettings" hx-post='{harmonyURL}objects/{objectName}/type'>
@@ -562,9 +579,9 @@ def buildObjectActions(cap):
                 "{objectName}", cap.oid).replace(
                 "{targetName}", target.oid).replace(
                 "{encodedBA}", imageToBase64(target.visual())).replace(
-                "{objectDistance}", f"{targetRange.capitalize()} ({action.targetDistance / 25.4:6.1f} in)").replace(
+                "{objectDistance}", f"{action.targetRange.capitalize()} ({action.targetDistance / 25.4:6.1f} in)").replace(
                 "{declare}", declare).replace(
-                "{skill}", cap.Skill).replace(
+                "{skill}", str(action.skill)).replace(
                 "{attackerMovementModifier}", str(action.aMM)).replace(
                 "{targetMovementModifier}", str(action.tMM)).replace(
                 "{range}", str(action.rangeModifier)).replace(
