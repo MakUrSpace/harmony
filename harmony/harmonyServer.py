@@ -20,7 +20,7 @@ from flask import Flask, Blueprint, render_template, Response, request, make_res
 from observer.configurator import configurator, setConfiguratorApp
 from observer.observer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
-from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, qs
+from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, GameEvent, qs
 
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
@@ -71,6 +71,15 @@ def declareActions():
 
 @harmony.route('/commit_actions', methods=['GET'])
 def commitActions():
+    with DATA_LOCK:
+        app.cm.trackMode()
+        app.cm.GameState.newPhase("Action")
+    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
+
+
+@harmony.route('/commit_actions', methods=['POST'])
+def commitActionForm():
+    # TODO: interrogate action resolution form for completion before moving phase
     with DATA_LOCK:
         app.cm.trackMode()
         app.cm.GameState.newPhase("Action")
@@ -334,12 +343,21 @@ def captureToChangeRow(capture):
     return changeRow
 
 
+
 def buildObjectTable(filter=None):
     changeRows = []
-    for capture in app.cm.memory:
-        if filter is not None and getattr(capture, 'objectType', None) != filter:
-            continue
-        changeRows.append(captureToChangeRow(capture))
+    if filter == "Event":
+        for de in GameEvent.get_declared_events():
+            # TODO: Add cancel event button
+            changeRows.append(f"""
+                <div class="row mb-1 border border-secondary border-2">
+                    <h5>{de.GameEventObject.terminant}</h5><h4>{de.GameEventType.terminant}</h4><h5>{de.GameEventValue.terminant}</h5>
+                </div>""")
+    else:
+        for capture in app.cm.memory:
+            if filter is not None and getattr(capture, 'objectType', None) != filter:
+                continue
+            changeRows.append(captureToChangeRow(capture))
     return " ".join(changeRows)
 
 
@@ -350,20 +368,30 @@ def getObjectTable():
 
 
 def buildObjectActionResolver():
-    table = ""
-    for objAction in qs.GameState.getDeclaredEvents():
-        value = "" if objAction.result is None else objAction.result
-        table += f"""<input class="number" id="objectActionResolver" hx-post="{url_for(".buildHarmony")}objects/{objAction.cap.oid}/take_action" value="{value}">"""
-    return table
+    table = f"""<div class="container"><form hx-post="{url_for(".buildHarmony")}commit_actions" hx-target="#objectInteractor">"""
+    for objAction in GameEvent.get_declared_events():
+        if objAction.GameEventType.terminant in [None, "NoAction"]:
+            continue
+        value = "" if objAction.GameEventResult.terminant in [None, "null"] else objAction.GameEventResult.terminant
+        gameObject = objAction.GameEventObject.terminant
+        eventType = objAction.GameEventType.terminant
+        gameValue = objAction.GameEventValue.terminant
+        table += f"""
+            <label class="btn btn-outline-primary" for="{gameObject}-objectActionResolver">{gameObject} {eventType} {gameValue}</label>
+            <input type="number" id="{gameObject}-objectActionResolver" hx-post="{url_for(".buildHarmony")}objects/{gameObject}/resolve_action" max="100" value="{value}"><br>"""
+    table += """<input type="submit" class="btn btn-danger" value="Commit Actions"></form></div>"""
+    return """<div class="row ">
+                <h2 class="mt-5">Object Action Resolver</h2>
+            </div>""" + table
 
 
 def buildObjectsFilter(filter=None):
-    if app.cm.GameState.getPhase() == "Resolve":
+    if app.cm.GameState.getPhase() == "Action":
         return buildObjectActionResolver()
 
-    assert filter in [None, 'None', 'Terrain', 'Building', 'Unit'], f"Unrecognized filter type: {filter}"
+    assert filter in [None, 'None', 'Terrain', 'Building', 'Unit', 'Event'], f"Unrecognized filter type: {filter}"
     buildObjectsFilter.filter = filter
-    noneSelected, terrainSelected, buildingSelected, unitSelected = "", "", "", ""
+    noneSelected, terrainSelected, buildingSelected, unitSelected, eventSelected = "", "", "", "", ""
     if filter == 'None' or filter is None:
         filterQuery = ''
         noneSelected = ' checked="checked"'
@@ -376,6 +404,9 @@ def buildObjectsFilter(filter=None):
     elif filter == 'Unit':
         filterQuery = '?filter=Unit'
         unitSelected = ' checked="checked"'
+    elif filter == 'Event':
+        filterQuery = '?filter=Event'
+        eventSelected = ' checked="checked"'
         
     template = """
     <div id="objectFilter"class="btn-group" role="group" aria-label="Objects Table Filter Select Buttons">
@@ -387,6 +418,8 @@ def buildObjectsFilter(filter=None):
       <label class="btn btn-outline-primary" for="Building">Building</label>
       <input type="radio" class="btn-check" name="objectFilterradio" id="Unit" autocomplete="off" {unitSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Unit" hx-target="#objectInteractor">
       <label class="btn btn-outline-primary" for="Unit">Unit</label>
+      <input type="radio" class="btn-check" name="objectFilterradio" id="Event" autocomplete="off" {eventSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Event" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="Event">Event</label>
     </div>
     <div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>"""
     template = template.replace(
@@ -452,16 +485,17 @@ def updateObjectSettings(cap):
     objectKwargs = request.form.to_dict()
     newName = objectKwargs.pop("objectName")
 
-    objectType = objectKwargs.pop('objectType')
-    objectSubType = objectKwargs.pop('objectSubType')
-    cap = app.cm.classifyObject(
-        objectId=cap.oid,
-        objectType=objectType,
-        objectSubType=objectSubType,
-        objectKwargs=objectKwargs)
-
-    if newName != cap.oid:
-        cap.rename(newName)
+    with DATA_LOCK:
+        objectType = objectKwargs.pop('objectType')
+        objectSubType = objectKwargs.pop('objectSubType')
+        cap = app.cm.classifyObject(
+            objectId=cap.oid,
+            objectType=objectType,
+            objectSubType=objectSubType,
+            objectKwargs=objectKwargs)
+    
+        if newName != cap.oid:
+            cap.rename(newName)
 
     print(f"{cap.oid} created!!!")
     return buildObjectsFilter()
@@ -470,21 +504,24 @@ def updateObjectSettings(cap):
 @harmony.route('/objects/<objectId>', methods=['DELETE'])
 @findObjectIdOr404
 def deleteObjectSettings(cap):
-    app.cm.deleteObject(cap.oid)
+    with DATA_LOCK:
+        app.cm.deleteObject(cap.oid)
     return buildObjectsFilter()
     
     
 @harmony.route('/objects/<objectId>/declare_attack/<targetId>', methods=['POST'])
 @findObjectIdOr404
 def declareAttackOnTarget(cap, targetId):
-    app.cm.declareEvent(eventType="Attack", eventFaction="Undeclared", eventObject=cap.oid, eventValue=targetId, eventResult="null")
+    with DATA_LOCK:
+        app.cm.declareEvent(eventType="Attack", eventFaction="Undeclared", eventObject=cap.oid, eventValue=targetId, eventResult="null")
     return buildObjectActions(cap)
     
     
 @harmony.route('/objects/<objectId>/declare_no_action', methods=['POST'])
 @findObjectIdOr404
 def declareNoAction(cap):
-    app.cm.GameState.declareAction(ObjectAction(cap=cap, target=None, result=None))
+    with DATA_LOCK:
+        app.cm.declareEvent(eventType="NoAction", eventFaction="Undeclared", eventObject=cap.oid, eventValue=None, eventResult="null")
     return buildObjectActions(cap)
 
 
@@ -561,21 +598,30 @@ def buildObjectActions(cap):
     with open("harmony_templates/ObjectActionCard.html") as f:
         cardTemplate = f.read()
     objActCards = []
+    try:
+        capDeclaredAction = GameEvent.get_existing_declarations(cap.oid)[0]
+        capDeclaredTarget = capDeclaredAction.GameEventValue.terminant
+        if capDeclaredTarget is not None:
+            capDeclaredTarget = app.cm.findObject(capDeclaredTarget)
+    except IndexError:
+        capDeclaredAction = None
+        capDeclaredTarget = None
     for target in app.cm.memory:
         if target.oid == cap.oid:
             continue
         else:
             declare = ""
+            action = ObjectAction(cap, target)
+            selected = capDeclaredAction is not None and capDeclaredTarget == target
             if app.cm.GameState.getPhase() == "Declare":
-                # TODO: fix with new gamestate disabled = "" if cap.oid not in app.cm.GameState.declaredEvents or target.oid != getattr(app.cm.GameState.declaredEvents[cap.oid], 'target', None) else "disabled"
-                disabled = ""
+                disabled = "disabled" if selected else ""
                 declare = f"""
                 <div class="col">
                     <input {disabled} type="button" class="btn btn-warning" value="Declare Attack" id="declare_{target.oid}" hx-target="#objectInteractor" hx-post="{url_for(".buildHarmony")}objects/{cap.oid}/declare_attack/{target.oid}">
                 </div>"""
-            action = ObjectAction(cap, target)
             objActCards.append(cardTemplate.replace(
                 "{harmonyURL}", url_for(".buildHarmony")).replace(
+                "{cardBorder}", "" if not selected else "border border-secondary border-3").replace(
                 "{objectName}", cap.oid).replace(
                 "{targetName}", target.oid).replace(
                 "{encodedBA}", imageToBase64(target.visual())).replace(
@@ -588,11 +634,11 @@ def buildObjectActions(cap):
                 "{other}", "0").replace(
                 "{targetNumber}", str(action.targetNumber)))
 
-    if app.cm.GameState.getPhase() == "Action":
-        # TODO: fix with new game state disabled = "" if cap.oid not in GameState.declaredActions or GameState.declaredActions[cap.oid] != {} else "disabled"
-        disabled= ""
+    if app.cm.GameState.getPhase() == "Declare":
+        selected = capDeclaredAction is not None and capDeclaredTarget is None
+        disabled = "disabled" if selected else ""
         objActCards.append(f"""
-        <div class="row mb-1 border border-secondary border-2">
+        <div class="row mb-1 {"border border-secondary border-5" if selected else ""}">
             <input {disabled} type="button" class="btn btn-danger" value="Take No Action" id="no_action" hx-target="#objectInteractor" hx-post="{url_for(".buildHarmony")}objects/{cap.oid}/declare_no_action">
         </div>
         """.replace("{harmonyURL}", url_for(".buildHarmony")).replace("{objectName}", cap.oid))
@@ -612,10 +658,13 @@ def getObjectActions(cap):
     return buildObjectActions(cap)
 
 
-@harmony.route('/objects/<objectId>/take_action', methods=['POST'])
+@harmony.route('/objects/<objectId>/resolve_action', methods=['POST'])
 @findObjectIdOr404
-def objectTakeAction(cap):
-    result = request.form["actionResult"]
+def resolveTakeAction(cap):
+    objectActionEvent = GameEvent.get_existing_declarations(cap.oid)[0]
+    result = request.form[f"{cap.oid}-objectActionResolver"]
+    with DATA_LOCK:
+        GameEvent.set_result(gameEvent=objectActionEvent.meta_anchor, result=result)
     return buildObjectActions(cap)
     
 
@@ -647,7 +696,6 @@ def objectVisualWithMargin(cap):
 @harmony.route('/objects/<objectId>/project_addition', methods=['POST'])
 @findObjectIdOr404
 def projectAdditionOntoObject(cap):
-    #margin = getattr(cap, "margin", 5)
     margin = 50
     addition_points = json.loads(request.form["additionPolygon"])
     addition_points = np.int32(addition_points)
@@ -675,7 +723,8 @@ def combineObjectWithAddition(cap):
     projected_addition_and_contours = cv2.polylines(contour_image, [adjusted_addition_points], isClosed=True, color=(255), thickness=3)
     _, thresh = cv2.threshold(projected_addition_and_contours, 127, 255, 0)
     newChangeContours = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-    cap.changeSet[camName].overrideChangeContours(newChangeContours)
+    with DATA_LOCK:
+        cap.changeSet[camName].overrideChangeContours(newChangeContours)
     return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(cap.visual(withContours=True, margin=margin))}" style="border-radius: 10px;">"""
 
 
