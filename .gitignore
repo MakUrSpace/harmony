@@ -131,3 +131,7 @@ dmypy.json
 # Python environments
 .python-version
 .*venv
+
+# sqlite databases
+.db
+.db*
