@@ -1,9 +1,7 @@
-pygraphviz
+graphviz
 jupyterlab
-cogdb
 flask>=2.2.2
 ipynb
-pyzbar
 opencv-python
 opencv-contrib-python
 imutils
