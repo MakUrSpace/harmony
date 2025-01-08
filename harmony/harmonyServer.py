@@ -34,7 +34,7 @@ def gameStateButton(gameState):
     elif gameState == "Declare":
         button = """<input type="button" class="btn btn-info" name="declareActions" id="passive" hx-get="{harmonyURL}declare_actions" hx-target="#objectInteractor" value="Declare Actions">"""
     elif gameState == "Action":
-        button = """<input type="button" class="btn btn-info" name="commitActions" id="passive" hx-get="{harmonyURL}commit_actions" hx-target="#objectInteractor" value="Commit Actions">"""
+        button = ""
     else:
         print(f"Unknown gameState: {gameState}")
         button = ""
@@ -69,21 +69,34 @@ def declareActions():
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
-@harmony.route('/commit_actions', methods=['GET'])
-def commitActions():
-    with DATA_LOCK:
-        app.cm.trackMode()
-        app.cm.GameState.newPhase("Action")
-    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
+@harmony.route('/resolve_actions', methods=['POST'])
+def resolveActionForm():
+    try:
+        actionData = {key.split("|||||")[0]: result for key, result in request.form.items()}
+    except Exception as e:
+        raise Exception(f"Unrecognized form data: {request.form}") from e
+    print(f"Received actions: {actionData} -- {request.form}")
+    for actor, result in actionData.items():
+        try:
+            objectActionEvent = GameEvent.get_existing_declarations(actor)[0]
+        except Exception as e:
+            raise Exception(f"Failed to recover {actor} actions") from e
+        with DATA_LOCK:
+            GameEvent.set_result(gameEvent=objectActionEvent.meta_anchor, newResult=result)
 
+    unresolved_actions = [ge for ge in GameEvent.get_declared_events() if ge.GameEventResult.terminant in ['null', None]]
 
-@harmony.route('/commit_actions', methods=['POST'])
-def commitActionForm():
-    # TODO: interrogate action resolution form for completion before moving phase
-    with DATA_LOCK:
-        app.cm.trackMode()
-        app.cm.GameState.newPhase("Action")
-    return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
+    if unresolved_actions:
+        console_message = f"{len(unresolved_actions)} Unresolved actions"
+        with DATA_LOCK:
+            global CONSOLE_OUTPUT
+            CONSOLE_OUTPUT = console_message
+        return buildObjectActionResolver()
+    else:
+        with DATA_LOCK:
+            app.cm.trackMode()
+            app.cm.GameState.newPhase("Action")
+        return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
     
 
 def imageToBase64(img):
@@ -343,7 +356,6 @@ def captureToChangeRow(capture):
     return changeRow
 
 
-
 def buildObjectTable(filter=None):
     changeRows = []
     if filter == "Event":
@@ -368,7 +380,7 @@ def getObjectTable():
 
 
 def buildObjectActionResolver():
-    table = f"""<div class="container"><form hx-post="{url_for(".buildHarmony")}commit_actions" hx-target="#objectInteractor">"""
+    table = ""
     for objAction in GameEvent.get_declared_events():
         if objAction.GameEventType.terminant in [None, "NoAction"]:
             continue
@@ -377,12 +389,21 @@ def buildObjectActionResolver():
         eventType = objAction.GameEventType.terminant
         gameValue = objAction.GameEventValue.terminant
         table += f"""
-            <label class="btn btn-outline-primary" for="{gameObject}-objectActionResolver">{gameObject} {eventType} {gameValue}</label>
-            <input type="number" id="{gameObject}-objectActionResolver" hx-post="{url_for(".buildHarmony")}objects/{gameObject}/resolve_action" max="100" value="{value}"><br>"""
-    table += """<input type="submit" class="btn btn-danger" value="Commit Actions"></form></div>"""
-    return """<div class="row ">
+            <div class="row">
+                <label class="btn btn-outline-primary" for="{gameObject}Resolver">{gameObject} {eventType} {gameValue}</label>
+                <input type="number" name="{gameObject}|||||Resolver" max="100" value="{value}"><br>
+            </div>"""
+    return f"""<div class="row">
                 <h2 class="mt-5">Object Action Resolver</h2>
-            </div>""" + table
+            </div>
+            <div class="row">
+                <div class="container">
+                    <form hx-post="{url_for(".buildHarmony")}resolve_actions" hx-target="#objectInteractor">
+                        {table}
+                        <input type="submit" class="btn btn-danger" value="Commit Actions">
+                    </form>
+                </div>
+            </div>"""
 
 
 def buildObjectsFilter(filter=None):
@@ -655,16 +676,6 @@ def buildObjectActions(cap):
 @harmony.route('/objects/<objectId>/actions', methods=['GET'])
 @findObjectIdOr404
 def getObjectActions(cap):
-    return buildObjectActions(cap)
-
-
-@harmony.route('/objects/<objectId>/resolve_action', methods=['POST'])
-@findObjectIdOr404
-def resolveTakeAction(cap):
-    objectActionEvent = GameEvent.get_existing_declarations(cap.oid)[0]
-    result = request.form[f"{cap.oid}-objectActionResolver"]
-    with DATA_LOCK:
-        GameEvent.set_result(gameEvent=objectActionEvent.meta_anchor, result=result)
     return buildObjectActions(cap)
     
 
