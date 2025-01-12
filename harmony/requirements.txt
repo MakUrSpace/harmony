@@ -1,7 +1,7 @@
 requests
 flask
 gunicorn
-ipynb
+importnb
 opencv-python
 opencv-contrib-python
 imutils

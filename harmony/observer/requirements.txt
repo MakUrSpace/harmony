@@ -1,6 +1,6 @@
 # python3-opencv
 flask
-ipynb
+importnb
 pyzbar
 opencv-python
 opencv-contrib-python

@@ -20,7 +20,7 @@ from flask import Flask, Blueprint, render_template, Response, request, make_res
 from observer.configurator import configurator, setConfiguratorApp
 from observer.observer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
-from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, GameEvent, qs
+from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, GameEvent, Mech, qs, mc
 
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
@@ -317,7 +317,8 @@ def buildHarmony():
         resetHarmony()
     with open("harmony_templates/Harmony.html", "r") as f:
         template = f.read()
-    cameraButtons = '<input type="button" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">' + ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()]) + ' <input type="button" value="Game Graph" onclick="gameGraph()">'
+    cameraButtons = ' '.join([f'''<input type="button" class="btn btn-info" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
+    cameraButtons = f"""<input type="button" class="btn btn-info" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">{cameraButtons}<input type="button" class="btn btn-info" value="Game Graph" onclick="gameGraph()">"""
     defaultCam = [camName for camName, cam in app.cc.cameras.items()]
     if len(defaultCam) == 0:
         defaultCam = "None"
@@ -343,6 +344,7 @@ def captureToChangeRow(capture):
         health += "[ ] "
     with open("harmony_templates/TrackedObjectRow.html") as f:
         changeRowTemplate = f.read()
+    # moveDistance = app.cm.lastMoveDistance(capture) -- movement distance this round
     moveDistance = app.cm.cc.rsc.trackedObjectLastDistance(capture)
     moveDistance = "None" if moveDistance is None else f"{moveDistance:6.0f} mm"
     changeRow = changeRowTemplate.replace(
@@ -353,6 +355,10 @@ def captureToChangeRow(capture):
         "{encodedBA}", imageToBase64(capture.visual(withContours=False))).replace(
         "{actions}", "" if getattr(capture, 'objectType', None) != "Unit" else f"""<button class="btn btn-primary" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Object Actions</button>""").replace(
         "{edit}", "" if app.cm.GameState.getPhase() != "Add" else f"""<button class="btn btn-info" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}">Edit</button>""")
+    if isinstance(capture, HarmonyObject):
+        changeRow = changeRow.replace(
+            "{armorPlating}", f"{mc.ArmorPlatingDamage(capture.oid).terminant}/{mc.ArmorPlating(capture.oid).terminant}").replace(
+            "{armorStructural}", f"{mc.ArmorStructrucalDamage(capture.oid).terminant}/{mc.ArmorStructrucal(capture.oid).terminant}")
     return changeRow
 
 
@@ -395,6 +401,7 @@ def buildObjectActionResolver():
             </div>"""
     return f"""<div class="row">
                 <h2 class="mt-5">Object Action Resolver</h2>
+                <div id="objectsSummary" class="text-warning" hx-get="{url_for(".buildHarmony")}objects_summary" hx-trigger="every 1.3s"></div>
             </div>
             <div class="row">
                 <div class="container">
@@ -404,6 +411,24 @@ def buildObjectActionResolver():
                     </form>
                 </div>
             </div>"""
+
+
+@harmony.route('/objects_summary', methods=['GET'])
+def getObjectSummary():
+    num_units = len(Mech.entities())
+    objects_summary = ""
+    match app.cm.GameState.getPhase():
+        case "Move":
+            num_moved = len(GameEvent.get_declared_events())
+            objects_summary = f"{num_moved}/{num_units} Movements Declared"
+        case "Declare":
+            declared_actions = len(GameEvent.get_declared_events())
+            objects_summary = f"{declared_actions}/{num_units} Actions Declared"
+        case "Action":
+            declared_actions = len(GameEvent.get_declared_events())
+            objects_summary = f"{declared_actions} Actions to Resolve"
+    
+    return f"""<h4>{objects_summary}</h4>"""
 
 
 def buildObjectsFilter(filter=None):
@@ -430,6 +455,10 @@ def buildObjectsFilter(filter=None):
         eventSelected = ' checked="checked"'
         
     template = """
+    <div class="row ">
+        <h2 class="mt-5">Object Tracker</h2>
+        <div id="objectsSummary" class="text-warning" hx-get="{harmonyURL}objects_summary" hx-trigger="every 1.3s"></div>
+    </div>
     <div id="objectFilter"class="btn-group" role="group" aria-label="Objects Table Filter Select Buttons">
       <input type="radio" class="btn-check" name="objectFilterradio" id="None" autocomplete="off" {noneSelected} hx-get="{harmonyURL}objects_filter" hx-target="#objectInteractor">
       <label class="btn btn-outline-primary" for="None">None</label>
@@ -443,7 +472,7 @@ def buildObjectsFilter(filter=None):
       <label class="btn btn-outline-primary" for="Event">Event</label>
     </div>
     <div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>"""
-    template = template.replace(
+    return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{filter}", filterQuery).replace(
         "{noneSelected}", noneSelected).replace(
@@ -451,9 +480,6 @@ def buildObjectsFilter(filter=None):
         "{buildingSelected}", buildingSelected).replace(
         "{unitSelected}", unitSelected).replace(
         "{objectRows}", buildObjectTable(filter))
-    return """<div class="row ">
-                <h2 class="mt-5">Object Tracker</h2>
-            </div>""" + template
 
 
 def getInteractor():
