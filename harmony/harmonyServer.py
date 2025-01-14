@@ -84,7 +84,7 @@ def resolveActionForm():
         with DATA_LOCK:
             GameEvent.set_result(gameEvent=objectActionEvent.meta_anchor, newResult=result)
 
-    unresolved_actions = [ge for ge in GameEvent.get_declared_events() if ge.GameEventResult.terminant in ['null', None]]
+    unresolved_actions = [ge for ge in GameEvent.get_declared_events() if ge.GameEventResult.terminant in ['null', None] and ge.GameEventType.terminant != "NoAction"]
 
     if unresolved_actions:
         console_message = f"{len(unresolved_actions)} Unresolved actions"
@@ -357,8 +357,13 @@ def captureToChangeRow(capture):
         "{edit}", "" if app.cm.GameState.getPhase() != "Add" else f"""<button class="btn btn-info" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}">Edit</button>""")
     if isinstance(capture, HarmonyObject):
         changeRow = changeRow.replace(
-            "{armorPlating}", f"{mc.ArmorPlatingDamage(capture.oid).terminant}/{mc.ArmorPlating(capture.oid).terminant}").replace(
-            "{armorStructural}", f"{mc.ArmorStructrucalDamage(capture.oid).terminant}/{mc.ArmorStructrucal(capture.oid).terminant}")
+            "{armorPlating}", f"{mc.ArmorPlating(capture.oid).terminant - mc.ArmorPlatingDamage(capture.oid).terminant}/{mc.ArmorPlating(capture.oid).terminant}").replace(
+            "{armorStructural}", f"{mc.ArmorStructural(capture.oid).terminant - mc.ArmorStructuralDamage(capture.oid).terminant}/{mc.ArmorStructural(capture.oid).terminant}")
+    else:
+        changeRow = changeRow.replace(
+            "{armorPlating}", "N/A").replace(
+            "{armorStructural}", "N/A")
+        
     return changeRow
 
 
@@ -568,7 +573,7 @@ def declareAttackOnTarget(cap, targetId):
 @findObjectIdOr404
 def declareNoAction(cap):
     with DATA_LOCK:
-        app.cm.declareEvent(eventType="NoAction", eventFaction="Undeclared", eventObject=cap.oid, eventValue=None, eventResult="null")
+        app.cm.declareEvent(eventType="NoAction", eventFaction="Undeclared", eventObject=cap.oid, eventValue="null", eventResult="null")
     return buildObjectActions(cap)
 
 
@@ -640,6 +645,7 @@ def updateObjectType(cap):
     with DATA_LOCK:
         cap.objectType = newType
     return buildObjectSettings(cap)    
+
 
 def buildObjectActions(cap):
     with open("harmony_templates/ObjectActionCard.html") as f:
