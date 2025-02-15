@@ -224,36 +224,37 @@ def genFullCam(camName):
 
 def genCombinedCameraWithChangesView():
     while True:
-        camImages = []
-        if app.cm.lastChanges is not None and not app.cm.lastChanges.empty:
-            print("Has changes")
-        if app.cm.lastClassification is not None:
-            print("Has class")
-        for camName in app.cc.cameras.keys():
-            camImage = app.cc.cameras[camName].mostRecentFrame.copy()
-            # Paint known objects blue
-            for memObj in app.cm.memory:
-                if memObj.changeSet[camName].changeType not in ['delete', None]:
-                    memContour = np.array([memObj.changeSet[camName].changePoints], dtype=np.int32)
-                    camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
-            # Paint last changes red
+        with DATA_LOCK:
+            camImages = []
             if app.cm.lastChanges is not None and not app.cm.lastChanges.empty:
-                lastChange = app.cm.lastChanges.changeSet[camName]
-                if lastChange is not None and lastChange.changeType not in ['delete', None]:
-                    lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
-                    camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
-            # Paint classification green
-            if app.cm.lastClassification is not None and not app.cm.lastClassification.empty:
-                lastClass = app.cm.lastClassification.changeSet[camName]
-                if lastClass is not None and lastClass.changeType not in ['delete', None]:
-                    lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
-                    camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
-            camImages.append(camImage)
-        camImage = vStackImages(camImages)
-        camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
-        ret, camImage = cv2.imencode('.jpg', camImage)
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+                print("Has changes")
+            if app.cm.lastClassification is not None:
+                print("Has class")
+            for camName in app.cc.cameras.keys():
+                camImage = app.cc.cameras[camName].mostRecentFrame.copy()
+                # Paint known objects blue
+                for memObj in app.cm.memory:
+                    if memObj.changeSet[camName].changeType not in ['delete', None]:
+                        memContour = np.array([memObj.changeSet[camName].changePoints], dtype=np.int32)
+                        camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
+                # Paint last changes red
+                if app.cm.lastChanges is not None and not app.cm.lastChanges.empty:
+                    lastChange = app.cm.lastChanges.changeSet[camName]
+                    if lastChange is not None and lastChange.changeType not in ['delete', None]:
+                        lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
+                        camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
+                # Paint classification green
+                if app.cm.lastClassification is not None and not app.cm.lastClassification.empty:
+                    lastClass = app.cm.lastClassification.changeSet[camName]
+                    if lastClass is not None and lastClass.changeType not in ['delete', None]:
+                        lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
+                        camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
+                camImages.append(camImage)
+            camImage = vStackImages(camImages)
+            camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
+            ret, camImage = cv2.imencode('.jpg', camImage)
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 
 
 @harmony.route('/combinedCamerasWithChanges')
@@ -270,7 +271,6 @@ def generateGameGraph():
 @harmony.route('/gamegraph')
 def game_graph_stream():
     return Response(generateGameGraph(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
 
 
 @harmony.route('/reset')
@@ -331,6 +331,16 @@ def buildHarmony():
         "{configuratorURL}", '/configurator')
 
 
+def objectCouldInteract(obj):
+    match app.cm.GameState.getPhase():
+        case "Move":
+            return not app.cm.objectHasMoved(obj)
+        case "Declare":
+            return not app.cm.objectHasDeclared(obj)
+        case "Action":
+            return not app.cm.objectHasResolved(obj)
+
+
 def captureToChangeRow(capture):
     encodedBA = imageToBase64(capture.visual())
     name = "None"
@@ -347,7 +357,15 @@ def captureToChangeRow(capture):
     # moveDistance = app.cm.lastMoveDistance(capture) -- movement distance this round
     moveDistance = app.cm.cc.rsc.trackedObjectLastDistance(capture)
     moveDistance = "None" if moveDistance is None else f"{moveDistance:6.0f} mm"
+
+    # Can object act in this phase (movement, declare, resolve)
+    if objectCouldInteract(capture):
+        borderType = "border-success border-3"
+    else:
+        borderType = "border-secondary border-2"
+    
     changeRow = changeRowTemplate.replace(
+        "{borderType}", borderType).replace(
         "{objectName}", capture.oid).replace(
         "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.cc.rsc.changeSetToRealCenter(capture)])).replace(
         "{moveDistance}", moveDistance).replace(
@@ -464,7 +482,7 @@ def buildObjectsFilter(filter=None):
         <h2 class="mt-5">Object Tracker</h2>
         <div id="objectsSummary" class="text-warning" hx-get="{harmonyURL}objects_summary" hx-trigger="every 1.3s"></div>
     </div>
-    <div id="objectFilter"class="btn-group" role="group" aria-label="Objects Table Filter Select Buttons">
+    <div id="objectFilter"class="btn-group" role="group" aria-labelbuildObjectActions="Objects Table Filter Select Buttons">
       <input type="radio" class="btn-check" name="objectFilterradio" id="None" autocomplete="off" {noneSelected} hx-get="{harmonyURL}objects_filter" hx-target="#objectInteractor">
       <label class="btn btn-outline-primary" for="None">None</label>
       <input type="radio" class="btn-check" name="objectFilterradio" id="Terrain" autocomplete="off" {terrainSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Terrain" hx-target="#objectInteractor">
@@ -654,6 +672,8 @@ def buildObjectActions(cap):
     try:
         capDeclaredAction = GameEvent.get_existing_declarations(cap.oid)[0]
         capDeclaredTarget = capDeclaredAction.GameEventValue.terminant
+        if capDeclaredTarget == "null":
+            capDeclaredTarget = None
         if capDeclaredTarget is not None:
             capDeclaredTarget = app.cm.findObject(capDeclaredTarget)
     except IndexError:
