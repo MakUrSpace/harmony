@@ -118,12 +118,13 @@ def renderConsole():
             (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'LO: {CONSOLE_OUTPUT}',
             (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        try:
-            roundCount = app.cm.GameState.getRoundCount()
-        except TypeError:
-            roundCount = "N/A"
-        consoleImage = cv2.putText(zeros, f'Round: {roundCount:3}-{app.cm.GameState.getPhase()}',
-            (50, 185), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
+        with DATA_LOCK:
+            try:
+                roundCount = app.cm.GameState.getRoundCount()
+            except TypeError:
+                roundCount = "N/A"
+            consoleImage = cv2.putText(zeros, f'Round: {roundCount:3}-{app.cm.GameState.getPhase()}',
+                (50, 185), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
 
         ret, consoleImage = cv2.imencode('.jpg', zeros)
         yield (b'--frame\r\n'
@@ -442,14 +443,15 @@ def getObjectSummary():
     objects_summary = ""
     match app.cm.GameState.getPhase():
         case "Move":
-            num_moved = len(GameEvent.get_declared_events())
+            num_moved = len(GameEvent.unitsMovedThisRound())
             objects_summary = f"{num_moved}/{num_units} Movements Declared"
         case "Declare":
-            declared_actions = len(GameEvent.get_declared_events())
+            declared_actions = len(GameEvent.unitsDeclaredThisRound())
             objects_summary = f"{declared_actions}/{num_units} Actions Declared"
         case "Action":
-            declared_actions = len(GameEvent.get_declared_events())
-            objects_summary = f"{declared_actions} Actions to Resolve"
+            declared_actions = len(GameEvent.unitsDeclaredThisRound())
+            no_actions = len(GameEvent.get_declared_no_action_events())
+            objects_summary = f"{declared_actions - no_actions} Actions to Resolve"
     
     return f"""<h4>{objects_summary}</h4>"""
 
