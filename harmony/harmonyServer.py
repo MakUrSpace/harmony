@@ -57,8 +57,7 @@ def commitAdditions():
 @harmony.route('/commit_movement', methods=['GET'])
 def commitMovement():
     with DATA_LOCK:
-        app.cm.passiveMode()
-        app.cm.GameState.newPhase("Move")
+        app.cm.commitMovement()
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
@@ -95,8 +94,7 @@ def resolveActionForm():
         return buildObjectActionResolver()
     else:
         with DATA_LOCK:
-            app.cm.trackMode()
-            app.cm.GameState.newPhase("Action")
+            app.cm.resolveRound()
         return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
     
 
@@ -363,7 +361,7 @@ def captureToChangeRow(capture):
         moveDistance = app.cm.objectLastDistance(capture)
     else:
         moveDistance = None
-    moveDistance = "None" if moveDistance is None or moveDistance < 10 else f"{moveDistance:6.0f} mm"
+    moveDistance = "None" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:6.0f} in"
 
     # Can object act in this phase (movement, declare, resolve)
     if objectCouldInteract(capture):
