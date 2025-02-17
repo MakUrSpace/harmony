@@ -358,9 +358,12 @@ def captureToChangeRow(capture):
         health += "[ ] "
     with open("harmony_templates/TrackedObjectRow.html") as f:
         changeRowTemplate = f.read()
-    # moveDistance = app.cm.lastMoveDistance(capture) -- movement distance this round
-    moveDistance = app.cm.cc.rsc.trackedObjectLastDistance(capture)
-    moveDistance = "None" if moveDistance is None else f"{moveDistance:6.0f} mm"
+
+    if isinstance(capture, HarmonyObject):
+        moveDistance = app.cm.objectLastDistance(capture)
+    else:
+        moveDistance = None
+    moveDistance = "None" if moveDistance is None or moveDistance < 10 else f"{moveDistance:6.0f} mm"
 
     # Can object act in this phase (movement, declare, resolve)
     if objectCouldInteract(capture):
