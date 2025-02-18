@@ -361,7 +361,7 @@ def captureToChangeRow(capture):
         moveDistance = app.cm.objectLastDistance(capture)
     else:
         moveDistance = None
-    moveDistance = "None" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:6.0f} in"
+    moveDistance = "None" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:4.1f} in"
 
     # Can object act in this phase (movement, declare, resolve)
     if objectCouldInteract(capture):
