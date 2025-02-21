@@ -44,7 +44,8 @@ def gameStateButton(gameState):
 
 @harmony.route('/get_game_controller')
 def getGameController():
-    return gameStateButton(app.cm.GameState.getPhase())
+    with DATA_LOCK:
+        return gameStateButton(app.cm.GameState.getPhase())
 
 
 @harmony.route('/commit_additions')
@@ -357,36 +358,46 @@ def captureToChangeRow(capture):
     with open("harmony_templates/TrackedObjectRow.html") as f:
         changeRowTemplate = f.read()
 
+    objectName = capture.oid
+    objectActions = ""
+    moveDistance = "None"
+    borderType = "border-secondary border-2"
+    editObject = ""
+    armorPlating = "N/A"
+    armorStructural = "N/A"
+    
     if isinstance(capture, HarmonyObject):
-        moveDistance = app.cm.objectLastDistance(capture)
-    else:
-        moveDistance = None
-    moveDistance = "None" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:4.1f} in"
+        if getattr(capture, 'objectType', None) == "Unit":
+            moveDistance = app.cm.objectLastDistance(capture)
+            moveDistance = "None" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:4.1f} in"
+        
+            if app.cm.obj_destroyed(capture.oid):
+                objectName = f"<s>{capture.oid}</s>"
+            else:
+                objectActions = f"""<button class="btn btn-primary" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Object Actions</button>"""
+    
+            if objectCouldInteract(capture):
+                borderType = "border-success border-3"
 
-    # Can object act in this phase (movement, declare, resolve)
-    if objectCouldInteract(capture):
-        borderType = "border-success border-3"
-    else:
-        borderType = "border-secondary border-2"
+        if getattr(capture, 'objectType', None) in ["Unit", "Building"]:
+            armorPlating = f"{mc.ArmorPlating(capture.oid).terminant - mc.ArmorPlatingDamage(capture.oid).terminant}/{mc.ArmorPlating(capture.oid).terminant}"
+            armorStructural = f"{mc.ArmorStructural(capture.oid).terminant - mc.ArmorStructuralDamage(capture.oid).terminant}/{mc.ArmorStructural(capture.oid).terminant}"
+        
+    if app.cm.GameState.getPhase() == "Add":
+        editObject = f"""<button class="btn btn-info" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}">Edit</button>"""
     
     changeRow = changeRowTemplate.replace(
         "{borderType}", borderType).replace(
-        "{objectName}", capture.oid).replace(
+        "{objectName}", objectName).replace(
         "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.cc.rsc.changeSetToRealCenter(capture)])).replace(
         "{moveDistance}", moveDistance).replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{encodedBA}", imageToBase64(capture.visual(withContours=False))).replace(
-        "{actions}", "" if getattr(capture, 'objectType', None) != "Unit" else f"""<button class="btn btn-primary" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Object Actions</button>""").replace(
-        "{edit}", "" if app.cm.GameState.getPhase() != "Add" else f"""<button class="btn btn-info" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}">Edit</button>""")
-    if isinstance(capture, HarmonyObject):
-        changeRow = changeRow.replace(
-            "{armorPlating}", f"{mc.ArmorPlating(capture.oid).terminant - mc.ArmorPlatingDamage(capture.oid).terminant}/{mc.ArmorPlating(capture.oid).terminant}").replace(
-            "{armorStructural}", f"{mc.ArmorStructural(capture.oid).terminant - mc.ArmorStructuralDamage(capture.oid).terminant}/{mc.ArmorStructural(capture.oid).terminant}")
-    else:
-        changeRow = changeRow.replace(
-            "{armorPlating}", "N/A").replace(
-            "{armorStructural}", "N/A")
-        
+        "{actions}", objectActions).replace(
+        "{edit}", editObject).replace(
+        "{armorPlating}", armorPlating).replace(
+        "{armorStructural}", armorStructural)
+
     return changeRow
 
 
@@ -444,19 +455,23 @@ def buildObjectActionResolver():
 @harmony.route('/objects_summary', methods=['GET'])
 def getObjectSummary():
     with DATA_LOCK:
-        num_units = len(Mech.entities())
+        num_units = len(app.cm.units())
+        active_units = len(app.cm.active_units())
+        destroyed = num_units - active_units
         objects_summary = ""
         match app.cm.GameState.getPhase():
             case "Move":
                 num_moved = len(app.cm.unitsMovedThisRound())
-                objects_summary = f"{num_moved}/{num_units} Movements Declared"
+                objects_summary = f"{num_moved}/{active_units} Movements Declared"
             case "Declare":
                 declared_actions = len(app.cm.unitsDeclaredThisRound())
-                objects_summary = f"{declared_actions}/{num_units} Actions Declared"
+                objects_summary = f"{declared_actions}/{active_units} Actions Declared"
             case "Action":
                 declared_actions = len(app.cm.unitsDeclaredThisRound())
                 no_actions = len(GameEvent.get_declared_no_action_events())
                 objects_summary = f"{declared_actions - no_actions} Actions to Resolve"
+        if destroyed > 0:
+            objects_summary += f". {destroyed} Destroyed"
         
     return f"""<h4>{objects_summary}</h4>"""
 
@@ -564,6 +579,8 @@ def getObject(cap):
 @harmony.route('/objects/<objectId>', methods=['POST'])
 @findObjectIdOr404
 def updateObjectSettings(cap):
+    if app.cm.GameState.getPhase() != "Add":
+        return "Cannot update object settings outside of Add Phase", 400
     objectKwargs = request.form.to_dict()
     newName = objectKwargs.pop("objectName")
 
@@ -586,6 +603,8 @@ def updateObjectSettings(cap):
 @harmony.route('/objects/<objectId>', methods=['DELETE'])
 @findObjectIdOr404
 def deleteObjectSettings(cap):
+    if app.cm.GameState.getPhase() != "Add":
+        return "Cannot remove object outside of Add Phase", 400
     with DATA_LOCK:
         app.cm.deleteObject(cap.oid)
     return buildObjectsFilter()
@@ -634,7 +653,8 @@ def buildObjectSettings(obj):
             unitTypes += f"""<option value="{unitType}">{unitType}</option>"""
         unitTypes += "</select>"
         objectSettings.append(unitTypes)
-        objectSettings.append(text_box_template.format(key="Skill", value=4))
+        mechSkill = app.cm.mech_skill(obj.oid) or 4
+        objectSettings.append(text_box_template.format(key="Skill", value=mechSkill))
 
         unitSelected = " selected='selected'"
     else:
@@ -695,7 +715,7 @@ def buildObjectActions(cap):
         for target in app.cm.memory:
             if target.oid == cap.oid:
                 continue
-            else:
+            elif getattr(target, 'objectType', 'None') in ["Unit", "Building"]:
                 declare = ""
                 action = ObjectAction(cap, target)
                 selected = capDeclaredAction is not None and capDeclaredTarget == target
