@@ -1,0 +1,27 @@
+<div class="row ">
+    <h2 class="mt-5">Object Tracker</h2>
+    <div id="objectsSummary" class="text-warning" hx-get="{harmonyURL}objects_summary" hx-trigger="every 1.3s"></div>
+</div>
+<div class="row ">
+    <div id="factionFilter" class="btn-group" role="group" aria-labelbuildObjectActions="Objects Table Faction Filter Select Buttons">
+      <input type="radio" class="btn-check" name="factionFilterradio" id="AllFactions" autocomplete="off" {allFactionsSelected} hx-get="{harmonyURL}objects_filter?faction_filter=All" hx-target="#objectInteractor">
+      <label class="btn btn-outline-secondary" for="AllFactions">All Factions</label>
+      {factionFilters}
+      <input type="button" class="btn btn-success" style="max-width:10%; margin-left: 10px" name="factionFilterradio" id="Add" value="+" autocomplete="off" hx-get="{harmonyURL}new_faction" hx-target="#objectInteractor">
+    </div>
+</div>
+<div class="row ">
+    <div id="objectFilter"class="btn-group" role="group" aria-labelbuildObjectActions="Objects Table Type Filter Select Buttons">
+      <input type="radio" class="btn-check" name="objectFilterradio" id="AllTypes" autocomplete="off" {allTypesSelected} hx-get="{harmonyURL}objects_filter?type_filter=All" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="AllTypes">All Types</label>
+      <input type="radio" class="btn-check" name="objectFilterradio" id="Terrain" autocomplete="off" {terrainSelected} hx-get="{harmonyURL}objects_filter?type_filter=Terrain" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="Terrain">Terrain</label>
+      <input type="radio" class="btn-check" name="objectFilterradio" id="Building" autocomplete="off" {buildingSelected} hx-get="{harmonyURL}objects_filter?type_filter=Building" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="Building">Building</label>
+      <input type="radio" class="btn-check" name="objectFilterradio" id="Unit" autocomplete="off" {unitSelected} hx-get="{harmonyURL}objects_filter?type_filter=Unit" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="Unit">Unit</label>
+      <input type="radio" class="btn-check" name="objectFilterradio" id="Event" autocomplete="off" {eventSelected} hx-get="{harmonyURL}objects_filter?type_filter=Event" hx-target="#objectInteractor">
+      <label class="btn btn-outline-primary" for="Event">Event</label>
+    </div>
+</div>
+<div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>

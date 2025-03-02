@@ -401,9 +401,9 @@ def captureToChangeRow(capture):
     return changeRow
 
 
-def buildObjectTable(filter=None):
+def buildObjectTable(faction_filter=None, type_filter=None):
     changeRows = []
-    if filter == "Event":
+    if type_filter == "Event":
         for de in GameEvent.get_declared_events():
             # TODO: Add cancel event button
             changeRows.append(f"""
@@ -412,7 +412,9 @@ def buildObjectTable(filter=None):
                 </div>""")
     else:
         for capture in app.cm.memory:
-            if filter is not None and getattr(capture, 'objectType', None) != filter:
+            if ((faction_filter is not None and faction_filter != "All" and getattr(capture, 'objectFaction', None) != faction_filter)
+                and (type_filter is not None and type_filter != "All" and getattr(capture, 'objectType', None) != type_filter)
+            ):
                 continue
             changeRows.append(captureToChangeRow(capture))
     return " ".join(changeRows)
@@ -420,8 +422,9 @@ def buildObjectTable(filter=None):
 
 @harmony.route('/objects', methods=['GET'])
 def getObjectTable():
-    filter = request.args.get('filter', None)
-    return buildObjectTable(filter=filter)
+    return buildObjectTable(
+        request.args.get('faction_filter', None),
+        request.args.get('type_filter', None))
 
 
 def buildObjectActionResolver():
@@ -476,56 +479,75 @@ def getObjectSummary():
     return f"""<h4>{objects_summary}</h4>"""
 
 
-def buildObjectsFilter(filter=None):
+def buildObjectsFilter(faction_filter=None, type_filter=None):
     with DATA_LOCK:
         if app.cm.GameState.getPhase() == "Action":
             return buildObjectActionResolver()
 
-    assert filter in [None, 'None', 'Terrain', 'Building', 'Unit', 'Event'], f"Unrecognized filter type: {filter}"
-    buildObjectsFilter.filter = filter
-    noneSelected, terrainSelected, buildingSelected, unitSelected, eventSelected = "", "", "", "", ""
-    if filter == 'None' or filter is None:
-        filterQuery = ''
-        noneSelected = ' checked="checked"'
-    elif filter == 'Terrain':
-        filterQuery = '?filter=Terrain'
+    existing_faction_filter = getattr(buildObjectsFilter, "faction_filter", None)
+    existing_type_filter = getattr(buildObjectsFilter, "type_filter", None)
+    
+    factions = app.cm.factions()
+
+    assert faction_filter in [None, 'All', *factions], f"Unrecognized faction: {faction_filter}"
+    assert type_filter in [None, 'All', 'Terrain', 'Building', 'Unit', 'Event'], f"Unrecognized object type: {type_filter}"
+    buildObjectsFilter.faction_filter = existing_faction_filter if faction_filter is None else faction_filter
+    buildObjectsFilter.type_filter = existing_type_filter if type_filter is None else type_filter
+    allSelected, terrainSelected, buildingSelected, unitSelected, eventSelected = "", "", "", "", ""
+    
+    
+    allFactionsSelected = ' checked="checked"' if faction_filter == "All" or faction_filter is None else ''
+
+    factionButtons = {}
+    filters = []
+    factionButtonTemplate = """
+      <input type="radio" class="btn-check" name="factionFilterradio" id="All" autocomplete="off"{checked} hx-get="{harmonyURL}objects_filter{param}" hx-target="#objectInteractor">
+      <label class="btn btn-outline-secondary" for="All">All</label>"""
+    for faction in factions:
+        if faction_filter == faction:
+            checked = ' checked ="checked"'
+            filters.append(f'faction_filter={faction}')
+        else:
+            checked = ''
+        factionButtons[faction] = factionButtonTemplate.replace(
+            "{param}", f"?faction_filter={faction}").replace(
+            "{checked}", checked)
+
+    allTypesSelected = ''
+    terrainSelected = ''
+    buildingSelected = ''
+    unitSelected = ''
+    eventSelected = ''
+    if type_filter == 'All' or type_filter is None:
+        allTypesSelected = ' checked="checked"'
+    elif type_filter == 'Terrain':
+        filters.append('type_filter=Terrain')
         terrainSelected = ' checked="checked"'
-    elif filter == 'Building':
-        filterQuery = '?filter=Building'
+    elif type_filter == 'Building':
+        filters.append('type_filter=Building')
         buildingSelected = ' checked="checked"'
-    elif filter == 'Unit':
-        filterQuery = '?filter=Unit'
+    elif type_filter == 'Unit':
+        filters.append('type_filter=Unit')
         unitSelected = ' checked="checked"'
-    elif filter == 'Event':
-        filterQuery = '?filter=Event'
+    elif type_filter == 'Event':
+        filters.append('type_filter=Event')
         eventSelected = ' checked="checked"'
-        
-    template = """
-    <div class="row ">
-        <h2 class="mt-5">Object Tracker</h2>
-        <div id="objectsSummary" class="text-warning" hx-get="{harmonyURL}objects_summary" hx-trigger="every 1.3s"></div>
-    </div>
-    <div id="objectFilter"class="btn-group" role="group" aria-labelbuildObjectActions="Objects Table Filter Select Buttons">
-      <input type="radio" class="btn-check" name="objectFilterradio" id="None" autocomplete="off" {noneSelected} hx-get="{harmonyURL}objects_filter" hx-target="#objectInteractor">
-      <label class="btn btn-outline-primary" for="None">None</label>
-      <input type="radio" class="btn-check" name="objectFilterradio" id="Terrain" autocomplete="off" {terrainSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Terrain" hx-target="#objectInteractor">
-      <label class="btn btn-outline-primary" for="Terrain">Terrain</label>
-      <input type="radio" class="btn-check" name="objectFilterradio" id="Building" autocomplete="off" {buildingSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Building" hx-target="#objectInteractor">
-      <label class="btn btn-outline-primary" for="Building">Building</label>
-      <input type="radio" class="btn-check" name="objectFilterradio" id="Unit" autocomplete="off" {unitSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Unit" hx-target="#objectInteractor">
-      <label class="btn btn-outline-primary" for="Unit">Unit</label>
-      <input type="radio" class="btn-check" name="objectFilterradio" id="Event" autocomplete="off" {eventSelected} hx-get="{harmonyURL}objects_filter?objectFilter=Event" hx-target="#objectInteractor">
-      <label class="btn btn-outline-primary" for="Event">Event</label>
-    </div>
-    <div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>"""
+
+    filters = f"?{'&'.join(filters)}" if len(filters) > 0 else ''
+    
+    with open("harmony_templates/FilteredObjectsTable.html", "r") as f:
+        template = f.read()
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
-        "{filter}", filterQuery).replace(
-        "{noneSelected}", noneSelected).replace(
+        "{allFactionsSelected}", allFactionsSelected).replace(
+        "{factionFilters}", "".join(factionButtons.values())).replace(
+        "{allTypesSelected}", allTypesSelected).replace(
         "{terrainSelected}", terrainSelected).replace(
         "{buildingSelected}", buildingSelected).replace(
         "{unitSelected}", unitSelected).replace(
-        "{objectRows}", buildObjectTable(filter))
+        "{eventSelected}", eventSelected).replace(
+        "{filter}", filters).replace(
+        "{objectRows}", buildObjectTable(faction_filter, type_filter))
 
 
 def getInteractor():
@@ -542,7 +564,9 @@ def getObjectTableContainer():
     with DATA_LOCK:
         gameState = app.cm.GameState.getPhase()
     if gameState != "Resolve":
-        return buildObjectsFilter(request.args.get('objectFilter', None))
+        return buildObjectsFilter(
+            request.args.get('faction_filter', None),
+            request.args.get('type_filter', None))
     else:
         return buildObjectActionResolver()
 
