@@ -501,8 +501,8 @@ def buildObjectsFilter(faction_filter=None, type_filter=None):
     factionButtons = {}
     filters = []
     factionButtonTemplate = """
-      <input type="radio" class="btn-check" name="factionFilterradio" id="All" autocomplete="off"{checked} hx-get="{harmonyURL}objects_filter{param}" hx-target="#objectInteractor">
-      <label class="btn btn-outline-secondary" for="All">All</label>"""
+        <input type="radio" class="btn-check" name="factionFilterradio" id="{faction}Radio" autocomplete="off"{checked} hx-get="{harmonyURL}objects_filter{param}" hx-target="#objectInteractor">
+        <label class="btn btn-outline-primary" for="{faction}Radio">{faction}</label>"""
     for faction in factions:
         if faction_filter == faction:
             checked = ' checked ="checked"'
@@ -510,8 +510,10 @@ def buildObjectsFilter(faction_filter=None, type_filter=None):
         else:
             checked = ''
         factionButtons[faction] = factionButtonTemplate.replace(
+            "{faction}", faction).replace(
             "{param}", f"?faction_filter={faction}").replace(
-            "{checked}", checked)
+            "{checked}", checked).replace(
+            "{harmonyURL}", url_for(".buildHarmony"))
 
     allTypesSelected = ''
     terrainSelected = ''
@@ -668,6 +670,7 @@ def buildObjectSettings(obj):
         for structureType in HarmonyObject.objectFactories['Structure'].keys(): 
             structureTypes += f"""<option value="{structureType}">{structureType}</option>"""
         structureTypes += "</select>"
+        objectSettings.append(text_box_template.format(key="Faction", value="Unaligned"))
         objectSettings.append(structureTypes)
         
         buildingSelected = " selected='selected'"
@@ -677,6 +680,7 @@ def buildObjectSettings(obj):
             unitTypes += f"""<option value="{unitType}">{unitType}</option>"""
         unitTypes += "</select>"
         objectSettings.append(unitTypes)
+        objectSettings.append(text_box_template.format(key="Faction", value="Unaligned"))
         mechSkill = app.cm.mech_skill(obj.oid) or 4
         objectSettings.append(text_box_template.format(key="Skill", value=mechSkill))
 
