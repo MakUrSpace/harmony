@@ -411,9 +411,11 @@ def buildObjectTable(faction_filter=None, type_filter=None):
                     <h5>{de.GameEventObject.terminant}</h5><h4>{de.GameEventType.terminant}</h4><h5>{de.GameEventValue.terminant}</h5>
                 </div>""")
     else:
+        print(f"Building object table with filters: Faction: {faction_filter} -- Type: {type_filter}")
         for capture in app.cm.memory:
-            if ((faction_filter is not None and faction_filter != "All" and getattr(capture, 'objectFaction', None) != faction_filter)
-                and (type_filter is not None and type_filter != "All" and getattr(capture, 'objectType', None) != type_filter)
+            print(f"Cap {capture.oid} -- Faction: {app.cm.faction(capture.oid)} -- Type: {app.cm.object_type(capture.oid)}")
+            if ((faction_filter is not None and faction_filter != "All" and app.cm.faction(capture.oid) != faction_filter)
+                or (type_filter is not None and type_filter != "All" and app.cm.object_type(capture.oid) != type_filter)
             ):
                 continue
             changeRows.append(captureToChangeRow(capture))
@@ -484,17 +486,14 @@ def buildObjectsFilter(faction_filter=None, type_filter=None):
         if app.cm.GameState.getPhase() == "Action":
             return buildObjectActionResolver()
 
-    existing_faction_filter = getattr(buildObjectsFilter, "faction_filter", None)
-    existing_type_filter = getattr(buildObjectsFilter, "type_filter", None)
-    
     factions = app.cm.factions()
-
     assert faction_filter in [None, 'All', *factions], f"Unrecognized faction: {faction_filter}"
     assert type_filter in [None, 'All', 'Terrain', 'Building', 'Unit', 'Event'], f"Unrecognized object type: {type_filter}"
-    buildObjectsFilter.faction_filter = existing_faction_filter if faction_filter is None else faction_filter
-    buildObjectsFilter.type_filter = existing_type_filter if type_filter is None else type_filter
-    allSelected, terrainSelected, buildingSelected, unitSelected, eventSelected = "", "", "", "", ""
-    
+    faction_filter = faction_filter or getattr(buildObjectsFilter, "faction_filter", None)
+    type_filter = type_filter or getattr(buildObjectsFilter, "type_filter", None)
+    with DATA_LOCK:
+        setattr(buildObjectsFilter, 'faction_filter', faction_filter)
+        setattr(buildObjectsFilter, 'type_filter', type_filter)
     
     allFactionsSelected = ' checked="checked"' if faction_filter == "All" or faction_filter is None else ''
 
@@ -502,7 +501,7 @@ def buildObjectsFilter(faction_filter=None, type_filter=None):
     filters = []
     factionButtonTemplate = """
         <input type="radio" class="btn-check" name="factionFilterradio" id="{faction}Radio" autocomplete="off"{checked} hx-get="{harmonyURL}objects_filter{param}" hx-target="#objectInteractor">
-        <label class="btn btn-outline-primary" for="{faction}Radio">{faction}</label>"""
+        <label class="btn btn-outline-secondary" for="{faction}Radio">{faction}</label>"""
     for faction in factions:
         if faction_filter == faction:
             checked = ' checked ="checked"'
@@ -515,11 +514,7 @@ def buildObjectsFilter(faction_filter=None, type_filter=None):
             "{checked}", checked).replace(
             "{harmonyURL}", url_for(".buildHarmony"))
 
-    allTypesSelected = ''
-    terrainSelected = ''
-    buildingSelected = ''
-    unitSelected = ''
-    eventSelected = ''
+    allTypesSelected, terrainSelected, buildingSelected, unitSelected, eventSelected = "", "", "", "", ""
     if type_filter == 'All' or type_filter is None:
         allTypesSelected = ' checked="checked"'
     elif type_filter == 'Terrain':
@@ -535,6 +530,7 @@ def buildObjectsFilter(faction_filter=None, type_filter=None):
         filters.append('type_filter=Event')
         eventSelected = ' checked="checked"'
 
+    print(f"Object Filters: {filters}")
     filters = f"?{'&'.join(filters)}" if len(filters) > 0 else ''
     
     with open("harmony_templates/FilteredObjectsTable.html", "r") as f:
@@ -567,8 +563,8 @@ def getObjectTableContainer():
         gameState = app.cm.GameState.getPhase()
     if gameState != "Resolve":
         return buildObjectsFilter(
-            request.args.get('faction_filter', None),
-            request.args.get('type_filter', None))
+            faction_filter=request.args.get('faction_filter', None),
+            type_filter=request.args.get('type_filter', None))
     else:
         return buildObjectActionResolver()
 
@@ -652,25 +648,26 @@ def declareNoAction(cap):
     return buildObjectActions(cap)
 
 
-def buildObjectSettings(obj):
-    objType = getattr(obj, 'objectType', 'None')
+def buildObjectSettings(obj, objType=None):
+    if objType is None:
+        objType = app.cm.object_type(obj.oid)
     terrainSelected, buildingSelected, unitSelected = '', '', ''
 
-    text_box_template = """<label for="{key}">{key}</label><input type="text" class="form-control" name="{key}" value="{value}">"""
+    text_box_template = """<label for="{key}">{key}</label><input type="text"{datalist} class="form-control" name="{key}" value="{value}">"""
 
     objectSettings = []
     if objType == "Terrain":
-        objectSettings.append(text_box_template.format(key="Rating", value=1))
-        objectSettings.append(text_box_template.format(key="Elevation", value=5))
+        objectSettings.append(text_box_template.format(key="Rating", value=1, datalist=""))
+        objectSettings.append(text_box_template.format(key="Elevation", value=5, datalist=""))
         terrainSelected = " selected='selected'"
     elif objType == "Building":
-        objectSettings.append(text_box_template.format(key="Elevation", value=5))
+        objectSettings.append(text_box_template.format(key="Elevation", value=5, datalist=""))
         
         structureTypes = """<select name="objectSubType" id="objectSubType">"""
         for structureType in HarmonyObject.objectFactories['Structure'].keys(): 
             structureTypes += f"""<option value="{structureType}">{structureType}</option>"""
         structureTypes += "</select>"
-        objectSettings.append(text_box_template.format(key="Faction", value="Unaligned"))
+        objectSettings.append(text_box_template.format(key="Faction", value="Unaligned", datalist=""))
         objectSettings.append(structureTypes)
         
         buildingSelected = " selected='selected'"
@@ -680,9 +677,22 @@ def buildObjectSettings(obj):
             unitTypes += f"""<option value="{unitType}">{unitType}</option>"""
         unitTypes += "</select>"
         objectSettings.append(unitTypes)
-        objectSettings.append(text_box_template.format(key="Faction", value="Unaligned"))
+
+        object_faction = app.cm.faction(obj.oid) or "Unaligned"
+        faction_options = [f'<option value="{faction}">{faction}</option>' for faction in app.cm.factions()]
+        factionInput = text_box_template + """
+        <datalist id="existing_factions">
+            {faction_options}
+        </datalist>"""
+        
+        objectSettings.append(factionInput.format(
+            key="Faction",
+            value=object_faction,
+            datalist=' datalist="existing_factions"',
+            faction_options="\n".join(faction_options)))
+            
         mechSkill = app.cm.mech_skill(obj.oid) or 4
-        objectSettings.append(text_box_template.format(key="Skill", value=mechSkill))
+        objectSettings.append(text_box_template.format(key="Skill", value=mechSkill, datalist=""))
 
         unitSelected = " selected='selected'"
     else:
@@ -717,12 +727,8 @@ def getObjectSettings(cap):
 @findObjectIdOr404
 def updateObjectType(cap):
     newType = request.form["objectType"]
-
     assert newType in ["None", "Terrain", "Building", "Unit"], f"Unrecognized object type: {newType}"
-
-    with DATA_LOCK:
-        cap.objectType = newType
-    return buildObjectSettings(cap)    
+    return buildObjectSettings(cap, objType=newType)    
 
 
 def buildObjectActions(cap):
