@@ -389,7 +389,7 @@ def captureToChangeRow(capture):
     changeRow = changeRowTemplate.replace(
         "{borderType}", borderType).replace(
         "{objectName}", objectName).replace(
-        "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.cc.rsc.changeSetToRealCenter(capture)])).replace(
+        "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.captureRealCoord(capture)])).replace(
         "{moveDistance}", moveDistance).replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{encodedBA}", imageToBase64(capture.visual(withContours=False))).replace(
@@ -746,10 +746,11 @@ def buildObjectActions(cap):
         except IndexError:
             capDeclaredAction = None
             capDeclaredTarget = None
+        cap_faction = app.cm.faction(cap.oid)
         for target in app.cm.memory:
-            if target.oid == cap.oid:
+            if target.oid == cap.oid or cap_faction == app.cm.faction(target.oid) or not app.cm.line_of_sight(cap, target):
                 continue
-            elif getattr(target, 'objectType', 'None') in ["Unit", "Building"]:
+            elif app.cm.object_type(target.oid) in ["Unit", "Building"]:
                 declare = ""
                 action = ObjectAction(cap, target)
                 selected = capDeclaredAction is not None and capDeclaredTarget == target
@@ -858,7 +859,7 @@ def combineObjectWithAddition(cap):
 
 def minimapGenerator():
     while True:
-        camImage = app.cm.cc.buildMiniMap(
+        camImage = app.cm.buildMiniMap(
             blueObjects=app.cm.memory,
             greenObjects=[app.cm.lastClassification] if app.cm.lastClassification is not None else None)
         ret, camImage = cv2.imencode('.jpg', camImage)
