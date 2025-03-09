@@ -287,6 +287,9 @@ def resetHarmony():
 def loadHarmony():
     global CONSOLE_OUTPUT
     with DATA_LOCK:
+        CONSOLE_OUTPUT = "Loading game state..."
+    time.sleep(3)
+    with DATA_LOCK:
         app.cm.loadGame()        
         CONSOLE_OUTPUT = "Reloaded game state."
     return 'success'
