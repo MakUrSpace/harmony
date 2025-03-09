@@ -1,6 +1,7 @@
 <div class="row ">
     <h2 class="mt-5">Object Tracker</h2>
     <div id="objectsSummary" class="text-warning" hx-get="{harmonyURL}objects_summary" hx-trigger="every 1.3s"></div>
+    <hr>
 </div>
 <div class="row ">
     <div id="factionFilter" class="btn-group" role="group" aria-labelbuildObjectActions="Objects Table Faction Filter Select Buttons">
@@ -23,4 +24,5 @@
       <label class="btn btn-outline-primary" for="Event">Event</label>
     </div>
 </div>
+<hr>
 <div id="objectsTable" hx-get="{harmonyURL}objects{filter}" hx-trigger="every 1s">{objectRows}</div>

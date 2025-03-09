@@ -24,13 +24,14 @@
     <div class="container">
         <div class="row">
             <div class="col" align="left">
-                <input class="btn btn-danger" type="button" value="Reset Harmony" hx-get="{harmonyURL}reset">
+                <input class="btn btn-warning" type="button" value="Load Game" hx-get="{harmonyURL}load">
             </div>
             <div class="col" align="right">
                 <input class="btn btn-info" type="button" value="Configurator" onclick="window.location.href='{configuratorURL}'">
             </div>
         </div>
     </div>
+    <hr>
     <div class="row">
         <div class="col" style="min-width: 500px">
             <h2 class="mt-5">Capture Control</h2>
@@ -41,10 +42,10 @@
             </div>
             <div class="container">
                 <div class="row">
-                    <div class="col" hx-get="{harmonyURL}get_game_controller" hx-trigger="every 1.5s" id="gameController"></div>
-                    <div class="col">
+                    <div class="col" align="left">
                         <input type="button" class="btn btn-danger float-end" name="undoChange" id="passive" hx-get="{harmonyURL}undo_last_change" hx-swap="none" value="Undo Last Change">
                     </div>
+                    <div class="col" hx-get="{harmonyURL}get_game_controller" hx-trigger="every 1.5s" id="gameController"></div>
                 </div>
             </div>
             <div class="container justify-content-center">
@@ -73,6 +74,15 @@
             <div id="objectInteractor" class="container">
                 <div id="objectFilterRetriever" hx-get="{harmonyURL}objects_filter" hx-trigger="every 1s" hx-target="#objectInteractor"></div>
             </div>
+        </div>
+    </div>
+    <hr>
+    <div class="row" style="margin-top:5px">
+        <div class="col" align="left">
+            <input class="btn btn-success" type="button" value="Save Game" hx-get="{harmonyURL}save">
+        </div>
+        <div class="col" align="right">
+            <input class="btn btn-danger" type="button" value="Reset Game" hx-get="{harmonyURL}reset">
         </div>
     </div>
 </div>

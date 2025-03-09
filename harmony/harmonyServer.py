@@ -266,9 +266,8 @@ def combinedCamerasWithChangesResponse():
 
 
 def generateGameGraph():
-    graph = qs.render()
     yield (b'--frame\r\n'
-           b'Content-Type: image/svg\r\n\r\n' + graph.pipe(encoding='utf-8') + b'\r\n')
+           b'Content-Type: image/svg\r\n\r\n' + qs.render().pipe(encoding='utf-8') + b'\r\n')
 
 
 @harmony.route('/gamegraph')
@@ -280,6 +279,20 @@ def game_graph_stream():
 def resetHarmony():
     with DATA_LOCK:
         app.cm.reset()
+    return 'success'
+
+
+@harmony.route('/load')
+def loadHarmony():
+    with DATA_LOCK:
+        app.cm.loadGame()
+    return 'success'
+
+
+@harmony.route('/save')
+def saveHarmony():
+    with DATA_LOCK:
+        app.cm.saveGame()
     return 'success'
 
 
