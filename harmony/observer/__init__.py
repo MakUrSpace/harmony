@@ -9,6 +9,7 @@ try:
         CalibratedCaptureConfiguration,
         CalibrationObserver,
         CalibratedObserver,
+        CameraChange,
         TrackedObject,
         Transition,
         distanceFormula
