@@ -279,20 +279,25 @@ def game_graph_stream():
 def resetHarmony():
     with DATA_LOCK:
         app.cm.reset()
+        CONSOLE_OUTPUT = "Harmony reset."
     return 'success'
 
 
 @harmony.route('/load')
 def loadHarmony():
+    global CONSOLE_OUTPUT
     with DATA_LOCK:
-        app.cm.loadGame()
+        app.cm.loadGame()        
+        CONSOLE_OUTPUT = "Reloaded game state."
     return 'success'
 
 
 @harmony.route('/save')
 def saveHarmony():
+    global CONSOLE_OUTPUT
     with DATA_LOCK:
         app.cm.saveGame()
+        CONSOLE_OUTPUT = "Saved game state."
     return 'success'
 
 
