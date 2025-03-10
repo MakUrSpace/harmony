@@ -386,6 +386,7 @@ def captureToChangeRow(capture):
     editObject = ""
     armorPlating = "N/A"
     armorStructural = "N/A"
+    rowClass = ""
     
     if isinstance(capture, HarmonyObject):
         if getattr(capture, 'objectType', None) == "Unit":
@@ -394,11 +395,12 @@ def captureToChangeRow(capture):
         
             if app.cm.obj_destroyed(capture.oid):
                 objectName = f"<s>{capture.oid}</s>"
+                borderType = "border-danger border-5 x-box"
             else:
+                if objectCouldInteract(capture):
+                    borderType = "border-success border-3"
                 objectActions = f"""<button class="btn btn-primary" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Object Actions</button>"""
     
-            if objectCouldInteract(capture):
-                borderType = "border-success border-3"
 
         if getattr(capture, 'objectType', None) in ["Unit", "Structure"]:
             armorPlating = f"{mc.ArmorPlating(capture.oid).terminant - mc.ArmorPlatingDamage(capture.oid).terminant}/{mc.ArmorPlating(capture.oid).terminant}"
@@ -678,11 +680,11 @@ def buildObjectSettings(obj, objType=None):
 
     objectSettings = []
     if objType == "Terrain":
-        objectSettings.append(text_box_template.format(key="Elevation", value=5, datalist=""))
+        objectSettings.append(text_box_template.format(key="Elevation", value=1, datalist=""))
         objectSettings.append("""<input type="text" hidden class="form-control" name="objectSubType" value="UniformElevation">""")
         terrainSelected = " selected='selected'"
     elif objType == "Structure":
-        objectSettings.append(text_box_template.format(key="Elevation", value=5, datalist=""))
+        objectSettings.append(text_box_template.format(key="Elevation", value=1, datalist=""))
         
         structureTypes = """<select name="objectSubType" id="objectSubType">"""
         for structureType in HarmonyObject.objectFactories['Structure'].keys(): 
