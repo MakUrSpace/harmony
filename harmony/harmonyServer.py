@@ -457,14 +457,15 @@ def buildObjectActionResolver():
     for objAction in GameEvent.get_declared_events():
         if objAction.GameEventType.terminant in [None, "NoAction"]:
             continue
-        value = "" if objAction.GameEventResult.terminant in [None, "null"] else objAction.GameEventResult.terminant
+        actionResult = "" if objAction.GameEventResult.terminant in [None, "null"] else objAction.GameEventResult.terminant
         gameObject = objAction.GameEventObject.terminant
         eventType = objAction.GameEventType.terminant
         gameValue = objAction.GameEventValue.terminant
+        actionTarget = objAction.GameEventTarget.terminant
         table += f"""
             <div class="row">
-                <label class="btn btn-outline-primary" for="{gameObject}Resolver">{gameObject} {eventType} {gameValue}</label>
-                <input type="number" name="{gameObject}|||||Resolver" max="100" value="{value}"><br>
+                <label class="btn btn-outline-primary" for="{gameObject}Resolver">{gameObject} {eventType} {gameValue}: ({actionTarget})</label>
+                <input type="number" name="{gameObject}|||||Resolver" max="100" value="{actionResult}"><br>
             </div>"""
     return f"""<div class="row">
                 <h2 class="mt-5">Object Action Resolver</h2>
