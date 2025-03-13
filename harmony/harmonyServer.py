@@ -305,16 +305,6 @@ def buildHarmony():
         "{configuratorURL}", '/configurator')
 
 
-def objectCouldInteract(obj):
-    match app.cm.GameState.getPhase():
-        case "Move":
-            return not app.cm.objectHasMoved(obj)
-        case "Declare":
-            return not app.cm.objectHasDeclared(obj)
-        case "Action":
-            return not app.cm.objectHasResolved(obj)
-
-
 def captureToChangeRow(capture):
     encodedBA = imageToBase64(capture.visual())
     name = "None"
@@ -347,7 +337,7 @@ def captureToChangeRow(capture):
                 objectName = f"<s>{capture.oid}</s>"
                 borderType = "border-danger border-5 x-box"
             else:
-                if objectCouldInteract(capture):
+                if app.cm.objectCouldInteract(capture):
                     borderType = "border-success border-3"
                 objectActions = f"""<button class="btn btn-primary" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Object Actions</button>"""
     
