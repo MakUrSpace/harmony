@@ -11,6 +11,7 @@ try:
         CalibratedObserver,
         CameraChange,
         TrackedObject,
+        MiniMapObject,
         Transition,
         distanceFormula
     )
