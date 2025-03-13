@@ -608,7 +608,7 @@ def declareAttackOnTarget(cap, targetId):
 @findObjectIdOr404
 def declareNoAction(cap):
     with DATA_LOCK:
-        app.cm.declareEvent(eventType="NoAction", eventFaction="Undeclared", eventObject=cap.oid, eventValue="null", eventResult="null")
+        app.cm.declareEvent(eventType="NoAction", eventFaction="Undeclared", eventObject=cap.oid, eventValue="null", eventTarget="null", eventResult="null")
     return buildObjectActions(cap)
 
 
