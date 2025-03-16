@@ -228,6 +228,7 @@ def game_graph_stream():
 @harmony.route('/reset')
 def resetHarmony():
     with DATA_LOCK:
+        app.cm = HarmonyMachine(app.cc)
         app.cm.reset()
         CONSOLE_OUTPUT = "Harmony reset."
     return 'success'
