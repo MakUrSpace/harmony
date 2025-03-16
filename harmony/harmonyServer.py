@@ -21,7 +21,7 @@ from flask import Flask, Blueprint, render_template, Response, request, make_res
 from observer.configurator import configurator, setConfiguratorApp
 from observer.observer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
-from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, GameEvent, Mech, qs, mc
+from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, mc
 
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
@@ -45,13 +45,13 @@ def gameStateButton(gameState):
 @harmony.route('/get_game_controller')
 def getGameController():
     with DATA_LOCK:
-        return gameStateButton(app.cm.GameState.getPhase())
+        return gameStateButton(app.cm.getPhase())
 
 
 @harmony.route('/commit_additions')
 def commitAdditions():
     with DATA_LOCK:
-        app.cm.GameState.newPhase("Add")
+        app.cm.commitAdditions()
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
@@ -79,13 +79,13 @@ def resolveActionForm():
     print(f"Received actions: {actionData} -- {request.form}")
     for actor, result in actionData.items():
         try:
-            objectActionEvent = GameEvent.get_existing_declarations(actor)[0]
+            objectActionEvent = app.cm.GameEvents.get_existing_declarations(actor)[0]
         except Exception as e:
             raise Exception(f"Failed to recover {actor} actions") from e
         with DATA_LOCK:
-            GameEvent.set_result(gameEvent=objectActionEvent.meta_anchor, newResult=result)
+            app.cm.GameEvents.set_result(gameEvent=objectActionEvent.entity, newResult=result)
 
-    unresolved_actions = [ge for ge in GameEvent.get_declared_events() if ge.GameEventResult.terminant in ['null', None] and ge.GameEventType.terminant != "NoAction"]
+    unresolved_actions = [ge for ge in app.cm.GameEvents.get_declared_events() if ge.GameEventResult.terminant in ['null', None] and ge.GameEventType.terminant != "NoAction"]
 
     if unresolved_actions:
         console_message = f"{len(unresolved_actions)} Unresolved actions"
@@ -120,10 +120,10 @@ def renderConsole():
             (50, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         with DATA_LOCK:
             try:
-                roundCount = app.cm.GameState.getRoundCount()
+                roundCount = app.cm.getRoundCount()
             except TypeError:
                 roundCount = "N/A"
-            consoleImage = cv2.putText(zeros, f'Round: {roundCount:3}-{app.cm.GameState.getPhase()}',
+            consoleImage = cv2.putText(zeros, f'Round: {roundCount:3}-{app.cm.getPhase()}',
                 (50, 185), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
 
         ret, consoleImage = cv2.imencode('.jpg', zeros)
@@ -306,7 +306,6 @@ def buildHarmony():
 
 
 def captureToChangeRow(capture):
-    encodedBA = imageToBase64(capture.visual())
     name = "None"
     objType = "None"
     center = ", ".join(["0", "0"])
@@ -321,33 +320,40 @@ def captureToChangeRow(capture):
 
     objectName = capture.oid
     objectActions = ""
+    objectMovement = ""
     moveDistance = "None"
     borderType = "border-secondary border-2"
     editObject = ""
     armorPlating = "N/A"
     armorStructural = "N/A"
     rowClass = ""
+
+    encodedBA = imageToBase64(app.cm.object_visual(capture, withContours=False))
+
+    print(f"Working on {capture} -- {type(capture)}")
     
     if isinstance(capture, HarmonyObject):
+        print(f"Processing harmony object -- {capture.objectType}")
         if getattr(capture, 'objectType', None) == "Unit":
             moveDistance = app.cm.objectLastDistance(capture)
             moveDistance = "None" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:4.1f} in"
         
             if app.cm.obj_destroyed(capture.oid):
+                print("Object is destroyed")
                 objectName = f"<s>{capture.oid}</s>"
                 borderType = "border-danger border-5 x-box"
             else:
                 if app.cm.objectCouldInteract(capture):
                     borderType = "border-success border-3"
-                objectActions = f"""<button class="btn btn-primary" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Object Actions</button>"""
+                objectActions = f"""<div class="col"><button class="btn btn-primary" style="width:100%" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Actions</button></div>"""
+                objectMovement = f"""<div class="col"><button class="btn btn-primary" style="width:100%" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/movement">Movement</button></div>"""
     
-
         if getattr(capture, 'objectType', None) in ["Unit", "Structure"]:
             armorPlating = f"{mc.ArmorPlating(capture.oid).terminant - mc.ArmorPlatingDamage(capture.oid).terminant}/{mc.ArmorPlating(capture.oid).terminant}"
             armorStructural = f"{mc.ArmorStructural(capture.oid).terminant - mc.ArmorStructuralDamage(capture.oid).terminant}/{mc.ArmorStructural(capture.oid).terminant}"
         
-    if app.cm.GameState.getPhase() == "Add":
-        editObject = f"""<button class="btn btn-info" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}">Edit</button>"""
+    if app.cm.getPhase() == "Add":
+        editObject = f"""<div class="col"><button class="btn btn-info" style="width:100%" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}">Edit</button></div>"""
     
     changeRow = changeRowTemplate.replace(
         "{borderType}", borderType).replace(
@@ -355,8 +361,9 @@ def captureToChangeRow(capture):
         "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.captureRealCoord(capture)])).replace(
         "{moveDistance}", moveDistance).replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
-        "{encodedBA}", imageToBase64(capture.visual(withContours=False))).replace(
+        "{encodedBA}", encodedBA).replace(
         "{actions}", objectActions).replace(
+        "{movement}", objectMovement).replace(
         "{edit}", editObject).replace(
         "{armorPlating}", armorPlating).replace(
         "{armorStructural}", armorStructural)
@@ -367,7 +374,7 @@ def captureToChangeRow(capture):
 def buildObjectTable(faction_filter=None, type_filter=None):
     changeRows = []
     if type_filter == "Event":
-        for de in GameEvent.get_declared_events():
+        for de in app.cm.GameEvents.get_declared_events():
             # TODO: Add cancel event button
             changeRows.append(f"""
                 <div class="row mb-1 border border-secondary border-2">
@@ -394,7 +401,7 @@ def getObjectTable():
 
 def buildObjectActionResolver():
     table = ""
-    for objAction in GameEvent.get_declared_events():
+    for objAction in app.cm.GameEvents.get_declared_events():
         if objAction.GameEventType.terminant in [None, "NoAction"]:
             continue
         actionResult = "" if objAction.GameEventResult.terminant in [None, "null"] else objAction.GameEventResult.terminant
@@ -428,7 +435,7 @@ def getObjectSummary():
         active_units = len(app.cm.active_units())
         destroyed = num_units - active_units
         objects_summary = ""
-        match app.cm.GameState.getPhase():
+        match app.cm.getPhase():
             case "Move":
                 num_moved = len(app.cm.unitsMovedThisRound())
                 objects_summary = f"{num_moved}/{active_units} Movements Declared"
@@ -437,7 +444,7 @@ def getObjectSummary():
                 objects_summary = f"{declared_actions}/{active_units} Actions Declared"
             case "Action":
                 declared_actions = len(app.cm.unitsDeclaredThisRound())
-                no_actions = len(GameEvent.get_declared_no_action_events())
+                no_actions = len(app.cm.GameEvents.get_declared_no_action_events())
                 objects_summary = f"{declared_actions - no_actions} Actions to Resolve"
         if destroyed > 0:
             objects_summary += f". {destroyed} Destroyed"
@@ -447,7 +454,7 @@ def getObjectSummary():
 
 def buildObjectsFilter(faction_filter=None, type_filter=None):
     with DATA_LOCK:
-        if app.cm.GameState.getPhase() == "Action":
+        if app.cm.getPhase() == "Action":
             return buildObjectActionResolver()
 
     factions = app.cm.factions()
@@ -514,7 +521,7 @@ def buildObjectsFilter(faction_filter=None, type_filter=None):
 
 def getInteractor():
     with DATA_LOCK:
-        gameState = app.cm.GameState.getPhase()
+        gameState = app.cm.getPhase()
     if gameState == "Resolve":
         return buildObjectActionResolver()
     else:
@@ -524,7 +531,7 @@ def getInteractor():
 @harmony.route('/objects_filter', methods=['GET'])
 def getObjectTableContainer():
     with DATA_LOCK:
-        gameState = app.cm.GameState.getPhase()
+        gameState = app.cm.getPhase()
     if gameState != "Resolve":
         return buildObjectsFilter(
             faction_filter=request.args.get('faction_filter', None),
@@ -559,13 +566,13 @@ def getObject(cap):
         "{objectName}", cap.oid).replace(
         "{objectSettings}", buildObjectSettings(cap)).replace(
         "{footprintToggleState}", str(not footprint_enabled).lower()).replace(
-        "{encodedBA}", imageToBase64(cap.visual(withContours=footprint_enabled)))
+        "{encodedBA}", imageToBase64(app.cm.object_visual(cap, withContours=footprint_enabled)))
 
 
 @harmony.route('/objects/<objectId>', methods=['POST'])
 @findObjectIdOr404
 def updateObjectSettings(cap):
-    if app.cm.GameState.getPhase() != "Add":
+    if app.cm.getPhase() != "Add":
         return "Cannot update object settings outside of Add Phase", 400
     objectKwargs = request.form.to_dict()
     newName = objectKwargs.pop("objectName")
@@ -589,7 +596,7 @@ def updateObjectSettings(cap):
 @harmony.route('/objects/<objectId>', methods=['DELETE'])
 @findObjectIdOr404
 def deleteObjectSettings(cap):
-    if app.cm.GameState.getPhase() != "Add":
+    if app.cm.getPhase() != "Add":
         return "Cannot remove object outside of Add Phase", 400
     with DATA_LOCK:
         app.cm.deleteObject(cap.oid)
@@ -600,7 +607,12 @@ def deleteObjectSettings(cap):
 @findObjectIdOr404
 def declareAttackOnTarget(cap, targetId):
     with DATA_LOCK:
-        app.cm.declareEvent(eventType="Attack", eventFaction="Undeclared", eventObject=cap.oid, eventValue=targetId, eventResult="null")
+        try:
+            target = app.cm.findObject(targetId)
+            action = ObjectAction(cap, target)
+            app.cm.declareEvent(eventType="Attack", eventFaction=app.cm.faction(cap.oid), eventObject=cap.oid, eventValue=targetId, eventTarget=action.targetNumber, eventResult="null")
+        except Exception as e:
+            print(f"Failed to declare attack: {cap.oid} on {targetId} -- {e}")
     return buildObjectActions(cap)
     
     
@@ -608,7 +620,7 @@ def declareAttackOnTarget(cap, targetId):
 @findObjectIdOr404
 def declareNoAction(cap):
     with DATA_LOCK:
-        app.cm.declareEvent(eventType="NoAction", eventFaction="Undeclared", eventObject=cap.oid, eventValue="null", eventTarget="null", eventResult="null")
+        app.cm.declareEvent(eventType="NoAction", eventFaction=app.cm.faction(cap.oid), eventObject=cap.oid, eventValue="null", eventTarget=0, eventResult="null")
     return buildObjectActions(cap)
 
 
@@ -701,13 +713,14 @@ def buildObjectActions(cap):
     objActCards = []
     with DATA_LOCK:
         try:
-            capDeclaredAction = GameEvent.get_existing_declarations(cap.oid)[0]
+            capDeclaredAction = app.cm.GameEvents.get_existing_declarations(cap.oid)[0]
             capDeclaredTarget = capDeclaredAction.GameEventValue.terminant
             if capDeclaredTarget == "null":
                 capDeclaredTarget = None
             if capDeclaredTarget is not None:
                 capDeclaredTarget = app.cm.findObject(capDeclaredTarget)
         except IndexError:
+            print(f"Failed to locate existing action declarations on {cap.oid}")
             capDeclaredAction = None
             capDeclaredTarget = None
         cap_faction = app.cm.faction(cap.oid)
@@ -718,7 +731,7 @@ def buildObjectActions(cap):
                 declare = ""
                 action = ObjectAction(cap, target)
                 selected = capDeclaredAction is not None and capDeclaredTarget == target
-                if app.cm.GameState.getPhase() == "Declare":
+                if app.cm.getPhase() == "Declare":
                     disabled = "disabled" if selected else ""
                     declare = f"""
                     <div class="col">
@@ -729,7 +742,7 @@ def buildObjectActions(cap):
                     "{cardBorder}", "" if not selected else "border border-secondary border-3").replace(
                     "{objectName}", cap.oid).replace(
                     "{targetName}", target.oid).replace(
-                    "{encodedBA}", imageToBase64(target.visual())).replace(
+                    "{encodedBA}", imageToBase64(app.cm.object_visual(target))).replace(
                     "{objectDistance}", f"{action.targetRange.capitalize()} ({action.targetDistance / 25.4:6.1f} in)").replace(
                     "{declare}", declare).replace(
                     "{skill}", str(action.skill)).replace(
@@ -739,7 +752,7 @@ def buildObjectActions(cap):
                     "{other}", "0").replace(
                     "{targetNumber}", str(action.targetNumber)))
     
-        if app.cm.GameState.getPhase() == "Declare":
+        if app.cm.getPhase() == "Declare":
             selected = capDeclaredAction is not None and capDeclaredTarget is None
             disabled = "disabled" if selected else ""
             objActCards.append(f"""
@@ -761,11 +774,36 @@ def buildObjectActions(cap):
 @findObjectIdOr404
 def getObjectActions(cap):
     return buildObjectActions(cap)
+
+
+def buildObjectMovement(cap):
+    with open("harmony_templates/HarmonyObjectMovement.html") as f:
+        template = f.read()
+    return template.replace(
+        "{harmonyURL}", url_for(".buildHarmony")).replace(
+        "{objectName}", cap.oid).replace(
+        "{encodedBA}", imageToBase64(app.cm.buildMovementMap(cap))).replace(
+        "{newLocation}", getattr(cap, "newLocation", ""))
     
+
+@harmony.route('/objects/<objectId>/movement', methods=['GET'])
+@findObjectIdOr404
+def getObjectMovement(cap):
+    return buildObjectMovement(cap)
+
+
+@harmony.route('/objects/<objectId>/movement', methods=['POST'])
+@findObjectIdOr404
+def requestObjectMovement(cap):
+    cap.newLocation = int(request.form["newLocation"])
+    return buildObjectMovement(cap)
+
 
 @harmony.route('/objects/<objectId>/footprint_editor', methods=['GET'])
 @findObjectIdOr404
 def buildFootprintEditor(cap):
+    margin = int(request.form["objectMargin"])
+    cap.margin = margin
     objectName = cap.oid
     with open("harmony_templates/TrackedObjectFootprintEditor.html") as f:
         template = f.read()
@@ -773,7 +811,7 @@ def buildFootprintEditor(cap):
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{objectName}", cap.oid).replace(
-        "{encodedBA}", imageToBase64(cap.visual(withContours=True, margin=50))).replace(
+        "{encodedBA}", imageToBase64(app.cm.object_visual(cap, withContours=True, margin=50))).replace(
         "{camName}", '0')
     return ""
     
@@ -783,7 +821,7 @@ def buildFootprintEditor(cap):
 def objectVisualWithMargin(cap):
     margin = int(request.form["objectMargin"])
     cap.margin = margin
-    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(cap.visual(withContours=True, margin=50))}" style="border-radius: 10px;"  onclick="imageClickListener(event)">"""
+    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(app.cm.object_visual(cap, withContours=True, margin=50))}" style="border-radius: 10px;"  onclick="imageClickListener(event)">"""
     
 
 @harmony.route('/objects/<objectId>/project_addition', methods=['POST'])
@@ -793,7 +831,7 @@ def projectAdditionOntoObject(cap):
     addition_points = json.loads(request.form["additionPolygon"])
     addition_points = np.int32(addition_points)
     print(f"Received addition points: {addition_points}")
-    projected_image = cap.visual(withContours=True, margin=margin)
+    projected_image = app.cm.object_visual(cap, withContours=True, margin=margin)
     projected_image = cv2.polylines(projected_image, [addition_points], isClosed=True, color=(255,255,0), thickness=3)
     return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(projected_image)}" style="border-radius: 10px;"  onclick="imageClickListener(event)">"""
     
@@ -818,7 +856,7 @@ def combineObjectWithAddition(cap):
     newChangeContours = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
     with DATA_LOCK:
         cap.changeSet[camName].overrideChangeContours(newChangeContours)
-    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(cap.visual(withContours=True, margin=margin))}" style="border-radius: 10px;">"""
+    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(app.cm.object_visual(cap, withContours=True, margin=margin))}" style="border-radius: 10px;">"""
 
 
 def minimapGenerator():
