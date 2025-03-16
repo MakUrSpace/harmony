@@ -1,0 +1,43 @@
+<h1>{objectName} Movement Request</h1>
+<div class="container border border-primary">
+    <div class="row" align="right">
+        <input class="btn btn-info" type="button" value="Return to table" hx-target="#objectInteractor" hx-get='{harmonyURL}objects'">
+    </div>
+    <div class="row">
+        <img class="img-fluid border border-info border-2" alt="Object Movement Display" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
+        <input hidden=true type="text" name="newLocation" id="newLocation" value="{newLocation}" hx-post="{harmonyURL}objects/{objectName}/movement" hx-target="#objectImageDiv">
+    </div>
+    <script>
+        function clearAddition(event) {
+            const additionPolygonField = document.getElementById(`additionPolygon`)
+            additionPolygonField.value = '[]'
+        }
+        
+        function imageClickListener(event) {
+            const imgElem = document.getElementById(`objectImage`)
+            bounds=imgElem.getBoundingClientRect();
+            const left=bounds.left;
+            const top=bounds.top;
+            const x = event.x - left;
+            const y = event.y - top;
+            const cw=imgElem.clientWidth
+            const ch=imgElem.clientHeight
+            const iw=imgElem.naturalWidth
+            const ih=imgElem.naturalHeight
+            const px=x/cw*iw
+            const py=y/ch*ih
+            //console.log("img element points: ", px, py)
+            const x_offset = 0
+            const x_scale = 1
+            const image_x = (px - x_offset) * x_scale
+            const y_offset = 0
+            const y_scale = 1
+            const image_y = (py - y_offset) * y_scale
+            const formField = document.getElementById(`newLocation`)
+            var formValue
+            formValue = [~~image_x, ~~image_y]
+            formField.value = JSON.stringify(formValue)
+            formField.dispatchEvent(new Event('change'));
+        }
+    </script>
+</div>
