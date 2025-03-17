@@ -279,7 +279,7 @@ def buildCalibrator():
 
 
 def captureToChangeRow(capture):
-    encodedBA = imageToBase64(capture.visual())
+    encodedBA = imageToBase64(app.cm.object_visual(capture))
     name = "None"
     realTriangle = {camName: ctp[-1] for camName, ctp in capture.calibTriPts.items()}
     center = ", ".join(["0", "0"])
