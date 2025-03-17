@@ -1,7 +1,7 @@
 <div class="row mb-1 {cardBorder}">
     <div class="border border-info border-1">
         <h4>Target: {targetName}</h4>
-        <h6>Range: {objectDistance}</h6>
+        <h6>Range: {range} -- {objectDistance}</h6>
     </div>
     <div class="col">
         <img class="img-fluid border border-2 border-info" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
@@ -26,7 +26,7 @@
                   <td>{attackerMovementModifier}</td>
                   <td>{targetMovementModifier}</td>
                   <td>{other}</td>
-                  <td>{range}</td>
+                  <td>{rangeModifier}</td>
                   <td>=</td>
                   <td>{targetNumber}</td>
                 </tr>

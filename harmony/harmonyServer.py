@@ -749,8 +749,9 @@ def buildObjectActions(cap):
                     "{skill}", str(action.skill)).replace(
                     "{attackerMovementModifier}", str(action.aMM)).replace(
                     "{targetMovementModifier}", str(action.tMM)).replace(
-                    "{range}", str(action.rangeModifier)).replace(
-                    "{other}", "0").replace(
+                    "{range}", action.targetRange).replace(
+                    "{rangeModifier}", str(action.rangeModifier)).replace(
+                    "{other}", str(action.otherModifiers)).replace(
                     "{targetNumber}", str(action.targetNumber)))
     
         if app.cm.getPhase() == "Declare":
