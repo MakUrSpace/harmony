@@ -330,17 +330,13 @@ def captureToChangeRow(capture):
     rowClass = ""
 
     encodedBA = imageToBase64(app.cm.object_visual(capture, withContours=False))
-
-    print(f"Working on {capture} -- {type(capture)}")
     
     if isinstance(capture, HarmonyObject):
-        print(f"Processing harmony object -- {capture.objectType}")
         if getattr(capture, 'objectType', None) == "Unit":
             moveDistance = app.cm.objectLastDistance(capture)
             moveDistance = "None" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:4.1f} in"
         
             if app.cm.obj_destroyed(capture.oid):
-                print("Object is destroyed")
                 objectName = f"<s>{capture.oid}</s>"
                 borderType = "border-danger border-5 x-box"
             else:
@@ -502,7 +498,6 @@ def buildObjectsFilter(faction_filter=None, type_filter=None):
         filters.append('type_filter=Event')
         eventSelected = ' checked="checked"'
 
-    print(f"Object Filters: {filters}")
     filters = f"?{'&'.join(filters)}" if len(filters) > 0 else ''
     
     with open("harmony_templates/FilteredObjectsTable.html", "r") as f:
@@ -726,33 +721,33 @@ def buildObjectActions(cap):
             capDeclaredTarget = None
         cap_faction = app.cm.faction(cap.oid)
         for target in app.cm.memory:
-            if target.oid == cap.oid or cap_faction == app.cm.faction(target.oid) or not app.cm.line_of_sight(cap, target):
+            if not app.cm.can_target(cap, target):
                 continue
-            elif app.cm.object_type(target.oid) in ["Unit", "Structure"]:
-                declare = ""
-                action = ObjectAction(cap, target)
-                selected = capDeclaredAction is not None and capDeclaredTarget == target
-                if app.cm.getPhase() == "Declare":
-                    disabled = "disabled" if selected else ""
-                    declare = f"""
-                    <div class="col">
-                        <input {disabled} type="button" class="btn btn-warning" value="Declare Attack" id="declare_{target.oid}" hx-target="#objectInteractor" hx-post="{url_for(".buildHarmony")}objects/{cap.oid}/declare_attack/{target.oid}">
-                    </div>"""
-                objActCards.append(cardTemplate.replace(
-                    "{harmonyURL}", url_for(".buildHarmony")).replace(
-                    "{cardBorder}", "" if not selected else "border border-secondary border-3").replace(
-                    "{objectName}", cap.oid).replace(
-                    "{targetName}", target.oid).replace(
-                    "{encodedBA}", imageToBase64(app.cm.object_visual(target))).replace(
-                    "{objectDistance}", f"{action.targetRange.capitalize()} ({action.targetDistance / 25.4:6.1f} in)").replace(
-                    "{declare}", declare).replace(
-                    "{skill}", str(action.skill)).replace(
-                    "{attackerMovementModifier}", str(action.aMM)).replace(
-                    "{targetMovementModifier}", str(action.tMM)).replace(
-                    "{range}", action.targetRange).replace(
-                    "{rangeModifier}", str(action.rangeModifier)).replace(
-                    "{other}", str(action.otherModifiers)).replace(
-                    "{targetNumber}", str(action.targetNumber)))
+
+            declare = ""
+            action = ObjectAction(cap, target)
+            selected = capDeclaredAction is not None and capDeclaredTarget == target
+            if app.cm.getPhase() == "Declare":
+                disabled = "disabled" if selected else ""
+                declare = f"""
+                <div class="col">
+                    <input {disabled} type="button" class="btn btn-warning" value="Declare Attack" id="declare_{target.oid}" hx-target="#objectInteractor" hx-post="{url_for(".buildHarmony")}objects/{cap.oid}/declare_attack/{target.oid}">
+                </div>"""
+            objActCards.append(cardTemplate.replace(
+                "{harmonyURL}", url_for(".buildHarmony")).replace(
+                "{cardBorder}", "" if not selected else "border border-secondary border-3").replace(
+                "{objectName}", cap.oid).replace(
+                "{targetName}", target.oid).replace(
+                "{encodedBA}", imageToBase64(app.cm.object_visual(target))).replace(
+                "{objectDistance}", f"{action.targetRange.capitalize()} ({action.targetDistance / 25.4:6.1f} in)").replace(
+                "{declare}", declare).replace(
+                "{skill}", str(action.skill)).replace(
+                "{attackerMovementModifier}", str(action.aMM)).replace(
+                "{targetMovementModifier}", str(action.tMM)).replace(
+                "{range}", action.targetRange).replace(
+                "{rangeModifier}", str(action.rangeModifier)).replace(
+                "{other}", str(action.otherModifiers)).replace(
+                "{targetNumber}", str(action.targetNumber)))
     
         if app.cm.getPhase() == "Declare":
             selected = capDeclaredAction is not None and capDeclaredTarget is None
@@ -769,6 +764,7 @@ def buildObjectActions(cap):
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{objectName}", cap.oid).replace(
         "{objectIcon}", imageToBase64(cap.icon)).replace(
+        "{visibilityMap}", imageToBase64(app.cm.buildVisibilityMap(cap))).replace(
         "{objectActionCards}", "\n".join(objActCards))
 
 
@@ -791,7 +787,8 @@ def buildObjectMovement(cap):
 @harmony.route('/objects/<objectId>/movement', methods=['GET'])
 @findObjectIdOr404
 def getObjectMovement(cap):
-    return buildObjectMovement(cap)
+    with DATA_LOCK:
+        return buildObjectMovement(cap)
 
 
 @harmony.route('/objects/<objectId>/movement', methods=['POST'])
@@ -799,6 +796,18 @@ def getObjectMovement(cap):
 def requestObjectMovement(cap):
     cap.newLocation = int(request.form["newLocation"])
     return buildObjectMovement(cap)
+    
+
+@harmony.route('/objects/<objectId>/visibility', methods=['GET'])
+@findObjectIdOr404
+def getObjectVisibility(cap):
+    with open("harmony_templates/HarmonyObjectMovement.html") as f:
+        template = f.read()
+    return template.replace(
+        "{harmonyURL}", url_for(".buildHarmony")).replace(
+        "{objectName}", cap.oid).replace(
+        "{encodedBA}", imageToBase64(app.cm.buildVisibilityMap(cap))).replace(
+        "{newLocation}", getattr(cap, "newLocation", ""))
 
 
 @harmony.route('/objects/<objectId>/footprint_editor', methods=['GET'])
@@ -832,7 +841,6 @@ def projectAdditionOntoObject(cap):
     margin = 50
     addition_points = json.loads(request.form["additionPolygon"])
     addition_points = np.int32(addition_points)
-    print(f"Received addition points: {addition_points}")
     projected_image = app.cm.object_visual(cap, withContours=True, margin=margin)
     projected_image = cv2.polylines(projected_image, [addition_points], isClosed=True, color=(255,255,0), thickness=3)
     return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(projected_image)}" style="border-radius: 10px;"  onclick="imageClickListener(event)">"""
