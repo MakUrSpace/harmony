@@ -19,7 +19,7 @@ from matplotlib.figure import Figure
 from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for
 
 from observer.configurator import configurator, setConfiguratorApp
-from observer.observer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
+from observer.observerServer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
 from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, mc
 
@@ -781,7 +781,7 @@ def buildObjectMovement(cap):
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{objectName}", cap.oid).replace(
         "{encodedBA}", imageToBase64(app.cm.buildMovementMap(cap))).replace(
-        "{newLocation}", getattr(cap, "newLocation", ""))
+        "{newLocation}", json.dumps(getattr(cap, "newLocation", "[]")))
     
 
 @harmony.route('/objects/<objectId>/movement', methods=['GET'])
@@ -793,9 +793,27 @@ def getObjectMovement(cap):
 
 @harmony.route('/objects/<objectId>/movement', methods=['POST'])
 @findObjectIdOr404
+def setMovementLocation(cap):
+    newLocation = json.loads(request.form["newLocation"])
+    movementMap = app.cm.buildMovementMap(cap)
+    if newLocation:
+        cap.newLocation = newLocation
+        cv2.circle(movementMap, [int(d) for d in newLocation], 10, (255, 255, 0), -1)
+    return f"""<div id="objectImageDiv">
+            <img class="img-fluid border border-info border-2" alt="Object Movement Display" id="movementMap" src="data:image/jpg;base64,{imageToBase64(movementMap)}" onclick="movementImageClickListener(event)" style="border-radius: 10px;">
+        </div>"""
+
+
+@harmony.route('/objects/<objectId>/request_movement', methods=['POST'])
+@findObjectIdOr404
 def requestObjectMovement(cap):
-    cap.newLocation = int(request.form["newLocation"])
-    return buildObjectMovement(cap)
+    print(f"Here! {request.form['newLocation']}")
+    requestedLocation = [int(d) for d in json.loads(request.form["newLocation"])]
+    x, y, w, h = app.cm.cc.realSpaceBoundingBox()
+    cap.newLocation = [requestedLocation[0] + x, requestedLocation[1] + y]
+    print(f"Requesting {cap.oid} move to {cap.newLocation}")
+    app.cm.expectObjectMovement(cap, cap.newLocation)
+    return getObjectTableContainer()
     
 
 @harmony.route('/objects/<objectId>/visibility', methods=['GET'])

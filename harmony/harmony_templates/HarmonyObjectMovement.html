@@ -4,8 +4,13 @@
         <input class="btn btn-info" type="button" value="Return to table" hx-target="#objectInteractor" hx-get='{harmonyURL}objects'">
     </div>
     <div class="row">
-        <img class="img-fluid border border-info border-2" alt="Object Movement Display" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
-        <input hidden=true type="text" name="newLocation" id="newLocation" value="{newLocation}" hx-post="{harmonyURL}objects/{objectName}/movement" hx-target="#objectImageDiv">
+        <div id="objectImageDiv">
+            <img class="img-fluid border border-info border-2" id="movementMap" alt="Object Movement Display" src="data:image/jpg;base64,{encodedBA}" onclick="movementImageClickListener(event)" style="border-radius: 10px;">
+        </div>
+        <form hx-post="{harmonyURL}objects/{objectName}/request_movement">
+            <input hidden=true type="text" name="newLocation" id="newLocation" value="{newLocation}" hx-post="{harmonyURL}objects/{objectName}/movement" hx-target="#objectImageDiv">
+            <input class="btn btn-secondary" type="submit" value="Submit Location Request" hx-target="#objectInteractor">
+        </form>
     </div>
     <script>
         function clearAddition(event) {
@@ -13,8 +18,8 @@
             additionPolygonField.value = '[]'
         }
         
-        function imageClickListener(event) {
-            const imgElem = document.getElementById(`objectImage`)
+        function movementImageClickListener(event) {
+            const imgElem = document.getElementById(`movementMap`)
             bounds=imgElem.getBoundingClientRect();
             const left=bounds.left;
             const top=bounds.top;
@@ -26,7 +31,7 @@
             const ih=imgElem.naturalHeight
             const px=x/cw*iw
             const py=y/ch*ih
-            //console.log("img element points: ", px, py)
+            console.log("img element points: ", px, py)
             const x_offset = 0
             const x_scale = 1
             const image_x = (px - x_offset) * x_scale
