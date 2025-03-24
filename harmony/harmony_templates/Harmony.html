@@ -67,10 +67,8 @@
             </div>
             <div class="container">
                 <div class="row">
-                    <div class="col" align="left">
-                        <input type="button" class="btn btn-danger float-end" name="undoChange" id="passive" hx-get="{harmonyURL}undo_last_change" hx-swap="none" value="Undo Last Change">
-                    </div>
-                    <div class="col" hx-get="{harmonyURL}get_game_controller" hx-trigger="every 1.5s" id="gameController"></div>
+                    <div class="col" align="left" hx-get="{harmonyURL}get_undo_button" hx-trigger="every 1.5s" id="undoButton"></div>
+                    <div class="col" align="right" hx-get="{harmonyURL}get_game_controller" hx-trigger="every 1.5s" id="gameController"></div>
                 </div>
             </div>
             <div class="container justify-content-center" align="center">

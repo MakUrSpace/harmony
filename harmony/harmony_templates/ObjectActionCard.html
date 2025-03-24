@@ -1,12 +1,19 @@
 <div class="row mb-1 {cardBorder}">
-    <div class="border border-info border-1">
-        <h4>Target: {targetName}</h4>
-        <h6>Range: {range} -- {objectDistance}</h6>
+    <div class="col border border-info border-1">
+        <div class="container">
+            <div class="row">
+                <div class="col">
+                    <img class="img-fluid border border-2 border-info" alt="Capture Image" src="data:image/jpg;base64,{targetVisual}" style="border-radius: 10px;">
+                </div>
+                <div class="col">
+                    <h6>Attack</h6>
+                    <h4>{targetName}</h4>
+                    <h6>Range: {objectDistance}</h6>
+                </div>
+            </div>
+        </div>
     </div>
-    <div class="col">
-        <img class="img-fluid border border-2 border-info" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
-    </div>
-    <div class="col">
+    <div class="col border border-info border-1"" align="center">
         <div class="row" id="sator_row_{targetName}">
             <table id="sator_{targetName}" class="table">
               <thead class="thead-dark table-primary">
@@ -33,7 +40,7 @@
               </tbody>
             </table>
         </div>
+        {declare}
     </div>
-    {declare}
 </div>
 <hr class="mt-2 mb-3">

@@ -1,15 +1,15 @@
 <h1>{objectName} Movement Request</h1>
 <div class="container border border-primary">
     <div class="row" align="right">
-        <input class="btn btn-info" type="button" value="Return to table" hx-target="#objectInteractor" hx-get='{harmonyURL}objects'">
+        <input class="btn btn-info" type="button" value="Return to table" hx-target="#objectInteractor" hx-get='{harmonyURL}objects_filter'">
     </div>
     <div class="row">
         <div id="objectImageDiv">
             <img class="img-fluid border border-info border-2" id="movementMap" alt="Object Movement Display" src="data:image/jpg;base64,{encodedBA}" onclick="movementImageClickListener(event)" style="border-radius: 10px;">
         </div>
-        <form hx-post="{harmonyURL}objects/{objectName}/request_movement">
+        <form hx-post="{harmonyURL}objects/{objectName}/request_movement" hx-target="#objectInteractor">
             <input hidden=true type="text" name="newLocation" id="newLocation" value="{newLocation}" hx-post="{harmonyURL}objects/{objectName}/movement" hx-target="#objectImageDiv">
-            <input class="btn btn-secondary" type="submit" value="Submit Location Request" hx-target="#objectInteractor">
+            <input class="btn btn-secondary" type="submit" value="Submit Location Request">
         </form>
     </div>
     <script>
