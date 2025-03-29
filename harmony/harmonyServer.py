@@ -997,38 +997,43 @@ def getObjectVisibility(cap):
         "{newLocation}", getattr(cap, "newLocation", ""))
 
 
-@harmony.route('/objects/<objectId>/footprint_editor', methods=['GET'])
-@findObjectIdOr404
 def buildFootprintEditor(cap):
     with open("harmony_templates/TrackedObjectFootprintEditor.html") as f:
         template = f.read()
 
+    if getattr(cap, "selection_polygon", None) is not None:
+        selectionPolygon = cap.selection_polygon
+        selection_points = np.int32(json.loads(selectionPolygon))
+        projected_image = app.cm.object_visual(cap, withContours=True, margin=50)
+        projected_image = cv2.polylines(projected_image, [selection_points], isClosed=True, color=(255,255,0), thickness=3)
+        encodedBA = imageToBase64(projected_image)
+    else:
+        encodedBA = imageToBase64(app.cm.object_visual(cap, withContours=True, margin=50))
+        selectionPolygon = "[]"
+
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
         "{objectName}", cap.oid).replace(
-        "{encodedBA}", imageToBase64(app.cm.object_visual(cap, withContours=True, margin=50))).replace(
+        "{selectionPolygon}", selectionPolygon).replace(
+        "{encodedBA}", encodedBA).replace(
         "{camName}", '0')
     return ""
-    
 
-@harmony.route('/objects/<objectId>/margin', methods=['POST'])
-@findObjectIdOr404
-def objectVisualWithMargin(cap):
-    margin = int(request.form["objectMargin"])
-    cap.margin = margin
-    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(app.cm.object_visual(cap, withContours=True, margin=50))}" style="border-radius: 10px;"  onclick="imageClickListener(event)">"""
-    
 
-@harmony.route('/objects/<objectId>/project_addition', methods=['POST'])
+@harmony.route('/objects/<objectId>/footprint_editor', methods=['GET'])
 @findObjectIdOr404
-def projectAdditionOntoObject(cap):
+def getFootprintEditor(cap):
+    return buildFootprintEditor(cap)
+
+
+@harmony.route('/objects/<objectId>/project_selection', methods=['POST'])
+@findObjectIdOr404
+def projectSelectionOntoObject(cap):
     margin = 50
-    addition_points = json.loads(request.form["additionPolygon"])
-    addition_points = np.int32(addition_points)
-    projected_image = app.cm.object_visual(cap, withContours=True, margin=margin)
-    projected_image = cv2.polylines(projected_image, [addition_points], isClosed=True, color=(255,255,0), thickness=3)
-    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(projected_image)}" style="border-radius: 10px;"  onclick="imageClickListener(event)">"""
-    
+    selection_polygon = json.loads(request.form["additionPolygon"])
+    cap.selection_polygon = request.form["additionPolygon"]
+    return buildFootprintEditor(cap)
+
 
 @harmony.route('/objects/<objectId>/submit_addition', methods=['POST'])
 @findObjectIdOr404
@@ -1037,20 +1042,23 @@ def combineObjectWithAddition(cap):
     margin = 50
     addition_points = json.loads(request.form["additionPolygon"])
     camName = request.form["camName"]
-    cam = app.cc.cameras[camName]
-    change = cap.changeSet[camName]
-    x, y, w, h = cap.changeSet['0'].clipBox
-    adjusted_addition_points = [[pt[0] + x - margin, pt[1] + y - margin] for pt in addition_points]
-    adjusted_addition_points = np.int32(adjusted_addition_points)
-    height, width = cam.mostRecentFrame.shape[:2]
-    blank_image = np.zeros([height, width], np.uint8)
-    contour_image = cv2.drawContours(blank_image.copy(), change.changeContours, -1, (255), -1)
-    projected_addition_and_contours = cv2.polylines(contour_image, [adjusted_addition_points], isClosed=True, color=(255), thickness=3)
-    _, thresh = cv2.threshold(projected_addition_and_contours, 127, 255, 0)
-    newChangeContours = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
     with DATA_LOCK:
-        cap.changeSet[camName].overrideChangeContours(newChangeContours)
-    return f"""<img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{imageToBase64(app.cm.object_visual(cap, withContours=True, margin=margin))}" style="border-radius: 10px;">"""
+        app.cm.add_footprint(cap, camName, addition_points)
+        cap.selection_polygon = None
+    return buildFootprintEditor(cap)
+
+
+@harmony.route('/objects/<objectId>/submit_subtraction', methods=['POST'])
+@findObjectIdOr404
+def combineObjectWithSubtraction(cap):
+    # margin = getattr(cap, "margin", 5)
+    margin = 50
+    subtraction_points = json.loads(request.form["subtractionPolygon"])
+    camName = request.form["camName"]
+    with DATA_LOCK:
+        app.cm.subtract_footprint(cap, camName, subtraction_points)
+        cap.selection_polygon = None
+    return buildFootprintEditor(cap)
 
 
 def minimapGenerator():

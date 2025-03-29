@@ -3,28 +3,40 @@
     <div class="row" align="right">
         <input class="btn btn-info" type="button" value="Return to Object" hx-target="#objectInteractor" hx-get='{harmonyURL}objects/{objectName}'">
     </div>
-    <div class="row" align="right">
+    <!-- <div class="row" align="right">
         <label for="objectMargin">Image Object Margin</label>
         <input type="number" class="form-control" name="objectMargin" value="50" min="50" max="200" hx-post='{harmonyURL}objects/{objectName}/margin', hx-target="#objectImageDiv">
-    </div>
+    </div> -->
     <div class="row" align="right">
-        <input type="button" class="btn btn-secondary" name="clearAddition" value="Clear Addition" onclick="clearAddition(event)">
+        <input type="button" class="btn btn-secondary" name="clear" value="Clear" onclick="clearPolygons()">
     </div>
     <div class="row" id="objectImageDiv">
         <img class="img-fluid border border-info border-2" id="objectImage" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" onclick="imageClickListener(event)" style="border-radius: 10px;">
     </div>
     <div class="row"><br></div>
-    <div class="col">
-        <form hx-post="{harmonyURL}objects/{objectName}/submit_addition" hx-target="#objectImageDiv">
-            <input hidden=true type="text" name="additionPolygon" id="additionPolygon" value="{objectAddition}" hx-post="{harmonyURL}objects/{objectName}/project_addition" hx-target="#objectImageDiv">
-            <input hidden=true type="text" name="camName" id="camName" value="{camName}">  
-            <input type="submit" class="btn btn-primary" name="submitAlteration" value="Submit Add Area">
-        </form>
+    <div class="row">
+        <div class="col">
+            <form hx-post="{harmonyURL}objects/{objectName}/submit_subtraction" hx-target="#objectInteractor">
+                <input hidden=true type="text" name="subtractionPolygon" id="subtractionPolygon" value="{selectionPolygon}">
+                <input hidden=true type="text" name="camName" id="camName" value="{camName}">  
+                <input type="submit" class="btn btn-danger" name="submitAlteration" value="Subtract Area">
+            </form>
+        </div>
+        <div class="col">
+            <form hx-post="{harmonyURL}objects/{objectName}/submit_addition" hx-target="#objectInteractor">
+                <input hidden=true type="text" name="additionPolygon" id="additionPolygon" value="{selectionPolygon}" hx-post="{harmonyURL}objects/{objectName}/project_selection" hx-target="#objectInteractor">
+                <input hidden=true type="text" name="camName" id="camName" value="{camName}">  
+                <input type="submit" class="btn btn-success" name="submitAlteration" value="Add Area">
+            </form>
+        </div>
     </div>
     <script>
-        function clearAddition(event) {
+        function clearPolygons() {
             const additionPolygonField = document.getElementById(`additionPolygon`)
+            const subtractionPolygonField = document.getElementById(`subtractionPolygon`)
             additionPolygonField.value = '[]'
+            subtractionPolygonField.value = '[]'
+            additionPolygonField.dispatchEvent(new Event('change'));
         }
         
         function imageClickListener(event) {
@@ -47,17 +59,24 @@
             const y_offset = 0
             const y_scale = 1
             const image_y = (py - y_offset) * y_scale
-            const formField = document.getElementById(`additionPolygon`)
+            const addFormField = document.getElementById(`additionPolygon`)
+            const subtractFormField = document.getElementById(`subtractionPolygon`)
             var formValue
             try {
-              formValue = JSON.parse(formField.value)
+              formValue = JSON.parse(addFormField.value)
             }
             catch(err) {
               formValue = []
             }
+            console.log(addFormField.value)
             formValue.push([~~image_x, ~~image_y])
-            formField.value = JSON.stringify(formValue)
-            formField.dispatchEvent(new Event('change'));
+            formValue = JSON.stringify(formValue)
+            addFormField.value = formValue
+            subtractFormField.value = formValue
+            console.log(formValue)
+            console.log("\n")
+            addFormField.dispatchEvent(new Event('change'));
+
         }
     </script>
 </div>
