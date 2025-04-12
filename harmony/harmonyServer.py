@@ -21,7 +21,7 @@ from flask import Flask, Blueprint, render_template, Response, request, make_res
 from observer.configurator import configurator, setConfiguratorApp
 from observer.observerServer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
-from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, mc
+from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, mc, INCHES_TO_MM
 
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
@@ -249,23 +249,25 @@ def resetHarmony():
     return 'success'
 
 
-@harmony.route('/load')
+@harmony.route('/load', methods=["POST"])
 def loadHarmony():
+    game_name = request.form["game_name"]
     global CONSOLE_OUTPUT
     with DATA_LOCK:
         CONSOLE_OUTPUT = "Loading game state..."
     time.sleep(3)
     with DATA_LOCK:
-        app.cm.loadGame()        
-        CONSOLE_OUTPUT = "Reloaded game state."
+        app.cm.loadGame(gameName=game_name)        
+        CONSOLE_OUTPUT = "Game state reloaded."
     return 'success'
 
 
-@harmony.route('/save')
+@harmony.route('/save', methods=["POST"])
 def saveHarmony():
+    game_name = request.form["game_name"]
     global CONSOLE_OUTPUT
     with DATA_LOCK:
-        app.cm.saveGame()
+        app.cm.saveGame(gameName=game_name)
         CONSOLE_OUTPUT = "Saved game state."
     return 'success'
 
@@ -722,6 +724,8 @@ def updateObjectSettings(cap):
     with DATA_LOCK:
         objectType = objectKwargs.pop('objectType')
         objectSubType = objectKwargs.pop('objectSubType')
+        if 'elevation' in objectKwargs:
+            objectKwargs['elevation'] = int(float(elevation) * INCHES_TO_MM)
         cap = app.cm.classifyObject(
             objectId=cap.oid,
             objectType=objectType,
@@ -797,6 +801,7 @@ def buildObjectSettings(obj, objType=None):
     objectSettings = []
     if objType == "Terrain":
         objectSettings.append(text_box_template.format(key="Elevation", value=1, datalist=""))
+        objectSettings.append(text_box_template.format(key="Difficulty", value=1, datalist=""))
         objectSettings.append("""<input type="text" hidden class="form-control" name="objectSubType" value="UniformElevation">""")
         terrainSelected = " selected='selected'"
     elif objType == "Structure":
