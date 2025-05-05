@@ -74,6 +74,7 @@ def commitMovement():
         except Exception as e:
             global CONSOLE_OUTPUT
             CONSOLE_OUTPUT = str(e)
+            raise
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
