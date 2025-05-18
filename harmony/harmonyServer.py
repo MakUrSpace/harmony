@@ -61,18 +61,21 @@ def getUndoButton():
 
 @harmony.route('/commit_additions')
 def commitAdditions():
+    global CONSOLE_OUTPUT
     with DATA_LOCK:
         app.cm.commitAdditions()
+        CONSOLE_OUTPUT = ""
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
 @harmony.route('/commit_movement', methods=['GET'])
 def commitMovement():
+    global CONSOLE_OUTPUT
     with DATA_LOCK:
         try:
             app.cm.commitMovement()
+            CONSOLE_OUTPUT = ""
         except Exception as e:
-            global CONSOLE_OUTPUT
             CONSOLE_OUTPUT = str(e)
             raise
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
@@ -80,14 +83,17 @@ def commitMovement():
 
 @harmony.route('/declare_actions', methods=['GET'])
 def declareActions():
+    global CONSOLE_OUTPUT
     with DATA_LOCK:
         app.cm.passiveMode()
         app.cm.GameState.newPhase("Declare")
+        CONSOLE_OUTPUT = ""
     return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
 
 
 @harmony.route('/resolve_actions', methods=['POST'])
 def resolveActionForm():
+    global CONSOLE_OUTPUT
     try:
         actionData = {key.split("|||||")[0]: result for key, result in request.form.items()}
     except Exception as e:
@@ -112,6 +118,7 @@ def resolveActionForm():
     else:
         with DATA_LOCK:
             app.cm.resolveRound()
+            CONSOLE_OUTPUT = ""
         return buildObjectsFilter(getattr(buildObjectsFilter, "filter", None))
     
 
@@ -364,6 +371,9 @@ def captureToChangeRow(capture):
             else:
                 if app.cm.objectCouldInteract(capture):
                     borderType = "border-success border-3"
+                    interactiveStyle = True
+                elif app.cm.objectViolatingRules(capture):
+                    borderType = "border-danger border-3"
                     interactiveStyle = True
                 else:
                     interactiveStyle = False
