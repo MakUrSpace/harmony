@@ -362,8 +362,8 @@ def captureToChangeRow(capture):
     if isinstance(capture, HarmonyObject):
         if getattr(capture, 'objectType', None) == "Unit":
             moveDistance = app.cm.objectLastDistance(capture)
-            movementSpeed = app.cm.objectSpeed(capture.oid)
-            moveDistance = f"0 /{movementSpeed:4.1f} in" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:4.1f} /{movementSpeed:4.1f} in"
+            movementSpeed = f"{app.cm.objectSpeed(capture.oid):4.1f}{app.cm.objectJumpJets(capture.oid) or ''}"
+            moveDistance = f"0 /{movementSpeed} in" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:4.1f} /{movementSpeed} in"
         
             if app.cm.obj_destroyed(capture.oid):
                 objectName = f"<s>{capture.oid}</s>"
