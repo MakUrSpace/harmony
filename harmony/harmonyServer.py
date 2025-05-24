@@ -811,7 +811,7 @@ def buildObjectSettings(obj, objType=None):
 
     objectSettings = []
     if objType == "Terrain":
-        objectSettings.append(text_box_template.format(key="Elevation", value=1, datalist=""))
+        objectSettings.append(text_box_template.format(key="Elevation", value=app.cm.objectElevation(obj), datalist=""))
         objectSettings.append(text_box_template.format(key="Difficulty", value=1, datalist=""))
         objectSettings.append("""<input type="text" hidden class="form-control" name="objectSubType" value="UniformElevation">""")
         terrainSelected = " selected='selected'"
@@ -892,8 +892,13 @@ def buildObjectActions(cap):
     objActCards = []
     with DATA_LOCK:
         try:
-            capDeclaredAction = app.cm.GameEvents.get_existing_declarations(cap.oid)[0]
-            capDeclaredTarget = capDeclaredAction.GameEventValue.terminant
+            if app.cm.getPhase() == "Declare":
+                capDeclaredAction = app.cm.GameEvents.get_existing_declarations(cap.oid)[0]
+                capDeclaredTarget = capDeclaredAction.GameEventValue.terminant
+            else:
+                capDeclaredAction = None
+                capDeclaredTarget = None
+                
             if capDeclaredTarget == "null":
                 capDeclaredTarget = None
             if capDeclaredTarget is not None:
