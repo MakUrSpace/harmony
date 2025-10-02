@@ -5,7 +5,7 @@
         <input class="btn btn-secondary" type="button" value="Toggle Footprint" hx-target="#objectInteractor" hx-get='{harmonyURL}objects/{objectName}?footprint={footprintToggleState}'">
     </div>
     <div class="row">
-        <img class="img-fluid border border-info border-2" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px;">
+        <img class="img-fluid border border-info border-2" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px; width:100%; height:100%; object-fit:contain;">
         <form hx-post="{harmonyURL}objects/{objectName}" hx-target="#objectInteractor">
             <label for="objectName">Name</label>
             <input type="text" class="form-control" name="objectName" value="{objectName}"><br>
