@@ -9,3 +9,6 @@ matplotlib
 ipython-autotime
 uvicorn
 graphviz
+importnb
+pyzbar
+aiohttp

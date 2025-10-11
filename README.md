@@ -13,6 +13,17 @@ Harmony integrates tabletop gaming utilities into a game recording and referreei
 1. Write Harmony Server configuration: `vim ./harmony/observerConfiguration.json`
 1. Start Harmony Server: `cd harmony && python3 harmonyServer.py`
 
+### Condensed commands
+
+```
+curl -fsSL https://deb.nodesource.com/setup_current.x | sudo -E bash -`
+sudo apt update && sudo apt upgrade && sudo apt install -y python3 python3-pip python3-dev graphviz libgraphviz-dev pkg-config nodejs
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python3 harmony/harmonyServer.py
+```
+
 ### NeoPixel Strip
 
 1. Connect NeoPixel to {NeoPixelPins}
