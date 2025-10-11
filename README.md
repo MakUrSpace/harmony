@@ -3,6 +3,8 @@ Harmony integrates tabletop gaming utilities into a game recording and referreei
 
 ## Setup
 
+Execute the [ubuntu-setup-and-launch.sh](./ubuntu-setup-and-launch.sh) script (~5 minute execution time) or follow the steps below:
+
 1. Flash Raspbian & update `sudo apt update && sudo apt upgrade`
 1. Install python: `sudo apt install python3 python3-pip python3-dev`
 1. Install nodejs:
@@ -12,17 +14,6 @@ Harmony integrates tabletop gaming utilities into a game recording and referreei
 1. Install Python Dependencies: `pip install -r requirements.txt`
 1. Write Harmony Server configuration: `vim ./harmony/observerConfiguration.json`
 1. Start Harmony Server: `cd harmony && python3 harmonyServer.py`
-
-### Condensed commands
-
-```
-curl -fsSL https://deb.nodesource.com/setup_current.x | sudo -E bash -`
-sudo apt update && sudo apt upgrade && sudo apt install -y python3 python3-pip python3-dev graphviz libgraphviz-dev pkg-config nodejs
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python3 harmony/harmonyServer.py
-```
 
 ### NeoPixel Strip
 
