@@ -990,7 +990,7 @@ def setMovementLocation(cap):
         cap.newLocation = newLocation
         cv2.circle(movementMap, [int(d) for d in newLocation], 10, (255, 255, 0), -1)
     return f"""<div id="objectImageDiv">
-            <img class="img-fluid border border-info border-2" alt="Object Movement Display" id="movementMap" src="data:image/jpg;base64,{imageToBase64(movementMap)}" onclick="movementImageClickListener(event)" style="border-radius: 10px;">
+            <img class="img-fluid border border-info border-2" alt="Object Movement Display" id="movementMap" src="data:image/jpg;base64,{imageToBase64(movementMap)}" onclick="movementImageClickListener(event)" style="border-radius: 10px; width:100%; height:100%; object-fit:contain;">
         </div>"""
 
 
