@@ -7,3 +7,4 @@ opencv-contrib-python
 imutils
 matplotlib
 ipython-autotime
+importnb
