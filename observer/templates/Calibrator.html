@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <link rel="stylesheet" href="/bootstrap.min.css">
+    <script src="/bootstrap.min.js"></script>
+    <script src="/htmx.min.js"></script>
+
+    <title>Observer Calibrator</title>
+</head>
+<body><div class="container">
+    <h1 align="center">Calibrator</h1>
+    <div class="container" >
+        <div class="row">
+            <div class="col" align="left">
+                <input class="btn btn-danger" type="button" value="Reset Calibrator" hx-get="{calibratorURL}reset">
+            </div>
+            <div class="col" align="right">
+                <input class="btn btn-info" type="button" value="Configurator" onclick="window.location.href='/configurator'">
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col" style="min-width: 40%">
+            <div class="row justify-content-center">
+                <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
+                <img id="liveCam" class="img-responsive border border-primary bg-primary" src="{calibratorURL}/camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
+            </div>
+            <div class="row justify-content-center">
+                <script>
+                    function liveCameraClick(camNum){{
+                        var header = document.querySelector("#liveCamHeader")
+                        header.innerText = `Live Cameras (Selected ${camNum})`
+                        var img = document.querySelector("#liveCam")
+                        img.src = `{calibratorURL}/camWithChanges/${camNum}`
+                    }}
+                </script>
+                {cameraButtons}
+            </div>
+        </div>
+        <div class="col">
+            <h2 class="mt-5">Capture Control</h2>
+            <div class="container" id="modeController" hx-get="{calibratorURL}get_mode_controller" hx-trigger="every 1.5s">
+            </div>
+            <div class="container">
+                <div class="row">
+                    <img class="img-fluid border border-primary" src="{calibratorURL}observer_console" style="border-radius: 50px;">
+                </div>
+                <div class="row">
+                    <input type="button" class="btn btn-success" name="commitbtn" id="commitbtn" value="Commit Calibration" hx-get="{calibratorURL}/commit_calibration">
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col" align="center">
+            <div class="row justify-content-center">
+                <h2 class="mt-5">Calibration Object Table</h2>
+            </div>
+            <div class="row justify-content-center">
+                <div id="changeTable" hx-get="{calibratorURL}objects" hx-trigger="every 1s"></div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

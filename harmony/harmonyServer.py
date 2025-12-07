@@ -21,7 +21,17 @@ from flask import Flask, Blueprint, render_template, Response, request, make_res
 from observer.configurator import configurator, setConfiguratorApp
 from observer.observerServer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
-from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, mc, INCHES_TO_MM
+
+import os
+import sys
+
+oldPath = os.getcwd()
+try:
+    observerDirectory = os.path.dirname(os.path.realpath(__file__))
+    sys.path.insert(0, observerDirectory)
+    from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, mc, INCHES_TO_MM
+finally:
+    os.chdir(oldPath)
 
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
@@ -315,7 +325,7 @@ def getModeController():
 def buildHarmony():
     if type(app.cm) is not HarmonyMachine:
         resetHarmony()
-    with open("harmony_templates/Harmony.html", "r") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/Harmony.html", "r") as f:
         template = f.read()
     cameraButtons = ' '.join([f'''<input type="button" class="btn btn-info" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
     cameraButtons = f"""<input type="button" class="btn btn-info" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">{cameraButtons}"""
@@ -352,7 +362,7 @@ def captureToChangeRow(capture):
     armorPlating = "N/A"
     armorStructural = "N/A"
     rowClass = ""
-    with open("harmony_templates/TrackedObjectRow.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectRow.html") as f:
         changeRowTemplate = f.read()
 
     encodedBA = imageToBase64(app.cm.object_visual(capture, withContours=False))
@@ -426,10 +436,10 @@ def captureToActionRow(capture):
 
     gamePhase = app.cm.getPhase()
 
-    with open("harmony_templates/TrackedObjectActionRow.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectActionRow.html") as f:
         actionRowTemplate = f.read()
 
-    with open("harmony_templates/ObjectActionCard.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/ObjectActionCard.html") as f:
         cardTemplate = f.read()
 
     objectVisual = imageToBase64(app.cm.object_visual(capture, withContours=False))
@@ -661,7 +671,7 @@ def buildObjectsFilter(faction_filter=None, type_filter=None):
 
     filters = f"?{'&'.join(filters)}" if len(filters) > 0 else ''
     
-    with open("harmony_templates/FilteredObjectsTable.html", "r") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/FilteredObjectsTable.html", "r") as f:
         template = f.read()
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
@@ -716,7 +726,7 @@ def getObject(cap):
     footprint_enabled = request.args.get('footprint', "false") == "true"
 
     objectName = cap.oid
-    with open("harmony_templates/TrackedObjectUpdater.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectUpdater.html") as f:
         template = f.read()
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
@@ -889,7 +899,7 @@ def updateObjectType(cap):
 
 
 def buildObjectActions(cap):
-    with open("harmony_templates/ObjectActionCard.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/ObjectActionCard.html") as f:
         cardTemplate = f.read()
     objActCards = []
     with DATA_LOCK:
@@ -948,7 +958,7 @@ def buildObjectActions(cap):
             </div>
             """.replace("{harmonyURL}", url_for(".buildHarmony")).replace("{objectName}", cap.oid))
         
-    with open("harmony_templates/ObjectActions.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/ObjectActions.html") as f:
         template = f.read()
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
@@ -965,7 +975,7 @@ def getObjectActions(cap):
 
 
 def buildObjectMovement(cap):
-    with open("harmony_templates/HarmonyObjectMovement.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyObjectMovement.html") as f:
         template = f.read()
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
@@ -1011,7 +1021,7 @@ def requestObjectMovement(cap):
 @harmony.route('/objects/<objectId>/visibility', methods=['GET'])
 @findObjectIdOr404
 def getObjectVisibility(cap):
-    with open("harmony_templates/HarmonyObjectMovement.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyObjectMovement.html") as f:
         template = f.read()
     return template.replace(
         "{harmonyURL}", url_for(".buildHarmony")).replace(
@@ -1021,7 +1031,7 @@ def getObjectVisibility(cap):
 
 
 def buildFootprintEditor(cap):
-    with open("harmony_templates/TrackedObjectFootprintEditor.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectFootprintEditor.html") as f:
         template = f.read()
 
     if getattr(cap, "selection_polygon", None) is not None:
@@ -1128,19 +1138,19 @@ def create_harmony_app():
     
     @app.route('/bootstrap.min.css', methods=['GET'])
     def getBSCSS():
-        with open("templates/bootstrap.min.css", "r") as f:
+        with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.css", "r") as f:
             bscss = f.read()
         return Response(bscss, mimetype="text/css")
     
     @app.route('/bootstrap.min.js', methods=['GET'])
     def getBSJS():
-        with open("templates/bootstrap.min.js", "r") as f:
+        with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.js", "r") as f:
             bsjs = f.read()
         return Response(bsjs, mimetype="application/javascript")
     
     @app.route('/htmx.min.js', methods=['GET'])
     def getHTMX():
-        with open("templates/htmx.min.js", "r") as f:
+        with open(f"{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
             htmx = f.read()
         return Response(htmx, mimetype="application/javascript")
     

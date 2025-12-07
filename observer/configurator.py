@@ -1,3 +1,4 @@
+import os
 import json
 import cv2
 import numpy as np
@@ -42,7 +43,7 @@ def buildConfigurator():
                 </div>
             </div>""")
 
-    with open("templates/Configurator.html") as f:
+    with open(f"{os.path.dirname(__file__)}/templates/Configurator.html") as f:
         template = f.read()
     
     return template.replace(
@@ -111,7 +112,7 @@ def updateCamType(camName):
 
 @configurator.route('/new_camera', methods=['GET'])
 def getNewCameraForm():
-    with open("templates/NewCamera.html", "r") as f:
+    with open(f"{os.path.dirname(__file__)}/templates/NewCamera.html", "r") as f:
         template = f.read()
     return template.replace("{configuratorURL}", url_for(".config"))
 
@@ -165,7 +166,7 @@ if __name__ == "__main__":
     @app.route('/<page>')
     def getPage(page):
         try:
-            with open(f"templates/{page}") as page:
+            with open(f"{os.path.dirname(__file__)}/templates/{page}") as page:
                 page = page.read()
         except Exception as e:
             print(f"Failed to find page: {e}")
