@@ -517,7 +517,7 @@ def buildObjectTable(faction_filter=None, type_filter=None):
         rowRenderer = captureToChangeRow if gamePhase in ["Add", "Move"] else captureToActionRow
         for capture in app.cm.memory:
             print(f"Cap {capture.oid} -- Faction: {app.cm.faction(capture.oid)} -- Type: {app.cm.object_type(capture.oid)}")
-            if gamePhase == "Declare" and app.cm.is_destroyed(capture.oid):
+            if gamePhase == "Declare" and app.cm.obj_destroyed(capture.oid):
                 continue
             if ((faction_filter is not None and faction_filter != "All" and app.cm.faction(capture.oid) != faction_filter)
                 or (type_filter is not None and type_filter != "All" and app.cm.object_type(capture.oid) != type_filter)
