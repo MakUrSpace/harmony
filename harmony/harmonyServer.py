@@ -1149,8 +1149,13 @@ def create_harmony_app():
     return app
 
 
-if __name__ == "__main__":
+def main():
     create_harmony_app()
     PORT = 7000
     print(f"Launching harmony Server on {PORT}")
     app.run(host="0.0.0.0", port=PORT)
+
+
+if __name__ == "__main__":
+    main()
+
