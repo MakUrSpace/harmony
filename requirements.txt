@@ -8,3 +8,4 @@ imutils
 matplotlib
 ipython-autotime
 importnb
+aiohttp
