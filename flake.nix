@@ -79,7 +79,7 @@
             echo "Starting Jupyter Lab in $PWD"
             echo "PYTHONPATH=$PYTHONPATH"
   
-            exec jupyter lab --notebook-dir="." --ip=0.0.0.0 --no-browser
+            exec jupyter lab --notebook-dir="." --ip=0.0.0.0 --no-browser --NotebookApp.token="harmony"
           '';
         };
         devShells.default = pkgs.mkShell {
