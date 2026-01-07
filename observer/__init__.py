@@ -15,5 +15,9 @@ try:
         Transition,
         distanceFormula
     )
+    from ipynb.fs.full.HexObserver import (
+        HexGridConfiguration,
+        HexCaptureConfiguration
+    )
 finally:
     os.chdir(oldPath)
