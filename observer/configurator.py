@@ -122,13 +122,15 @@ def addNewCamera():
     global CONSOLE_OUTPUT
     camName = request.form.get("camName")
     camRot = request.form.get("camRot")
+    rtspCam = request.form.get("rtspCam")
     camAddr = request.form.get("camAddr")
     try:
         camAuth = json.loads(request.form.get("camAuth"))
     except:
         camAuth = None
-    
-    app.cc.cameras[camName] = RemoteCamera(address=camAddr, activeZone=[[0, 0], [0, 1], [1, 1,], [1, 0]], camName=camName, rotate=camRot, auth=camAuth)
+
+    builder = RTSPCamera if rtspCam else RemoteCamera
+    app.cc.cameras[camName] = builder(address=camAddr, activeZone=[[0, 0], [0, 1], [1, 1,], [1, 0]], camName=camName, rotate=camRot, auth=camAuth)
     app.cc.rsc = None
     app.cc.saveConfiguration()
     app.cc.capture()
