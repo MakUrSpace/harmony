@@ -10,5 +10,5 @@ requires = ["setuptools", "setuptools-scm"]
 packages = ["harmony", "observer"]
 
 [project.scripts]
-harmony = "harmony.hexServer:main"
+harmony = "harmony.harmonyServer:main"
 observer = "observer.observerServer:main"

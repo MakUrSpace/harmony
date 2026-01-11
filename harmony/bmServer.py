@@ -18,9 +18,8 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for
 
-from observer import HexGridConfiguration, HexCaptureConfiguration
 from observer.configurator import configurator, setConfiguratorApp
-from observer.observerServer import observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
+from observer.observerServer import CalibratedCaptureConfiguration, observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
 
 import os
@@ -30,7 +29,7 @@ oldPath = os.getcwd()
 try:
     observerDirectory = os.path.dirname(os.path.realpath(__file__))
     sys.path.insert(0, observerDirectory)
-    from ipynb.fs.full.HarmonyMachine import HarmonyMachine, HarmonyObject, ObjectAction, mc, INCHES_TO_MM
+    from ipynb.fs.full.BMMachine import HarmonyMachine, HarmonyObject, ObjectAction, mc, INCHES_TO_MM
 finally:
     os.chdir(oldPath)
 
@@ -197,27 +196,9 @@ def genCameraWithChangesView(camName):
             print("Has changes")
         if app.cm.lastClassification is not None:
             print("Has class")
-        camImage = cam.cropToActiveZone(cam.mostRecentFrame.copy())
-        # Paint known objects blue
-        for memObj in app.cm.memory:
-            if memObj.changeSet[camName].changeType not in ['delete', None]:
-                memContour = np.array([memObj.changeSet[camName].changePoints], dtype=np.int32)
-                camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
-        # Paint last changes red
-        if app.cm.lastChanges is not None and not app.cm.lastChanges.empty:
-            lastChange = app.cm.lastChanges.changeSet[camName]
-            if lastChange is not None and lastChange.changeType not in ['delete', None]:
-                lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
-                camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
-        # Paint classification green
-        if app.cm.lastClassification is not None and not app.cm.lastClassification.empty:
-            lastClass = app.cm.lastClassification.changeSet[camName]
-            if lastClass is not None and lastClass.changeType not in ['delete', None]:
-                lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
-                camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
-        grid = app.cc.cameraGriddle(camName)
-        camImage = cam.cropToActiveZone(cv2.addWeighted(grid, 0.3, camImage, 1.0 - 0.3, 0.0))
-        camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
+
+        with DATA_LOCK:
+            camImage = app.cm.getCameraImagesWithChanges(cameraKeys=[camName])[camName]
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
@@ -362,7 +343,6 @@ def buildHarmony():
 
 
 def captureToChangeRow(capture):
-    encodedBA = imageToBase64(app.cm.object_visual(capture))
     name = "None"
     objType = "None"
     center = ", ".join(["0", "0"])
@@ -372,16 +352,64 @@ def captureToChangeRow(capture):
         health += "[x] "
     for i in range(3 - numHits):
         health += "[ ] "
-    with open(f"{os.path.dirname(__file__)}/templates/TrackedObjectRow.html") as f:
+
+    objectName = capture.oid
+    objectActions = ""
+    objectMovement = ""
+    moveDistance = "None"
+    borderType = "border-secondary border-2"
+    editObject = ""
+    armorPlating = "N/A"
+    armorStructural = "N/A"
+    rowClass = ""
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectRow.html") as f:
         changeRowTemplate = f.read()
-    moveDistance = app.cm.cc.trackedObjectLastDistance(capture)
-    moveDistance = "None" if moveDistance is None else f"{moveDistance:6.0f}"
+
+    encodedBA = imageToBase64(app.cm.object_visual(capture, withContours=False))
+
+    gamePhase = app.cm.getPhase()
+    
+    if isinstance(capture, HarmonyObject):
+        if getattr(capture, 'objectType', None) == "Unit":
+            moveDistance = app.cm.objectLastDistance(capture)
+            movementSpeed = f"{app.cm.objectSpeed(capture.oid):4.1f}{app.cm.objectJumpJets(capture.oid) or ''}"
+            moveDistance = f"0 /{movementSpeed} in" if moveDistance is None or moveDistance < 0.3 else f"{moveDistance:4.1f} /{movementSpeed} in"
+        
+            if app.cm.obj_destroyed(capture.oid):
+                objectName = f"<s>{capture.oid}</s>"
+                borderType = "border-danger border-5 x-box"
+            else:
+                if app.cm.objectCouldInteract(capture):
+                    borderType = "border-success border-3"
+                    interactiveStyle = True
+                elif app.cm.objectViolatingRules(capture):
+                    borderType = "border-danger border-3"
+                    interactiveStyle = True
+                else:
+                    interactiveStyle = False
+                objectActions = f"""<div class="col"><button class="btn btn-{'success' if gamePhase == 'Declare' and interactiveStyle else 'primary'}" style="width:100%" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/actions">Actions</button></div>"""
+                objectMovement = f"""<div class="col"><button class="btn btn-{'success' if gamePhase == 'Move' and interactiveStyle else 'primary'}" style="width:100%" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}/movement">Movement</button></div>"""
+    
+        if getattr(capture, 'objectType', None) in ["Unit", "Structure"]:
+            armorPlating = f"{mc.ArmorPlating(capture.oid).terminant - mc.ArmorPlatingDamage(capture.oid).terminant}/{mc.ArmorPlating(capture.oid).terminant}"
+            armorStructural = f"{mc.ArmorStructural(capture.oid).terminant - mc.ArmorStructuralDamage(capture.oid).terminant}/{mc.ArmorStructural(capture.oid).terminant}"
+        
+    if gamePhase == "Add":
+        editObject = f"""<div class="col"><button class="btn btn-info" style="width:100%" hx-target="#objectInteractor" hx-get="{url_for(".buildHarmony")}objects/{capture.oid}">Edit</button></div>"""
+    
     changeRow = changeRowTemplate.replace(
-        "{objectName}", capture.oid).replace(
-        "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.cc.changeSetToAxialCoord(capture)])).replace(
+        "{borderType}", borderType).replace(
+        "{objectName}", objectName).replace(
+        "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in app.cm.captureRealCoord(capture)])).replace(
         "{moveDistance}", moveDistance).replace(
-        "{observerURL}", url_for(".buildHarmony")).replace(
-        "{encodedBA}", imageToBase64(app.cm.object_visual(capture)))
+        "{harmonyURL}", url_for(".buildHarmony")).replace(
+        "{encodedBA}", encodedBA).replace(
+        "{actions}", objectActions).replace(
+        "{movement}", objectMovement).replace(
+        "{edit}", editObject).replace(
+        "{armorPlating}", armorPlating).replace(
+        "{armorStructural}", armorStructural)
+
     return changeRow
 
 
@@ -1095,9 +1123,7 @@ def create_harmony_app():
     global app
     
     app = Flask(__name__)
-    app.cc = HexCaptureConfiguration()
-    if app.cc.hex is None:
-        app.cc.hex = HexGridConfiguration()
+    app.cc = CalibratedCaptureConfiguration()
     app.cc.capture()
     app.cm = HarmonyMachine(app.cc)
     app.register_blueprint(configurator, url_prefix='/configurator')

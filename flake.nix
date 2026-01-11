@@ -74,7 +74,7 @@
             #!/usr/bin/env bash
             # Run from whatever dir `nix run` is invoked in.
             # If your code lives in ./src, expose it to Python:
-            export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
+            export PYTHONPATH="$PWD:${PYTHONPATH:-}"
   
             echo "Starting Jupyter Lab in $PWD"
             echo "PYTHONPATH=$PYTHONPATH"

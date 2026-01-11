@@ -60,58 +60,76 @@
         </div>
     </div>
     <hr>
-    <div class="row">
-        <div class="col" style="min-width: 500px">
-            <h2 class="mt-5">Capture Control</h2>
-            <div class="container" hx-get="{harmonyURL}get_mode_controller" hx-trigger="every 1.5s" id="modeController">
-            </div>
-            <div class="container">
-                <img class="img-fluid border border-info border-2" src="{harmonyURL}harmony_console" style="border-radius: 50px; border-width: 3">
-            </div>
-            <div class="container">
-                <div class="row">
-                    <div class="col" align="left" hx-get="{harmonyURL}get_undo_button" hx-trigger="every 1.5s" id="undoButton"></div>
-                    <div class="col" align="right" hx-get="{harmonyURL}get_game_controller" hx-trigger="every 1.5s" id="gameController"></div>
-                </div>
-            </div>
-            <div class="container justify-content-center" align="center">
-                <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
-                <img id="liveCam" class="img-responsive border border-3 border-info bg-primary" src="{harmonyURL}camWithChanges/{defaultCamera}" style="border-radius: 40px; max-width: 80%; max-height: 500px">
-            </div>
-            <div class="container justify-content-center" align="center">
-                <script>
-                function liveCameraClick(camNum){{
-                    var header = document.querySelector("#liveCamHeader")
-                    header.innerText = `Live Cameras (Selected ${camNum})`
-                    var img = document.querySelector("#liveCam")
-                    img.src = `{harmonyURL}/camWithChanges/${camNum}`
-                }}
-                function gameGraph(){{
-                    var header = document.querySelector("#liveCamHeader")
-                    header.innerText = `Game Concept Graph`
-                    var img = document.querySelector("#liveCam")
-                    img.src = `{harmonyURL}gamegraph`
-                }}
-                </script>
-                {cameraButtons}
-            </div>
+    <div class="row" style="min-width: 500px">
+        <div class="container justify-content-center" align="center">
+            <h3 id="GameWorldHeader" class="mt-5">Game World Views (Selected {defaultCamera})</h3>
+            <input type="text" id="listenerOutput" value="" style="min-width=6em">
+            <img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="{harmonyURL}camWithChanges/{defaultCamera}" style="border-radius: 40px; max-width: 90%;" onclick="imageClickListener(event)">
+            <script>
+                function imageClickListener(event) {
+                    console.log("Image clicked!!", event)
+                    const imgElem = document.getElementById(`GameWorld`)
+                    const bounds=imgElem.getBoundingClientRect();
+                    console.log("img element bounds: ", bounds)
+                    const left=bounds.left;
+                    const top=bounds.top;
+                    const x = event.x - left;
+                    const y = event.y - top;
+                    const cw=imgElem.clientWidth
+                    const ch=imgElem.clientHeight
+                    const px=x/cw*1080
+                    const py=y/ch*1920
+                    const x_offset = 0
+                    const x_scale = 1
+                    const image_x = (px - x_offset) * x_scale
+                    const y_offset = 0
+                    const y_scale = 1
+                    const image_y = (py - y_offset) * y_scale
+                    const listenerField = document.getElementById(`listenerOutput`)
+                    var formValue
+                    try {
+                      formValue = JSON.parse(listenerField.value)
+                    }
+                    catch(err) {
+                      formValue = []
+                    }
+                    console.log(listenerField.value)
+                    formValue.push([~~image_x, ~~image_y])
+                    formValue = JSON.stringify(formValue)
+                    listenerField.value = formValue
+                    console.log(formValue)
+                    console.log("\n")
+                    listenerField.dispatchEvent(new Event('change'));
+                }
+            </script>
         </div>
-    	<div class="col justify-content-center" align="center" style="min-width: 500px">
+        <div class="container justify-content-center" align="center">
+            <script>
+            function liveCameraClick(camNum){{
+                var header = document.querySelector("#GameWorldHeader")
+                header.innerText = `Live Cameras (Selected ${camNum})`
+                var img = document.querySelector("#GameWorld")
+                img.src = `{harmonyURL}/camWithChanges/${camNum}`
+            }}
+            </script>
+            {cameraButtons}
+        </div>
+        <hr>
+    	<div class="row justify-content-center" align="center" style="min-width: 500px">
+            <h1>Actions</h1>
             <div id="objectInteractor" class="container">
-                <div id="objectFilterRetriever" hx-get="{harmonyURL}objects_filter" hx-trigger="every 1s" hx-target="#objectInteractor"></div>
+                <div id="objectFilterRetriever" hx-get="{harmonyURL}objects" hx-trigger="every 1s" hx-target="#objectInteractor"></div>
             </div>
-        </div>
-    </div>
-    <hr>
-    <div class="row" style="margin-top:5px">
-        <div class="col" align="left">
-            <form hx-post="{harmonyURL}save" hx-swap="none">
-                <input class="btn btn-success" type="submit" value="Save Game">
-                <input class="text" value="Harmony" id="game_name" name="game_name">
-            </form>
-        </div>
-        <div class="col" align="right">
-            <input class="btn btn-danger" type="button" value="Reset Game" hx-get="{harmonyURL}reset">
+            <hr>
+            <div class="container" align="left">
+                <form hx-post="{harmonyURL}save" hx-swap="none">
+                    <input class="btn btn-success" type="submit" value="Save Game">
+                    <input class="text" value="Harmony" id="game_name" name="game_name">
+                </form>
+            </div>
+            <div class="container" align="right">
+                <input class="btn btn-danger" type="button" value="Reset Game" hx-get="{harmonyURL}reset">
+            </div>
         </div>
     </div>
 </div>
