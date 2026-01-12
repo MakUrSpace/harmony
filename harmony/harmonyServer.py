@@ -37,6 +37,7 @@ finally:
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
 
+perspective_res = [1920, 1080]
 
 def imageToBase64(img):
     return base64.b64encode(cv2.imencode('.jpg', img)[1]).decode()
@@ -120,9 +121,15 @@ def genCameraWithChangesView(camName):
             if lastClass is not None and lastClass.changeType not in ['delete', None]:
                 lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
                 camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
+
+        # Paint Selected Cell
+        if SELECTED_CELL != None and SELECTED_CELL[0] == camName:
+            cell_poly = app.cc.cam_hex_at_axial(camName, *SELECTED_CELL[1])
+            cv2.fillPoly(camImage, [cell_poly], (0, 255, 0))
+
         grid = app.cc.cameraGriddle(camName)
         camImage = cam.cropToActiveZone(cv2.addWeighted(grid, 0.3, camImage, 1.0 - 0.3, 0.0))
-        camImage = cv2.resize(camImage, [1080, 1920], interpolation=cv2.INTER_AREA)
+        camImage = cv2.resize(camImage, perspective_res, interpolation=cv2.INTER_AREA)
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
@@ -210,8 +217,8 @@ def buildHarmony():
         resetHarmony()
     with open(f"{os.path.dirname(__file__)}/harmony_templates/Harmony.html", "r") as f:
         template = f.read()
-    cameraButtons = ' '.join([f'''<input type="button" class="btn btn-info" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
-    cameraButtons = f"""<input type="button" class="btn btn-info" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">{cameraButtons}"""
+    cameraButtons = ' '.join([f'''<input type="button" class="btn btn-info" value="Camera {camName}" onclick="gameWorldClick('{camName}')">''' for camName in app.cc.cameras.keys()])
+    cameraButtons = f"""<input type="button" class="btn btn-info" value="Virtual Map" onclick="gameWorldClick(\'VirtualMap\')">{cameraButtons}"""
     defaultCam = [camName for camName, cam in app.cc.cameras.items()]
     if len(defaultCam) == 0:
         defaultCam = "None"
@@ -343,75 +350,36 @@ def requestObjectMovement(cap):
     return getObjectTableContainer()
 
 
-def buildFootprintEditor(cap):
-    with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectFootprintEditor.html") as f:
-        template = f.read()
+SELECTED_CELL = None
 
-    if getattr(cap, "selection_polygon", None) is not None:
-        selectionPolygon = cap.selection_polygon
-        selection_points = np.int32(json.loads(selectionPolygon))
-        projected_image = app.cm.object_visual(cap, withContours=True, margin=50)
-        projected_image = cv2.polylines(projected_image, [selection_points], isClosed=True, color=(255,255,0), thickness=3)
-        encodedBA = imageToBase64(projected_image)
+
+@harmony.route('/select_pixel', methods=['POST'])
+def selectPixel():
+    pixel = json.loads(request.form["selectedPixel"])
+    x, y = pixel
+    cam = request.form["selectedCamera"]
+    print(f"Received Pixel: {pixel}")
+    print(f"Received Camera: {cam}")
+    if cam == "VirtualMap":
+        axial_coord = app.cm.cc.pixel_to_axial(x, y)
     else:
-        encodedBA = imageToBase64(app.cm.object_visual(cap, withContours=True, margin=50))
-        selectionPolygon = "[]"
-
-    return template.replace(
-        "{harmonyURL}", url_for(".buildHarmony")).replace(
-        "{objectName}", cap.oid).replace(
-        "{selectionPolygon}", selectionPolygon).replace(
-        "{encodedBA}", encodedBA).replace(
-        "{camName}", '0')
-    return ""
-
-
-@harmony.route('/objects/<objectId>/footprint_editor', methods=['GET'])
-@findObjectIdOr404
-def getFootprintEditor(cap):
-    return buildFootprintEditor(cap)
-
-
-@harmony.route('/objects/<objectId>/project_selection', methods=['POST'])
-@findObjectIdOr404
-def projectSelectionOntoObject(cap):
-    margin = 50
-    selection_polygon = json.loads(request.form["additionPolygon"])
-    cap.selection_polygon = request.form["additionPolygon"]
-    return buildFootprintEditor(cap)
-
-
-@harmony.route('/objects/<objectId>/submit_addition', methods=['POST'])
-@findObjectIdOr404
-def combineObjectWithAddition(cap):
-    # margin = getattr(cap, "margin", 5)
-    margin = 50
-    addition_points = json.loads(request.form["additionPolygon"])
-    camName = request.form["camName"]
-    with DATA_LOCK:
-        app.cm.add_footprint(cap, camName, addition_points)
-        cap.selection_polygon = None
-    return buildFootprintEditor(cap)
-
-
-@harmony.route('/objects/<objectId>/submit_subtraction', methods=['POST'])
-@findObjectIdOr404
-def combineObjectWithSubtraction(cap):
-    # margin = getattr(cap, "margin", 5)
-    margin = 50
-    subtraction_points = json.loads(request.form["subtractionPolygon"])
-    camName = request.form["camName"]
-    with DATA_LOCK:
-        app.cm.subtract_footprint(cap, camName, subtraction_points)
-        cap.selection_polygon = None
-    return buildFootprintEditor(cap)
+        axial_coord = app.cm.cc.camCoordToAxial(cam, (x, y))
+    print(axial_coord)
+    global SELECTED_CELL
+    SELECTED_CELL = (cam, axial_coord)
+    q, r = axial_coord
+    return "200"
 
 
 def minimapGenerator():
     while True:
         with DATA_LOCK:
             camImage = app.cm.buildMiniMap()
-            camImage = cv2.resize(camImage, [1080, 1920], interpolation=cv2.INTER_AREA)
+            if SELECTED_CELL and SELECTED_CELL[0] == "VirtualMap":
+                q, r = SELECTED_CELL[1]
+                cell_poly = app.cc.hex_at_axial(q, r)
+                cv2.fillPoly(camImage, [cell_poly], (0, 255, 0))
+            camImage = cv2.resize(camImage, perspective_res, interpolation=cv2.INTER_AREA)
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
@@ -420,12 +388,6 @@ def minimapGenerator():
 @harmony.route('/minimap')
 def minimapResponse():
     return Response(minimapGenerator(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-
-@harmony.route('/undo_last_change')
-def undoLastChange():
-    app.cm.undoLastChange()
-    return "Success"
 
 
 def setHarmonyApp(newApp):
