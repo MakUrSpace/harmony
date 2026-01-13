@@ -69,8 +69,16 @@
                     const y = event.y - top;
                     const cw=imgElem.clientWidth
                     const ch=imgElem.clientHeight
-                    const px=x/cw*1920
-                    const py=y/ch*1080
+                    
+                    const selectedCamera = document.getElementById(`selectedCamera`).value
+                    var natural_width = 1920
+                    var natural_height = 1080
+                    if (selectedCamera === "VirtualMap") {
+                        natural_width = 1200
+                        natural_height = 1200
+                    }
+                    const px=x/cw*natural_width
+                    const py=y/ch*natural_height
                     const x_offset = 0
                     const x_scale = 1
                     const image_x = (px - x_offset) * x_scale

@@ -379,7 +379,6 @@ def minimapGenerator():
                 q, r = SELECTED_CELL[1]
                 cell_poly = app.cc.hex_at_axial(q, r)
                 cv2.fillPoly(camImage, [cell_poly], (0, 255, 0))
-            camImage = cv2.resize(camImage, perspective_res, interpolation=cv2.INTER_AREA)
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
