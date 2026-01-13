@@ -42,5 +42,19 @@
         ]
       ]
     ]
-  ]
+  ],
+  "hex": {
+    "size": 38,
+    "rotation_deg": 0,
+    "offset_xy": [
+      0,
+      0
+    ],
+    "anchor_xy": [
+      -12,
+      -19
+    ],
+    "width": 1600,
+    "height": 1600
+  }
 }

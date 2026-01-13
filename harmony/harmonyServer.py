@@ -11,6 +11,7 @@ import threading
 import atexit
 from traceback import format_exc
 import time
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -95,7 +96,17 @@ def combinedCamerasResponse():
     return Response(genCombinedCamerasView(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-def genCameraWithChangesView(camName):
+@dataclass
+class CellSelection:
+    viewId: str
+    firstCell: tuple
+    secondCell: tuple | None = None
+
+
+SELECTED_CELLS = {}
+
+
+def genCameraWithChangesView(camName, viewId=None):
     camName = str(camName)
     cam = app.cc.cameras[camName]
     while True:
@@ -123,9 +134,13 @@ def genCameraWithChangesView(camName):
                 camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
 
         # Paint Selected Cell
-        if SELECTED_CELL != None and SELECTED_CELL[0] == camName:
-            cell_poly = app.cc.cam_hex_at_axial(camName, *SELECTED_CELL[1])
+        if viewId and viewId in SELECTED_CELLS and SELECTED_CELLS[viewId]:
+            cell_poly = app.cc.cam_hex_at_axial(camName, *SELECTED_CELLS[viewId].firstCell)
             cv2.fillPoly(camImage, [cell_poly], (0, 255, 0))
+            if SELECTED_CELLS[viewId].secondCell:
+                cell_poly = app.cc.cam_hex_at_axial(camName, *SELECTED_CELLS[viewId].secondCell)
+                cv2.fillPoly(camImage, [cell_poly], (255, 165, 0))
+                
 
         grid = app.cc.cameraGriddle(camName)
         camImage = cam.cropToActiveZone(cv2.addWeighted(grid, 0.3, camImage, 1.0 - 0.3, 0.0))
@@ -135,11 +150,11 @@ def genCameraWithChangesView(camName):
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 
 
-@harmony.route('/camWithChanges/<camName>')
-def cameraViewWithChangesResponse(camName):
+@harmony.route('/camWithChanges/<camName>/<viewId>')
+def cameraViewWithChangesResponse(camName, viewId):
     if camName == "VirtualMap":
-        return Response(minimapGenerator(), mimetype='multipart/x-mixed-replace; boundary=frame')
-    return Response(genCameraWithChangesView(camName), mimetype='multipart/x-mixed-replace; boundary=frame')
+        return Response(minimapGenerator(viewId=viewId), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(genCameraWithChangesView(camName, viewId=viewId), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 def fullCam(camName):
@@ -225,6 +240,7 @@ def buildHarmony():
     else:
         defaultCam = defaultCam[0]
     return template.replace(
+        "{viewId}", str(uuid4())).replace(
         "{defaultCamera}", defaultCam).replace(
         "{cameraButtons}", cameraButtons).replace(
         "{harmonyURL}", url_for('.buildHarmony')).replace(
@@ -350,43 +366,183 @@ def requestObjectMovement(cap):
     return getObjectTableContainer()
 
 
-SELECTED_CELL = None
+@harmony.route('/object_factory/<viewId>', methods=['GET'])
+def buildObjectFactory(viewId):
+    return f"""
+        <form hx-post="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#interactor">
+            <input type="text" name="object_name" value="">
+            <input type="submit" class="btn btn-primary" value="Define Object">
+        </form>
+    """
 
+    
+interactor_template = """
+  <hr>
+  <span class="border-3 border-info">
+  <div class="border-3 border-info" align="left">
+    {info}
+  </div>
+  </span>
+  <span class="border-3 border-warning">
+  <div class="border-3 border-warning" align="right">
+    <h3>Selected Cell Actions</h3>
+    {actions}
+  <div>
+  </span>
+"""
+
+
+
+@harmony.route('/object_factory/<viewId>', methods=['POST'])
+def buildObject(viewId):
+    objectName = str(request.form.get("object_name"))
+    selectedAxial = SELECTED_CELLS[viewId].firstCell
+    trackedObject = app.cm.cc.define_object_from_axial(objectName, *selectedAxial)
+    app.cm.commitChanges(trackedObject)
+    return interactor_template.format(info=f"""
+        <h2>Selected cell: {selectedAxial}</h2>
+        <h3>Object Name: {trackedObject.oid}</h3>
+        """,
+                                    actions=f"""
+        <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
+        <hr>
+        <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="{url_for(".buildHarmony")}object_factory/{trackedObject.oid}" hx-target="#interactor">
+        <hr>
+        """)
+
+
+@harmony.route('/object_factory/<viewId>', methods=['DELETE'])
+def deleteObject(viewId):
+    raise NotImplementedError()
+
+
+@harmony.route('/request_move/<oid>/<viewId>', methods=['GET'])
+def moveObjectDefinition(oid, viewId):
+    try:
+        firstCell = SELECTED_CELLS[viewId].firstCell
+        secondCell = SELECTED_CELLS[viewId].secondCell
+    except:
+        raise Exception("404")
+    trackedObject = app.cm.cc.define_object_from_axial(oid, *secondCell)
+    existing = app.cm.cc.define_object_from_axial(oid, *firstCell)
+    with DATA_LOCK:
+        app.cm.memory.remove(existing)
+        app.cm.commitChanges(trackedObject)
+        SELECTED_CELLS.pop(viewId)
+    return ""
+
+
+@harmony.route('/clear_pixel/<viewId>', methods=['GET'])
+def clearPixel(viewId):
+    if viewId in SELECTED_CELLS:
+        with DATA_LOCK:
+            SELECTED_CELLS.pop(viewId)
+    return ""
 
 @harmony.route('/select_pixel', methods=['POST'])
 def selectPixel():
+    global SELECTED_CELLS
+    if len(SELECTED_CELLS) > 12:
+        with DATA_LOCK:
+            SELECTED_CELLS = {}
+    
+    viewId = request.form["viewId"]
     pixel = json.loads(request.form["selectedPixel"])
     x, y = pixel
     cam = request.form["selectedCamera"]
-    print(f"Received Pixel: {pixel}")
-    print(f"Received Camera: {cam}")
     if cam == "VirtualMap":
         axial_coord = app.cm.cc.pixel_to_axial(x, y)
     else:
         axial_coord = app.cm.cc.camCoordToAxial(cam, (x, y))
-    print(axial_coord)
-    global SELECTED_CELL
-    SELECTED_CELL = (cam, axial_coord)
+    print(f"viewId {viewId} || Received: Pixel {pixel} on Cam {cam} || Translated to Axial: {axial_coord}")
+    with DATA_LOCK:
+        existing = SELECTED_CELLS.get(viewId, None)
+        if existing:
+            if existing.secondCell:
+                SELECTED_CELLS[viewId] = CellSelection(viewId, axial_coord)    
+            else:
+                SELECTED_CELLS[viewId].secondCell = axial_coord
+        else:
+            SELECTED_CELLS[viewId] = CellSelection(viewId, axial_coord)
     q, r = axial_coord
-    return "200"
+
+    overlaps = []
+    targets = []
+    selected = SELECTED_CELLS[viewId]
+    for mem in app.cm.memory:
+        mem_axial = app.cm.cc.changeSetToAxialCoord(mem)
+        if mem_axial == selected.firstCell:
+            overlaps.append(mem)
+        if mem_axial == selected.secondCell:
+            targets.append(mem)
+
+    if overlaps:
+        overlap = overlaps[0]
+        if selected.secondCell:
+            distance = app.cm.cc.axial_distance(selected.firstCell, selected.secondCell)
+            distance = f"{distance} {'cell' if abs(distance) == 1 else 'cells'}"
+            return interactor_template.format(info=f"""
+                    <h2>Selected cell: {selected.firstCell}</h2>
+                    <h2>Object name: {overlap.oid}</h2>
+                    <h3>Distance to {selected.secondCell}  --  {distance}</h3>
+                """,
+                                                actions=f"""
+                    <input type="button" class="btn btn-info" value="Move Object" hx-get="{url_for(".buildHarmony")}request_move/{overlap.oid}/{viewId}" hx-target="#interactor">
+                    <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
+                """)
+        else:
+            return interactor_template.format(info=f"""
+                    <h2>Selected cell: {selected.firstCell}</h2>
+                    <h2>Object name: {overlap.oid}</h2>
+                """,
+                                                actions=f"""
+                <div id="object_factory">
+                    <input type="button" class="btn btn-success" value="Define Object" hx-get="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#object_factory">
+                </div>
+                <input type="button" class="btn btn-danger" value="Clear Selected Pixel" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
+                """)
+    else:
+        if selected.secondCell:
+            distance = app.cm.cc.axial_distance(selected.firstCell, selected.secondCell)
+            distance = f"{distance} {'cell' if abs(distance) == 1 else 'cells'}"
+            return interactor_template.format(info=f"""
+                    <h2>Selected cell: {selected.firstCell}</h2>
+                    <h3>Distance to {selected.secondCell}  --  {distance}</h3>
+                """,
+                                                actions=f"""
+                    <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
+                """)
+        else:
+            return interactor_template.format(info=f"""
+                    <h2>Selected cell: {selected.firstCell}</h2>
+                """,
+                                                actions=f"""
+                <div id="object_factory">
+                    <input type="button" class="btn btn-success" value="Define Object" hx-get="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#object_factory">
+                </div>
+                <input type="button" class="btn btn-danger" value="Clear Selected Pixel" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
+                """)
 
 
-def minimapGenerator():
+def minimapGenerator(viewId=None):
     while True:
-        with DATA_LOCK:
-            camImage = app.cm.buildMiniMap()
-            if SELECTED_CELL and SELECTED_CELL[0] == "VirtualMap":
-                q, r = SELECTED_CELL[1]
+        camImage = app.cm.buildMiniMap()
+        if viewId and viewId in SELECTED_CELLS:
+            q, r = SELECTED_CELLS[viewId].firstCell
+            cell_poly = app.cc.hex_at_axial(q, r)
+            cv2.fillPoly(camImage, [cell_poly], (0, 255, 0))
+            if SELECTED_CELLS[viewId].secondCell:
+                q, r = SELECTED_CELLS[viewId].secondCell
                 cell_poly = app.cc.hex_at_axial(q, r)
-                cv2.fillPoly(camImage, [cell_poly], (0, 255, 0))
+                cv2.fillPoly(camImage, [cell_poly], (255, 165, 0))
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 
 
-@harmony.route('/minimap')
-def minimapResponse():
-    return Response(minimapGenerator(), mimetype='multipart/x-mixed-replace; boundary=frame')
+@harmony.route('/minimap/<viewId>')
+def minimapResponse(viewId):
+    return Response(minimapGenerator(viewId), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 def setHarmonyApp(newApp):

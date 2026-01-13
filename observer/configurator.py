@@ -6,6 +6,7 @@ from flask import Blueprint, render_template, abort, request, Response, url_for
 
 from ipynb.fs.full.Observer import RemoteCamera
 from ipynb.fs.full.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver
+from ipynb.fs.full.HexObserver import HexGridConfiguration
 
 from calibrator import calibrator, registerCaptureService, setCalibratorApp
 
@@ -148,6 +149,15 @@ def deleteCamera(camName):
     CONSOLE_OUTPUT = f"Deleted Camera {camName}"
     return f"""<script>window.location.reload();</script>
               <input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='{url_for('.config')}'">"""
+
+
+@configurator.route('/grid_configuration', methods=['POST'])
+def configureGrid():
+    app.cc.hex = HexGridConfiguration(
+        size=float(request.form.get("size")),
+        anchor_xy=[float(d) for d in json.loads(f'[{request.form.get("anchor_xy")}')]
+    )
+    return "Success"
 
 
 def setConfiguratorApp(newApp):

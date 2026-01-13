@@ -33,10 +33,10 @@
             <form hx-post="{configuratorURL}/grid_configuration" hx-swap="outerHTML">
                 <input type="number" class="form-check-input bg-info" name="size" min="20" max="60" value="38" style="width:3em">
                 <label class="form-check-label" for="size">Size</label><br>
-                <input type="number" class="form-check-input bg-info" name="rotation_deg" min="0" max="180" value="0" style="width:3em">
-                <label class="form-check-label" for="rotation_deg">Rotation Degree</label><br>
-                <input type="text" class="form-check-input bg-info" name="offset_xy" default="(0,0)" style="width:6em">
-                <label class="form-check-label" for="offset_xy">Offset XY</label><br>
+                <!-- <input type="number" class="form-check-input bg-info" name="rotation_deg" min="0" max="180" value="0" style="width:3em">
+                <label class="form-check-label" for="rotation_deg">Rotation Degree</label><br> -->
+                <input type="text" class="form-check-input bg-info" name="anchor_xy" default="0,0" style="width:12em">
+                <label class="form-check-label" for="anchor_xy">Anchor XY</label><br>
                 <input type="submit" class="btn btn-primary bg-secondary" value="Submit Grid Configuration">
             </form>
         </div>

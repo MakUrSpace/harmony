@@ -50,12 +50,14 @@
     <div class="row" style="min-width: 500px">
         <div class="container justify-content-center" align="center">
             <h3 id="GameWorldHeader">Game World View -- {defaultCamera}</h3>
-            <form id="selectPixelForm" hx-post="{harmonyURL}select_pixel" hx-swap="none">
+            <form id="selectPixelForm" hx-post="{harmonyURL}select_pixel" hx-target="#interactor">
                 <input type="hidden" name="selectedCamera" id="selectedCamera" value="{defaultCamera}">
                 <input type="hidden" name="selectedPixel" id="selectedPixel" value="">
+                <input type="hidden" name="secondPixel" id="secondPixel" value="">
+                <input type="hidden" name="viewId" id="viewId" value="{viewId}">
             </form>
             <div id="GameWorldViewer">
-                <img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="{harmonyURL}camWithChanges/{defaultCamera}" style="border-radius: 40px; max-width: 90%;" onclick="imageClickListener(event)">
+                <img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="{harmonyURL}camWithChanges/{defaultCamera}/{viewId}" style="border-radius: 40px; max-width: 90%;" onclick="imageClickListener(event)">
             </div>
             <script>
                 function imageClickListener(event) {
@@ -90,35 +92,32 @@
                     pixelField.value = JSON.stringify([~~image_x, ~~image_y])
                     selectPixelForm.requestSubmit()
                 }
+                
+                function gameWorldClick(camNum){
+                    const view_id = document.getElementById(`viewId`).value
+                    var header = document.querySelector("#GameWorldHeader")
+                    header.innerText = `Game World View -- ${camNum}`
+                    var img = document.querySelector("#GameWorld")
+                    img.src = `{harmonyURL}/camWithChanges/${camNum}/${view_id}`
+                    const camField = document.getElementById(`selectedCamera`)
+                    camField.value = camNum
+                }
             </script>
         </div>
         <div class="container justify-content-center" align="center">
-            <script>
-            function gameWorldClick(camNum){{
-                var header = document.querySelector("#GameWorldHeader")
-                header.innerText = `Game World View -- ${camNum})`
-                var img = document.querySelector("#GameWorld")
-                img.src = `{harmonyURL}/camWithChanges/${camNum}`
-                const camField = document.getElementById(`selectedCamera`)
-                camField.value = camNum
-            }}
-            </script>
             {cameraButtons}
         </div>
-        <hr>
-        <div class="container">
-        </div>
-        <hr>
     	<div class="row justify-content-center" align="center" style="min-width: 500px">
-            <h1>Actions</h1>
-            <div id="objectInteractor" class="row">
-                <div id="objectFilterRetriever" hx-get="{harmonyURL}objects" hx-trigger="every 1s" hx-target="#objectInteractor"></div>
+            <div id="interactor" class="row"></div>
+            <div id="objectTable" class="row">
+                <div id="objectFilterRetriever" hx-get="{harmonyURL}objects" hx-trigger="every 1s" hx-target="#objectFilterRetriever"></div>
             </div>
+            <hr>
             <hr>
             <div class="row">
                 <div class="col" align="left">
-                    <form hx-post="{harmonyURL}load" hx-swap="none">
-                        <input class="btn btn-warning" type="submit" value="Load Game">
+                    <form hx-post="{harmonyURL}save" hx-swap="none">
+                        <input class="btn btn-success" type="submit" value="Save Game">
                         <input class="text" value="Harmony" id="game_name" name="game_name">
                     </form>
                 </div>
@@ -128,10 +127,19 @@
             </div>
             <div class="row">
                 <div class="col" align="left">
-                    <form hx-post="{harmonyURL}save" hx-swap="none">
-                        <input class="text" value="Harmony" id="game_name" name="game_name">
-                        <input class="btn btn-success" type="submit" value="Save Game">
+                    <input class="btn btn-warning" type="submit" value="Load Game" onclick="loadGame()">
+                    <form id="load_game" hx-post="{harmonyURL}load" hx-swap="none">
+                        <input type="hidden" value="Harmony" id="load_game_name" name="game_name">
                     </form>
+                    <script>
+                        function load_game(){
+                            const gameName = document.getElementById(`game_name`).value
+                            const loadGameField = document.getElementById(`load_game_name`)
+                            loadGameField.value = game_name
+                            const loadGameForm = document.getElementById(`load_game`)
+                            loadGameForm.requestSubmit()
+                        }
+                    </script>
                 </div>
                 <div class="col" align="right">
                     <input class="btn btn-danger" type="button" value="Reset Game" hx-get="{harmonyURL}reset">
