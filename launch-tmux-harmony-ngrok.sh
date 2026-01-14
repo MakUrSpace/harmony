@@ -22,13 +22,9 @@ tmux new-session -d -s "$SESSION_NAME" -n "server" \
   "PYTHONUNBUFFERED=1 nix run .#harmony; read"
 
 # Second window: ngrok
-if [[ -n "$HARMONY_NGROK_URL" ]]; then
-  tmux new-window -t "$SESSION_NAME" -n "ngrok" \
-    "ngrok http $PORT; read"
-else
-  tmux new-window -t "$SESSION_NAME" -n "ngrok" \
-    "ngrok http $PORT --url https://$HARMONY_NGROK_URL; read"
-fi
+echo "Starting session at https://$HARMONY_NGROK_URL"
+tmux new-window -t "$SESSION_NAME" -n "ngrok" \
+  "ngrok http $PORT --url https://$HARMONY_NGROK_URL; read"
 
 # Show both windows
 tmux select-window -t "$SESSION_NAME:0"
