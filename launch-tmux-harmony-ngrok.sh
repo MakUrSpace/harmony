@@ -5,11 +5,9 @@
 #   2. ngrok tunnel
 
 SESSION_NAME="harmony"
-APP_DIR="${APP_DIR:-harmony}"
-PYBIN="${PYBIN:-venv/bin/python3}"
-PYFILE="${PYFILE:-harmonyServer.py}"
+APP_DIR="${HARMONY_APP_DIR:-harmony}"
 PORT="${PORT:-7000}"
-HARMONY_NGROK_URL="${HARMONY_NGROK_URL:-}"
+HARMONY_NGROK_URL="${HARMONY_NGROK_URL:-harmony.ngrok.app}"
 
 # If the session already exists, just attach
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -21,15 +19,15 @@ echo "Creating tmux session '$SESSION_NAME'..."
 
 # Create new detached session
 tmux new-session -d -s "$SESSION_NAME" -n "server" \
-  "cd \"$APP_DIR\" && PYTHONUNBUFFERED=1 ../$PYBIN \"$PYFILE\"; read"
+  "PYTHONUNBUFFERED=1 nix run .#harmony; read"
 
 # Second window: ngrok
 if [[ -n "$HARMONY_NGROK_URL" ]]; then
   tmux new-window -t "$SESSION_NAME" -n "ngrok" \
-    "ngrok http $PORT --url=$HARMONY_NGROK_URL; read"
+    "ngrok http $PORT; read"
 else
   tmux new-window -t "$SESSION_NAME" -n "ngrok" \
-    "ngrok http $PORT; read"
+    "ngrok http $PORT --url https://$HARMONY_NGROK_URL; read"
 fi
 
 # Show both windows
