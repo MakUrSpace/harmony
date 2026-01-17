@@ -8,6 +8,11 @@ requires = ["setuptools", "setuptools-scm"]
 
 [tool.setuptools]
 packages = ["harmony", "observer"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"harmony" = ["**/*.ipynb"]
+"observer" = ["**/*.ipynb"]
 
 [project.scripts]
 harmony = "harmony.harmonyServer:main"
