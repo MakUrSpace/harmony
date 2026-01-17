@@ -12,7 +12,43 @@ Harmony's primary dependency is nix which manages packaging and running Harmony.
 
 ### Execute Harmony
 
-`nix run "github:makurspace/harmony#harmony-ngrok" --refresh`
+`nix run --impure "github:makurspace/harmony#harmony" --refresh`
+
+Harmony will be available at [http://localhost:7000](http://localhost:7000).
+
+#### Configure Cameras
+
+To configure Harmony, navigate to [http://localhost:7000/configurator](http://localhost:7000/configurator) (accessible from the `Configurator` button from the Harmony homepage).
+
+##### Add Camera
+
+Provide:
+* Name -- a simple name for the camera
+* RTSP -- enable the RTSP camera streaming module
+* Rotation -- degrees of rotation to apply to camera stream
+* Address -- IP address for camera, like `192.168.2.185`. An RTSP address might look like `192.168.2.185:554/11`
+* Auth -- authentication for the IP camera, provided as a comma separated list like `{username},{password}` 
+
+###### SV3C RTSP Stream
+
+If using a SV3C camera, you can use the RTSP camera stream module by clicking the `RTSP` checkbox and providing the RTSP address, which is typically `{Camera IP}:554/11`
+
+##### Grid Configuration
+
+Harmony projects a hexagonal grid across its perspectives. The grid cell size and the starting coordinate of the grid can be adjusted in this section.
+
+##### Calibrator
+
+Harmony's Calibrator is a utility for mapping cameras. It's accessed by clicking the `Calibrate Cameras` button on the Configurator page or by navigating to [http://localhost:7000/configurator/calibrator](http://localhost:7000/configurator/calibrator). Use this page to confirm the camera stream, and then click `First (Reset)` in the `Capture Control` section. 
+
+1. Confirm camera stream
+1. Select `First (Reset)` button in `Capture Control` section
+1. Place calibration triangle (60mmX80mmX100mm triangle) onto the camera
+1. Confirm Harmony recognized the triangle
+1. Click `Commit Calibration`
+1. Navigate to `Configurator`
+1. Click `Save State` button
+  1. This will create an `observerConfiguration.json` in Harmony's working directory
 
 ### Host Harmony with [ngrok](https://ngrok.com/)
 

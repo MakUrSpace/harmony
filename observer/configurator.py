@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from flask import Blueprint, render_template, abort, request, Response, url_for
 
-from ipynb.fs.full.Observer import RemoteCamera
+from ipynb.fs.full.Observer import RemoteCamera, RTSPCamera
 from ipynb.fs.full.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver
 from ipynb.fs.full.HexObserver import HexGridConfiguration
 
@@ -126,7 +126,9 @@ def addNewCamera():
     rtspCam = request.form.get("rtspCam")
     camAddr = request.form.get("camAddr")
     try:
-        camAuth = json.loads(request.form.get("camAuth"))
+        camAuth = [part.strip() for part in request.form.get("camAuth").split(",")]
+        if len(camAuth) != 2:
+            raise Exception(f"Unrecognized auth format: {request.form.get('camAuth')}")
     except:
         camAuth = None
 
