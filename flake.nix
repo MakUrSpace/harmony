@@ -82,6 +82,54 @@
             exec jupyter lab --notebook-dir="." --ip=0.0.0.0 --no-browser --NotebookApp.token="harmony"
           '';
         };
+        packages.register-ngrok = writeShellApplication {
+          name = "register-ngrok";
+          runtimeInputs = [ ngrok ];
+          text = ''
+            set -euo pipefail
+    
+            if [ "$#" -ne 1 ]; then
+              echo "Usage: nix run .#ngrok-auth -- <NGROK_AUTHTOKEN>" >&2
+              exit 1
+            fi
+    
+            exec ngrok config add-authtoken "$1"
+          '';
+        };
+        packages.harmony-ngrok = writeShellApplication {
+          name = "harmony-ngrok";
+          runtimeInputs = [ self'.packages.harmony ngrok tmux ];
+          text = ''
+            # Starts a tmux session with 2 windows:
+            #   1. Python server
+            #   2. ngrok tunnel
+            
+            SESSION_NAME="harmony"
+            PORT="''${PORT:-7000}"
+            HARMONY_NGROK_URL="''${HARMONY_NGROK_URL:-harmony.ngrok.app}"
+            
+            # If the session already exists, just attach
+            if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+              echo "Attaching to existing tmux session '$SESSION_NAME'..."
+              exec tmux attach -t "$SESSION_NAME"
+            fi
+            
+            echo "Creating tmux session '$SESSION_NAME'..."
+            
+            # Create new detached session
+            tmux new-session -d -s "$SESSION_NAME" -n "server" \
+              "PYTHONUNBUFFERED=1 harmony; read"
+            
+            # Second window: ngrok
+            echo "Starting session at https://$HARMONY_NGROK_URL"
+            tmux new-window -t "$SESSION_NAME" -n "ngrok" \
+              "ngrok http $PORT --url https://$HARMONY_NGROK_URL; read"
+            
+            # Show both windows
+            tmux select-window -t "$SESSION_NAME:0"
+            tmux attach -t "$SESSION_NAME"
+          '';
+        };
         devShells.default = pkgs.mkShell {
           name = "harmonyShell";
           packages = [ harmony-dev-env ];
