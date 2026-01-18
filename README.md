@@ -29,6 +29,8 @@ Provide:
 * Address -- IP address for camera, like `192.168.2.185`. An RTSP address might look like `192.168.2.185:554/11`
 * Auth -- authentication for the IP camera, provided as a comma separated list like `{username},{password}` 
 
+After submitting the camera settings, select the camera's `Active Zone` by clicking on the camera view in the Configurator.
+
 ###### SV3C RTSP Stream
 
 If using a SV3C camera, you can use the RTSP camera stream module by clicking the `RTSP` checkbox and providing the RTSP address, which is typically `{Camera IP}:554/11`

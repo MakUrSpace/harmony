@@ -49,7 +49,8 @@ def buildConfigurator():
     
     return template.replace(
         "{configuratorURL}", url_for(".config")).replace(
-        "{cameraConfigRows}", "\n".join(cameraConfigRows))
+        "{cameraConfigRows}", "\n".join(cameraConfigRows)).replace(
+        "{size}", str(app.cc.hex.size))
 
     
 @configurator.route('/', methods=['GET'])
@@ -62,7 +63,7 @@ def updateConfig():
     global CONSOLE_OUTPUT
     CONSOLE_OUTPUT = "Saved Configuration"
     app.cc.saveConfiguration()
-    return "success"
+    return "Success"
 
 
 def genCameraFullViewWithActiveZone(camName):
@@ -156,10 +157,12 @@ def deleteCamera(camName):
 @configurator.route('/grid_configuration', methods=['POST'])
 def configureGrid():
     app.cc.hex = HexGridConfiguration(
-        size=float(request.form.get("size")),
-        anchor_xy=[float(d) for d in json.loads(f'[{request.form.get("anchor_xy")}')]
+        size=float(request.form.get("size"))
     )
-    return "Success"
+    return f"""
+        <input type="number" class="form-check-input bg-info" name="size" min="10" max="60" value="{app.cc.hex.size}" style="width:4em">
+        <label class="form-check-label" for="size">Size</label><br>
+        <input type="submit" class="btn btn-primary bg-secondary" value="Submit Grid Configuration">"""
 
 
 def setConfiguratorApp(newApp):
