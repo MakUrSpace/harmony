@@ -109,11 +109,10 @@
         </div>
     	<div class="row justify-content-center" align="center" style="min-width: 500px">
             <div id="interactor" class="row"></div>
+            <hr>
             <div id="objectTable" class="row">
                 <div id="objectFilterRetriever" hx-get="{harmonyURL}objects" hx-trigger="every 1s" hx-target="#objectFilterRetriever"></div>
             </div>
-            <hr>
-            <hr>
             <div class="row">
                 <div class="col" align="left">
                     <form hx-post="{harmonyURL}save" hx-swap="none">

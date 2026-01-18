@@ -100,7 +100,11 @@ def combinedCamerasResponse():
 class CellSelection:
     viewId: str
     firstCell: tuple
-    secondCell: tuple | None = None
+    additionalCells: list[tuple] | None = None
+
+    @property
+    def secondCell(self):
+        return self.additionalCells[0] if self.additionalCells else None
 
 
 SELECTED_CELLS = {}
@@ -114,7 +118,8 @@ def genCameraWithChangesView(camName, viewId=None):
             print("Has changes")
         if app.cm.lastClassification is not None:
             print("Has class")
-        camImage = cam.cropToActiveZone(cam.mostRecentFrame.copy())
+        orig = cam.cropToActiveZone(cam.mostRecentFrame.copy())
+        camImage = orig.copy()
         # Paint known objects blue
         for memObj in app.cm.memory:
             if memObj.changeSet[camName].changeType not in ['delete', None]:
@@ -140,7 +145,8 @@ def genCameraWithChangesView(camName, viewId=None):
             if SELECTED_CELLS[viewId].secondCell:
                 cell_poly = app.cc.cam_hex_at_axial(camName, *SELECTED_CELLS[viewId].secondCell)
                 cv2.fillPoly(camImage, [cell_poly], (255, 165, 0))
-                
+
+        camImage = cv2.addWeighted(orig, 0.4, camImage, 0.6, 0)
 
         grid = app.cc.cameraGriddle(camName)
         camImage = cam.cropToActiveZone(cv2.addWeighted(grid, 0.3, camImage, 1.0 - 0.3, 0.0))
@@ -368,9 +374,13 @@ def requestObjectMovement(cap):
 
 @harmony.route('/object_factory/<viewId>', methods=['GET'])
 def buildObjectFactory(viewId):
+    selectedCell = SELECTED_CELLS[viewId].firstCell
     return f"""
         <form hx-post="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#interactor">
-            <input type="text" name="object_name" value="">
+            <label for="object_name" class="form-check-label">Object Name</label>
+            <input type="text" name="object_name" value=""><br>
+            <label for="selected_cells" class="form-check-label">Selected Cells</label>
+            <input type="text" name="selected_cells" value="{selectedCell}"><br>
             <input type="submit" class="btn btn-primary" value="Define Object">
         </form>
     """
@@ -392,7 +402,6 @@ interactor_template = """
 """
 
 
-
 @harmony.route('/object_factory/<viewId>', methods=['POST'])
 def buildObject(viewId):
     objectName = str(request.form.get("object_name"))
@@ -406,21 +415,37 @@ def buildObject(viewId):
                                     actions=f"""
         <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
         <hr>
-        <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="{url_for(".buildHarmony")}object_factory/{trackedObject.oid}" hx-target="#interactor">
-        <hr>
+        <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#interactor">
         """)
 
 
 @harmony.route('/object_factory/<viewId>', methods=['DELETE'])
 def deleteObject(viewId):
-    raise NotImplementedError()
+    selected = SELECTED_CELLS[viewId]
+    overlap = None
+    for mem in app.cm.memory:
+        mem_axial = app.cm.cc.changeSetToAxialCoord(mem)
+        if mem_axial == selected.firstCell:
+            overlap = mem
+            break
+    app.cm.memory.remove(mem)
+    SELECTED_CELLS.pop(viewId)
+    return "Success"
 
 
-@harmony.route('/request_move/<oid>/<viewId>', methods=['GET'])
-def moveObjectDefinition(oid, viewId):
+@harmony.route('/request_move/<viewId>', methods=['GET'])
+def moveObjectDefinition(viewId):
     try:
-        firstCell = SELECTED_CELLS[viewId].firstCell
-        secondCell = SELECTED_CELLS[viewId].secondCell
+        selected = SELECTED_CELLS[viewId]
+        firstCell = selected.firstCell
+        secondCell = selected.secondCell
+
+        for mem in app.cm.memory:
+            mem_axial = app.cm.cc.changeSetToAxialCoord(mem)
+            if mem_axial == selected.firstCell:
+                overlap = mem
+                break
+        oid = mem.oid
     except:
         raise Exception("404")
     trackedObject = app.cm.cc.define_object_from_axial(oid, *secondCell)
@@ -429,7 +454,7 @@ def moveObjectDefinition(oid, viewId):
         app.cm.memory.remove(existing)
         app.cm.commitChanges(trackedObject)
         SELECTED_CELLS.pop(viewId)
-    return ""
+    return "Success"
 
 
 @harmony.route('/clear_pixel/<viewId>', methods=['GET'])
@@ -461,7 +486,7 @@ def selectPixel():
             if existing.secondCell:
                 SELECTED_CELLS[viewId] = CellSelection(viewId, axial_coord)    
             else:
-                SELECTED_CELLS[viewId].secondCell = axial_coord
+                SELECTED_CELLS[viewId].additionalCells = [axial_coord]
         else:
             SELECTED_CELLS[viewId] = CellSelection(viewId, axial_coord)
     q, r = axial_coord
@@ -497,8 +522,9 @@ def selectPixel():
                 """,
                                                 actions=f"""
                 <div id="object_factory">
-                    <input type="button" class="btn btn-success" value="Define Object" hx-get="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#object_factory">
+                    <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#object_factory">
                 </div>
+                <hr>
                 <input type="button" class="btn btn-danger" value="Clear Selected Pixel" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
                 """)
     else:
@@ -522,6 +548,11 @@ def selectPixel():
                 </div>
                 <input type="button" class="btn btn-danger" value="Clear Selected Pixel" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
                 """)
+
+
+@harmony.route('/select_additional_pixel/<viewId>', methods=['POST'])
+def selectAdditionalPixel(viewId):
+    pass
 
 
 def minimapGenerator(viewId=None):
