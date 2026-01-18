@@ -254,16 +254,9 @@ def buildHarmony():
 
 
 def captureToChangeRow(capture):
-    encodedBA = imageToBase64(app.cm.object_visual(capture))
     name = "None"
     objType = "None"
     center = ", ".join(["0", "0"])
-    health = ""
-    numHits = 0
-    for i in range(numHits):
-        health += "[x] "
-    for i in range(3 - numHits):
-        health += "[ ] "
     with open(f"{os.path.dirname(__file__)}/templates/TrackedObjectRow.html") as f:
         changeRowTemplate = f.read()
     moveDistance = app.cm.cc.trackedObjectLastDistance(capture)
