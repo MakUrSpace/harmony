@@ -18,7 +18,7 @@ from traceback import format_exc
 
 
 CONSOLE_OUTPUT = "No Output Yet"
-POOL_TIME = 0.35 #Seconds
+POOL_TIME = 0.01 #Seconds
 ENABLE_CYCLE = True
 DATA_LOCK = threading.Lock()
 
