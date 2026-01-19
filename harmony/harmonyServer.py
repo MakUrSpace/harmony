@@ -146,7 +146,7 @@ def genCameraWithChangesView(camName, viewId=None):
                 cell_poly = app.cc.cam_hex_at_axial(camName, *SELECTED_CELLS[viewId].secondCell)
                 cv2.fillPoly(camImage, [cell_poly], (255, 165, 0))
 
-        camImage = cv2.addWeighted(orig, 0.4, camImage, 0.6, 0)
+        camImage = cv2.addWeighted(orig, 0.6, camImage, 0.4, 0)
 
         grid = app.cc.cameraGriddle(camName)
         camImage = cam.cropToActiveZone(cv2.addWeighted(grid, 0.3, camImage, 1.0 - 0.3, 0.0))
@@ -257,7 +257,7 @@ def captureToChangeRow(capture):
     name = "None"
     objType = "None"
     center = ", ".join(["0", "0"])
-    with open(f"{os.path.dirname(__file__)}/templates/TrackedObjectRow.html") as f:
+    with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectRow.html") as f:
         changeRowTemplate = f.read()
     moveDistance = app.cm.cc.trackedObjectLastDistance(capture)
     moveDistance = "None" if moveDistance is None else f"{moveDistance:6.0f}"
@@ -468,6 +468,7 @@ def selectPixel():
     pixel = json.loads(request.form["selectedPixel"])
     x, y = pixel
     cam = request.form["selectedCamera"]
+    appendPixel = bool(request.form["appendPixel"])
     if cam == "VirtualMap":
         axial_coord = app.cm.cc.pixel_to_axial(x, y)
     else:
@@ -476,10 +477,10 @@ def selectPixel():
     with DATA_LOCK:
         existing = SELECTED_CELLS.get(viewId, None)
         if existing:
-            if existing.secondCell:
-                SELECTED_CELLS[viewId] = CellSelection(viewId, axial_coord)    
-            else:
+            if existing.secondCell is None or appendPixel:
                 SELECTED_CELLS[viewId].additionalCells = [axial_coord]
+            else:
+                SELECTED_CELLS[viewId] = CellSelection(viewId, axial_coord)
         else:
             SELECTED_CELLS[viewId] = CellSelection(viewId, axial_coord)
     q, r = axial_coord
