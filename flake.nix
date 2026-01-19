@@ -63,7 +63,7 @@
           propagatedBuildInputs = harmony-deps;
         };
 
-    	harmony-dev-env = python.withPackages (ps: with ps; harmony-deps);
+    	harmony-dev-env = python.withPackages (ps: with ps; harmony-deps ++ [ pytest pytest-cov ]);
       in {
         packages.default = harmony;
         packages.harmony = harmony;
@@ -128,6 +128,13 @@
             # Show both windows
             tmux select-window -t "$SESSION_NAME:0"
             tmux attach -t "$SESSION_NAME"
+          '';
+        };
+        packages.tests = writeShellApplication {
+          name = "run-tests";
+          runtimeInputs = [ harmony-dev-env self'.packages.harmony ];
+          text = ''
+            pytest tests/
           '';
         };
         devShells.default = pkgs.mkShell {

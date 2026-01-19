@@ -211,7 +211,7 @@ def buildObserver():
     if type(app.cm) is not CalibratedObserver:
         with DATA_LOCK:
             app.cm = CalibratedObserver(app.cc)
-    with open("{os.path.dirname(__file__)}/templates/Observer.html", "r") as f:
+    with open(f"{os.path.dirname(__file__)}/templates/Observer.html", "r") as f:
         template = f.read()
     cameraButtons = '<input type="button" value="Virtual Map" onclick="liveCameraClick(\'VirtualMap\')">' + ' '.join([f'''<input type="button" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
     defaultCam = [camName for camName, cam in app.cc.cameras.items()][0]
@@ -233,7 +233,7 @@ def captureToChangeRow(capture):
         health += "[x] "
     for i in range(3 - numHits):
         health += "[ ] "
-    with open("{os.path.dirname(__file__)}/templates/TrackedObjectRow.html") as f:
+    with open(f"{os.path.dirname(__file__)}/templates/TrackedObjectRow.html") as f:
         changeRowTemplate = f.read()
     moveDistance = app.cm.cc.rsc.trackedObjectLastDistance(capture)
     moveDistance = "None" if moveDistance is None else f"{moveDistance:6.0f} mm"
@@ -271,7 +271,7 @@ def getObjectSettings(objectId):
 
     objectName = cap.oid
     observerURL = url_for(".buildObserver")
-    with open("{os.path.dirname(__file__)}/templates/TrackedObjectUpdater.html") as f:
+    with open(f"{os.path.dirname(__file__)}/templates/TrackedObjectUpdater.html") as f:
         template = f.read()
     return template.replace(
         "{observerURL}", observerURL).replace(
@@ -309,7 +309,7 @@ def getObjectDistances(objectId):
     if cap is None:
         return f"{objectId} Not found", 404
 
-    with open("{os.path.dirname(__file__)}/templates/ObjectDistanceCard.html") as f:
+    with open(f"{os.path.dirname(__file__)}/templates/ObjectDistanceCard.html") as f:
         cardTemplate = f.read()
     objDistCards = []
     for target in app.cm.memory:
@@ -321,7 +321,7 @@ def getObjectDistances(objectId):
                 "{encodedBA}", imageToBase64(target.visual())).replace(
                 "{objectDistance}", f"{app.cm.cc.rsc.distanceBetweenObjects(cap, target):6.0f} mm"))
                 
-    with open("{os.path.dirname(__file__)}/templates/ObjectDistanceTable.html") as f:
+    with open(f"{os.path.dirname(__file__)}/templates/ObjectDistanceTable.html") as f:
         template = f.read()
     return template.replace(
         "{observerURL}", url_for(".buildObserver")).replace(
@@ -364,19 +364,19 @@ def main():
 
     @app.route('/bootstrap.min.css', methods=['GET'])
     def getBSCSS():
-        with open("{os.path.dirname(__file__)}/templates/bootstrap.min.css", "r") as f:
+        with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.css", "r") as f:
             bscss = f.read()
         return Response(bscss, mimetype="text/css")
     
     @app.route('/bootstrap.min.js', methods=['GET'])
     def getBSJS():
-        with open("{os.path.dirname(__file__)}/templates/bootstrap.min.js", "r") as f:
+        with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.js", "r") as f:
             bsjs = f.read()
         return Response(bsjs, mimetype="application/javascript")
     
     @app.route('/htmx.min.js', methods=['GET'])
     def getHTMX():
-        with open("{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
+        with open(f"{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
             htmx = f.read()
         return Response(htmx, mimetype="application/javascript")
     

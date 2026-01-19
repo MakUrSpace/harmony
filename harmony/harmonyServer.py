@@ -332,7 +332,7 @@ def deleteObjectSettings(cap):
     return buildObjectTable()
 
 
-def buildObjectSettings(cap):
+def buildObjectSettings(cap, objType=None):
     return "200"
     
 
@@ -362,7 +362,7 @@ def requestObjectMovement(cap):
         print(f"Requesting {cap.oid} move to {cap.newLocation}")
         CONSOLE_OUTPUT = f"RQ-{cap.oid} move to {cap.newLocation}"
         app.cm.expectObjectMovement(cap, cap.newLocation)
-    return getObjectTableContainer()
+    return getObjectTable()
 
 
 @harmony.route('/object_factory/<viewId>', methods=['GET'])
