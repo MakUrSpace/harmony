@@ -426,21 +426,14 @@ def deleteObject(viewId):
     return "Success"
 
 
-@harmony.route('/request_move/<viewId>', methods=['GET'])
-def moveObjectDefinition(viewId):
+@harmony.route('/request_move/<oid>/<viewId>', methods=['GET'])
+def moveObjectDefinition(oid, viewId):
     try:
         selected = SELECTED_CELLS[viewId]
         firstCell = selected.firstCell
         secondCell = selected.secondCell
-
-        for mem in app.cm.memory:
-            mem_axial = app.cm.cc.changeSetToAxialCoord(mem)
-            if mem_axial == selected.firstCell:
-                overlap = mem
-                break
-        oid = mem.oid
-    except:
-        raise Exception("404")
+    except Exception as e:
+        raise Exception("500") from e
     trackedObject = app.cm.cc.define_object_from_axial(oid, *secondCell)
     existing = app.cm.cc.define_object_from_axial(oid, *firstCell)
     with DATA_LOCK:
