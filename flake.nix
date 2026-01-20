@@ -134,7 +134,7 @@
           name = "run-tests";
           runtimeInputs = [ harmony-dev-env self'.packages.harmony ];
           text = ''
-            pytest tests/
+            pytest tests/ "$@"
           '';
         };
         devShells.default = pkgs.mkShell {

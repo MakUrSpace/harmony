@@ -14,6 +14,11 @@ from traceback import format_exc
 import time
 from uuid import uuid4
 import copy
+import os
+import shutil
+import pickle
+import random
+from collections import defaultdict
 
 import cv2
 import numpy as np
@@ -128,13 +133,33 @@ def safe_point(pt):
         return (p[0][0], p[0][1])
     return (p[0], p[1])
 
+def get_scale_factor(cam_name):
+    try:
+        if cam_name == "VirtualMap":
+            return 1.0, 1.0
+        cam = current_app.cc.cameras.get(cam_name)
+        if cam is None or cam.mostRecentFrame is None:
+            return 1.0, 1.0
+        
+        h, w = cam.mostRecentFrame.shape[:2]
+        if w == 0 or h == 0:
+            return 1.0, 1.0
+            
+        # perspective_res is global [1920, 1080]
+        return perspective_res[0] / w, perspective_res[1] / h
+    except Exception:
+        return 1.0, 1.0
+
+def scale_point(pt, scale):
+    return (pt[0] * scale[0], pt[1] * scale[1])
+
 def axial_to_ui_object(q, r):
     return {
         "VirtualMap": [
             safe_point(pt)
             for pt in current_app.cm.cc.hex_at_axial(q, r)],
         **{camName: [
-            safe_point(pt)
+            scale_point(safe_point(pt), get_scale_factor(camName))
             for pt in current_app.cm.cc.cam_hex_at_axial(camName, q, r)] for camName in current_app.cc.cameras.keys()}
     }
 
@@ -148,7 +173,7 @@ def getCanvasData(viewId):
                 safe_point(pt)
                 for pt in current_app.cm.cc.hex_at_axial(*current_app.cm.cc.changeSetToAxialCoord(obj))],
             **{
-                camName: [(pt[0], pt[1]) for pt in obj.changeSet[camName].changePoints]
+                camName: [scale_point((pt[0], pt[1]), get_scale_factor(camName)) for pt in obj.changeSet[camName].changePoints]
                 for camName in current_app.cc.cameras.keys()}
         }
     
@@ -160,7 +185,8 @@ def getCanvasData(viewId):
         "selection": {
             "firstCell": axial_to_ui_object(*session_config.selection.firstCell) if session_config.selection.firstCell is not None else None,
             "additionalCells": [axial_to_ui_object(*cell) for cell in session_config.selection.additionalCells]
-        }
+        },
+        "selectable": [obj.oid for obj in app.cm.memory]
     }
     return jsonify(data)
 
@@ -187,6 +213,7 @@ def combinedCamerasWithChangesResponse():
     return Response(stream_with_context(genCombinedCameraWithChangesView()), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
+
 @harmony.route('/reset')
 def resetHarmony():
     with DATA_LOCK:
@@ -205,28 +232,113 @@ def resetHarmony():
     return 'success'
 
 
-@harmony.route('/load', methods=["POST"])
-def loadHarmony():
-    game_name = request.form["game_name"]
-    global CONSOLE_OUTPUT
-    with DATA_LOCK:
-        CONSOLE_OUTPUT = "Loading game state..."
-    time.sleep(3)
-    with DATA_LOCK:
-        current_app.cm.loadGame(gameName=game_name)        
-        CONSOLE_OUTPUT = "Game state reloaded."
-    return 'success'
+@harmony.route('/save', methods=['POST'])
+def saveHarmonyPost():
+    gameName = request.form.get("game_name")
+    if not gameName:
+        return "Game name required", 400
+    
+    # Reuse existing save logic or call it directly
+    return saveHarmony(gameName)
 
 
-@harmony.route('/save', methods=["POST"])
-def saveHarmony():
-    game_name = request.form["game_name"]
-    global CONSOLE_OUTPUT
-    with DATA_LOCK:
-        current_app.cm.saveGame(gameName=game_name)
+@harmony.route('/load', methods=['POST'])
+def loadHarmonyPost():
+    gameName = request.form.get("game_name")
+    if not gameName:
+        return "Game name required", 400
+        
+    return loadHarmony(gameName)
+
+
+@harmony.route('/save_game/<gameName>')
+def saveHarmony(gameName):
+    global SESSIONS
+    try:
+        current_app.cm.saveGame(gameName)
+        # Pickle memory and current sessions
+        save_data = {
+            'memory': current_app.cm.memory,
+            'sessions': SESSIONS
+        }
+        with open(f"{gameName}.pickle", "wb") as f:
+            pickle.dump(save_data, f)
+            
+        return f"Game saved as {gameName}"
+    except Exception as e:
+        print(f"Error saving game: {e}")
+        return f"Error saving game: {e}"
+
+@harmony.route('/load_game/<gameName>')
+def loadHarmony(gameName):
+    global SESSIONS
+    try:
+        # current_app.cm.loadGame(gameName) # Use manual pickle logic mainly
+        
+        pickle_path = f"{gameName}.pickle"
+        if os.path.exists(pickle_path):
+            with open(pickle_path, "rb") as f:
+                load_data = pickle.load(f)
+                
+                # Restore Memory
+                new_memory = load_data.get('memory', [])
+                current_app.cm.memory = new_memory
+                print(f"Loaded {len(new_memory)} objects into memory.")
+                
+                # Restore Sessions (Merge)
+                loaded_sessions = load_data.get('sessions', {})
+                # We do NOT clear, we update. 
+                # This ensures the current user's session remains valid, 
+                # or if there's a conflict, the saved one takes precedence (which is usually desired for load)
+                # But to be safe for a NEW session after restart, we want to keep the new one active.
+                # Actually, simply updating adds the old sessions back. The current session viewId is distinct.
+                SESSIONS.update(loaded_sessions)
+                print(f"Merged {len(loaded_sessions)} sessions from save. Total sessions: {len(SESSIONS)}")
+                
+        else:
+            return f"Save file {gameName}.pickle not found"
+        
+        return f"Game {gameName} loaded. Objects: {len(current_app.cm.memory)}" 
+    except Exception as e:
+        print(f"Error loading game: {e}")
+        return f"Error loading game: {e}"
         CONSOLE_OUTPUT = "Saved game state."
     return 'success'
 
+
+
+ADJECTIVES = ["Cool", "Happy", "Fast", "Shiny", "Blue", "Red", "Green", "Bright", "Dark", "Loud", "Quiet", "Brave", "Calm", "Eager", "Fair", "Gentle", "Jolly", "Kind", "Lively", "Nice", "Proud", "Silly", "Witty", "Zealous"]
+NOUNS = ["Tiger", "Eagle", "Shark", "Bear", "Lion", "Wolf", "Fox", "Hawk", "Owl", "Frog", "Toad", "Fish", "Crab", "Star", "Moon", "Sun", "Cloud", "Rain", "Snow", "Wind", "Storm", "River", "Lake", "Sea", "Ocean"]
+
+def simple_id_generator():
+    return f"{random.choice(ADJECTIVES)}-{random.choice(NOUNS)}"
+
+@harmony.route('/update_session_id', methods=['POST'])
+def update_session_id():
+    old_id = request.form.get('viewId')
+    new_id = request.form.get('newViewId')
+    
+    if not old_id or not new_id:
+        return "Invalid Request", 400
+        
+    if new_id in SESSIONS:
+         return "Session ID already exists", 409
+
+    with DATA_LOCK:
+        if old_id in SESSIONS:
+            SESSIONS[new_id] = SESSIONS.pop(old_id)
+            # Must update the viewId inside the session config if it's stored there? 
+            # SessionConfig has 'selection' which has 'viewId' in CellSelection's init but it's not stored in SessionConfig directly.
+            # However CellSelection stores viewId? No, CellSelection definition:
+            # @dataclass
+            # class CellSelection:
+            #    firstCell: tuple | None = None
+            #    additionalCells: list[tuple] | None = None
+            # It doesn't seem to store viewId.
+            
+            return f"""<script>window.location.href = "{url_for('.buildHarmony')}?viewId={new_id}";</script>"""
+        else:
+            return "Session not found", 404
 
 @harmony.route('/')
 def buildHarmony():
@@ -236,23 +348,35 @@ def buildHarmony():
     with open(f"{os.path.dirname(__file__)}/harmony_templates/{template_name}", "r") as f:
         template = f.read()
     cameraButtons = ' '.join([f'''<input type="button" class="btn btn-info" value="Camera {camName}" onclick="gameWorldClick('{camName}')">''' for camName in current_app.cc.cameras.keys()])
-    cameraButtons = f"""<input type="button" class="btn btn-info" value="Virtual Map" onclick="gameWorldClick(\'VirtualMap\')">{cameraButtons}"""
+    cameraButtons = f"""<input type="button" class="btn btn-info" value="Virtual Map" onclick="gameWorldClick('VirtualMap')">{cameraButtons}"""
     defaultCam = [camName for camName, cam in current_app.cc.cameras.items()]
     if len(defaultCam) == 0:
         defaultCam = "None"
     else:
         defaultCam = defaultCam[0]
         
-    # Register new session
-    new_view_id = str(uuid4())
-    SESSIONS[new_view_id] = SessionConfig()
+    # Check for existing session
+    view_id = request.args.get('viewId')
+    
+    if view_id and view_id in SESSIONS:
+        # Resume session
+        pass
+    else:
+        # Register new session
+        # Ensure uniqueness
+        while True:
+            view_id = simple_id_generator()
+            if view_id not in SESSIONS:
+                break
+        SESSIONS[view_id] = SessionConfig()
     
     return template.replace(
-        "{viewId}", new_view_id).replace(
+        "{viewId}", view_id).replace(
         "{defaultCamera}", defaultCam).replace(
         "{cameraButtons}", cameraButtons).replace(
         "{harmonyURL}", url_for('.buildHarmony')).replace(
         "{configuratorURL}", '/configurator')
+
 
 
 def captureToChangeRow(capture):
@@ -507,9 +631,22 @@ def selectPixel():
                 <input type="button" class="btn btn-danger" value="Clear Selected Pixel" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
                 """)
     else:
+        # Check additional cells for objects
         additional_info = ""
         if selected.additionalCells:
-            additional_info = f"<h3>Additional cells: {len(selected.additionalCells)}</h3>"
+            count = len(selected.additionalCells)
+            additional_info += f"<h3>Additional cells: {count - 1}</h3>"
+            
+            # Iterate through additional cells to find objects
+            for cell in selected.additionalCells:
+                cell_objects = []
+                for mem in current_app.cm.memory:
+                    mem_axial = current_app.cm.cc.changeSetToAxialCoord(mem)
+                    if mem_axial == cell:
+                        cell_objects.append(mem.oid)
+                
+                if cell_objects:
+                    additional_info += f"<div>Cell {cell}: Object(s) {', '.join(cell_objects)}</div>"
 
         if selected.secondCell:
             distance = current_app.cm.cc.axial_distance(selected.firstCell, selected.secondCell)
@@ -519,7 +656,7 @@ def selectPixel():
                     {additional_info}
                     <h3>Distance to {selected.secondCell}  --  {distance}</h3>
                 """,
-                                                actions=f"""
+            actions=f"""
                     <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
                 """)
         else:
@@ -699,6 +836,12 @@ def start_servers():
             with open(f"{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
                 htmx = f.read()
             return Response(htmx, mimetype="application/javascript")
+
+        @new_app.route('/HarmonyTemplate.css', methods=['GET'])
+        def getHarmonyCSS():
+            with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyTemplate.css", "r") as f:
+                css = f.read()
+            return Response(css, mimetype="text/css")
             
         registerCaptureService(new_app)
         APPS.append(new_app)

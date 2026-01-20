@@ -10,41 +10,8 @@
     <script src="/bootstrap.min.js"></script>
     <script src="/htmx.min.js"></script>
 
-    <style>
-        table,
-        th,
-        td {
-            border: 1px solid black;
-            padding: 15px;
-        }
-
-        .x-box {
-            position: relative;
-            display: flex;
-        }
-
-        .x-box::before,
-        .x-box::after {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 10;
-            /* Ensures it appears over text */
-            pointer-events: none;
-            /* Allows interactions with underlying content */
-        }
-
-        .x-box::before {
-            background: linear-gradient(30deg, transparent 49%, red 49%, red 51%, transparent 51%);
-        }
-
-        .x-box::after {
-            background: linear-gradient(-30deg, transparent 49%, red 49%, red 51%, transparent 51%);
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/HarmonyTemplate.css">
 
     <title>Harmony</title>
 </head>
@@ -53,6 +20,19 @@
     <div class="container">
         <h1 align="center">Harmony</h1>
         <hr>
+        <div class="row justify-content-center mb-3">
+            <h4>Session ID: {viewId}
+                <button class="btn btn-sm btn-outline-secondary"
+                    onclick="document.getElementById('updateSessionForm').hidden = !document.getElementById('updateSessionForm').hidden">Edit</button>
+            </h4>
+        </div>
+        <div id="updateSessionForm" class="row justify-content-center mb-3" hidden>
+            <form action="/update_session_id" method="POST" class="form-inline">
+                <input type="hidden" name="viewId" value="{viewId}">
+                <input type="text" name="newViewId" class="form-control mr-2" placeholder="New Session ID" required>
+                <button type="submit" class="btn btn-primary">Update</button>
+            </form>
+        </div>
         <div class="row" style="min-width: 500px">
             <div class="container justify-content-center" align="center">
                 <h3 id="GameWorldHeader">Game World View -- {defaultCamera}</h3>
@@ -427,11 +407,11 @@
             </div>
             <div class="row justify-content-center" align="center" style="min-width: 500px">
                 <div id="interactor" class="row"></div>
-                <!-- <hr> removed -->
                 <div id="objectTable" class="row">
                     <div id="objectFilterRetriever" hx-get="{harmonyURL}objects" hx-trigger="every 1s"
                         hx-target="#objectFilterRetriever"></div>
                 </div>
+                <hr>
                 <div class="row">
                     <div class="col" align="left">
                         <form hx-post="{harmonyURL}save" hx-swap="none">
@@ -447,14 +427,15 @@
                 <div class="row">
                     <div class="col" align="left">
                         <input class="btn btn-warning" type="submit" value="Load Game" onclick="loadGame()">
-                        <form id="load_game" hx-post="{harmonyURL}load" hx-swap="none">
+                        <form id="load_game" hx-post="{harmonyURL}load" hx-target="#load_status" hx-swap="innerHTML">
                             <input type="hidden" value="Harmony" id="load_game_name" name="game_name">
                         </form>
+                        <div id="load_status" class="text-sm text-muted mt-1"></div>
                         <script>
-                            function load_game() {
-                                const gameName = document.getElementById(`game_name`).value
+                            function loadGame() {
+                                const gameNameVal = document.getElementById(`game_name`).value
                                 const loadGameField = document.getElementById(`load_game_name`)
-                                loadGameField.value = game_name
+                                loadGameField.value = gameNameVal
                                 const loadGameForm = document.getElementById(`load_game`)
                                 loadGameForm.requestSubmit()
                             }

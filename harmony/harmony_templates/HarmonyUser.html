@@ -10,41 +10,8 @@
     <script src="/bootstrap.min.js"></script>
     <script src="/htmx.min.js"></script>
 
-    <style>
-        table,
-        th,
-        td {
-            border: 1px solid black;
-            padding: 15px;
-        }
-
-        .x-box {
-            position: relative;
-            display: flex;
-        }
-
-        .x-box::before,
-        .x-box::after {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 10;
-            /* Ensures it appears over text */
-            pointer-events: none;
-            /* Allows interactions with underlying content */
-        }
-
-        .x-box::before {
-            background: linear-gradient(30deg, transparent 49%, red 49%, red 51%, transparent 51%);
-        }
-
-        .x-box::after {
-            background: linear-gradient(-30deg, transparent 49%, red 49%, red 51%, transparent 51%);
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/HarmonyTemplate.css">
 
     <title>Harmony</title>
 </head>
