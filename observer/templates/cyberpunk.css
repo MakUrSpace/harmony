@@ -1,0 +1,182 @@
+/* Cyberpunk Theme */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&family=Rajdhani:wght@400;600&display=swap');
+
+:root {
+    --neon-red: #ff003c;
+    --neon-red-dim: rgba(255, 0, 60, 0.2);
+    --neon-red-glow: 0 0 10px var(--neon-red), 0 0 20px var(--neon-red);
+    --dark-bg: #050505;
+    --panel-bg: rgba(20, 20, 20, 0.9);
+    --grid-line: rgba(255, 0, 60, 0.1);
+    --font-heading: 'Orbitron', sans-serif;
+    --font-body: 'Rajdhani', sans-serif;
+}
+
+body {
+    background-color: var(--dark-bg);
+    color: var(--neon-red);
+    font-family: var(--font-body);
+    background-image:
+        linear-gradient(var(--grid-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 50px 50px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: var(--font-heading);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-shadow: var(--neon-red-glow);
+}
+
+/* Containers and Layout */
+.container {
+    border: 1px solid var(--neon-red-dim);
+    background: var(--panel-bg);
+    padding: 20px;
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.8);
+    position: relative;
+    /* Corner Accents */
+    clip-path: polygon(0% 0%,
+            100% 0%,
+            100% calc(100% - 20px),
+            calc(100% - 20px) 100%,
+            0% 100%);
+    margin-bottom: 20px;
+}
+
+/* Bootstrap Overrides - Buttons */
+.btn {
+    border-radius: 0;
+    font-family: var(--font-heading);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    position: relative;
+    clip-path: polygon(10px 0,
+            100% 0,
+            100% calc(100% - 10px),
+            calc(100% - 10px) 100%,
+            0 100%,
+            0 10px);
+    border: none;
+    transition: all 0.3s ease;
+}
+
+.btn-primary,
+.btn-info,
+.btn-secondary,
+.btn-success,
+.btn-danger,
+.btn-warning,
+.btn-outline-primary {
+    background: transparent;
+    border: 1px solid var(--neon-red);
+    color: var(--neon-red);
+    box-shadow: inset 0 0 10px var(--neon-red-dim);
+}
+
+.btn:hover,
+.btn:active,
+.btn:focus {
+    background: var(--neon-red) !important;
+    color: var(--dark-bg) !important;
+    box-shadow: 0 0 20px var(--neon-red) !important;
+    border: 1px solid var(--neon-red) !important;
+}
+
+/* Inputs */
+input[type="text"],
+input[type="number"],
+input[type="radio"] {
+    background-color: #000 !important;
+    border: 1px solid var(--neon-red);
+    color: var(--neon-red);
+    font-family: var(--font-body);
+}
+
+input:focus {
+    box-shadow: 0 0 10px var(--neon-red);
+    outline: none;
+}
+
+/* Tables */
+table {
+    border: 1px solid var(--neon-red) !important;
+    color: var(--neon-red) !important;
+}
+
+th,
+td {
+    border-color: var(--neon-red-dim) !important;
+    background-color: transparent !important;
+}
+
+th {
+    font-family: var(--font-heading);
+    text-shadow: 0 0 5px var(--neon-red);
+}
+
+/* Images/Canvas Borders */
+img,
+canvas {
+    border: 2px solid var(--neon-red) !important;
+    box-shadow: 0 0 15px var(--neon-red-dim);
+    filter: drop-shadow(0 0 5px var(--neon-red));
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: #000;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--neon-red);
+    border: 1px solid #000;
+}
+
+/* Custom Utilities */
+.text-neon {
+    color: var(--neon-red);
+    text-shadow: var(--neon-red-glow);
+}
+
+.border-tech {
+    border: 1px solid var(--neon-red);
+    position: relative;
+}
+
+.border-tech::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    width: 10px;
+    height: 10px;
+    border-top: 2px solid var(--neon-red);
+    border-left: 2px solid var(--neon-red);
+}
+
+.border-tech::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
+    border-bottom: 2px solid var(--neon-red);
+    border-right: 2px solid var(--neon-red);
+}
+
+hr {
+    border-color: var(--neon-red);
+    opacity: 0.5;
+}

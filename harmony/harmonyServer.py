@@ -4,7 +4,7 @@ import base64
 import argparse
 import json
 from io import BytesIO
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Callable
 from functools import wraps
 import threading
@@ -17,7 +17,7 @@ import cv2
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
-from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for
+from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for, jsonify
 
 from observer import HexGridConfiguration, HexCaptureConfiguration
 from observer.configurator import configurator, setConfiguratorApp
@@ -114,39 +114,7 @@ def genCameraWithChangesView(camName, viewId=None):
     camName = str(camName)
     cam = app.cc.cameras[camName]
     while True:
-        if app.cm.lastChanges is not None and not app.cm.lastChanges.empty:
-            print("Has changes")
-        if app.cm.lastClassification is not None:
-            print("Has class")
-        orig = cam.cropToActiveZone(cam.mostRecentFrame.copy())
-        camImage = orig.copy()
-        # Paint known objects blue
-        for memObj in app.cm.memory:
-            if memObj.changeSet[camName].changeType not in ['delete', None]:
-                memContour = np.array([memObj.changeSet[camName].changePoints], dtype=np.int32)
-                camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
-        # Paint last changes red
-        if app.cm.lastChanges is not None and not app.cm.lastChanges.empty:
-            lastChange = app.cm.lastChanges.changeSet[camName]
-            if lastChange is not None and lastChange.changeType not in ['delete', None]:
-                lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
-                camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
-        # Paint classification green
-        if app.cm.lastClassification is not None and not app.cm.lastClassification.empty:
-            lastClass = app.cm.lastClassification.changeSet[camName]
-            if lastClass is not None and lastClass.changeType not in ['delete', None]:
-                lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
-                camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
-
-        # Paint Selected Cell
-        if viewId and viewId in SELECTED_CELLS and SELECTED_CELLS[viewId]:
-            cell_poly = app.cc.cam_hex_at_axial(camName, *SELECTED_CELLS[viewId].firstCell)
-            cv2.fillPoly(camImage, [cell_poly], (0, 255, 0))
-            if SELECTED_CELLS[viewId].secondCell:
-                cell_poly = app.cc.cam_hex_at_axial(camName, *SELECTED_CELLS[viewId].secondCell)
-                cv2.fillPoly(camImage, [cell_poly], (255, 165, 0))
-
-        camImage = cv2.addWeighted(orig, 0.6, camImage, 0.4, 0)
+        camImage = cam.cropToActiveZone(cam.mostRecentFrame.copy())
 
         grid = app.cc.cameraGriddle(camName)
         camImage = cam.cropToActiveZone(cv2.addWeighted(grid, 0.3, camImage, 1.0 - 0.3, 0.0))
@@ -161,6 +129,39 @@ def cameraViewWithChangesResponse(camName, viewId):
     if camName == "VirtualMap":
         return Response(minimapGenerator(viewId=viewId), mimetype='multipart/x-mixed-replace; boundary=frame')
     return Response(genCameraWithChangesView(camName, viewId=viewId), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@harmony.route('/canvas_data/<viewId>')
+def getCanvasData(viewId):
+    # Example structure - populate this from app.cm.memory
+    objects = {}
+    print(f"Hex: {app.cm.cc.hex}")
+    for obj in app.cm.memory:
+        objects[obj.oid] = {
+            "VirtualMap": [
+                (pt.tolist()[0][0], pt.tolist()[0][1])
+                for pt in app.cm.cc.hex_at_axial(*app.cm.cc.changeSetToAxialCoord(obj))],
+            **{
+                camName: [(pt[0], pt[1]) for pt in obj.changeSet[camName].changePoints]
+                for camName in app.cc.cameras.keys()}
+        }
+    
+    data = {
+        "objects": {
+            obj.oid: {"VirtualMap": [pt.tolist()[0] for pt in app.cm.cc.hex_at_axial(*app.cm.cc.changeSetToAxialCoord(obj))], **{
+                camName: obj.changeSet[camName].changePoints for camName in app.cc.cameras.keys()
+            }} for obj in app.cm.memory
+        },
+        "moveable": ["M0"],
+        "selectable":  ["M0", "S0", "T0", "A0"],
+        "terrain": ["TO"],
+        "allies": ["A0"],
+        "enemies": ["E0"],
+        "viewId": viewId,
+        "selection": asdict(SELECTED_CELLS[viewId]) if viewId in SELECTED_CELLS else {},
+        "cameraName": "VirtualMap"
+    }
+    return jsonify(data)
 
 
 def fullCam(camName):
@@ -351,20 +352,6 @@ def updateObjectType(cap):
     return buildObjectSettings(cap, objType=newType)    
 
 
-@harmony.route('/objects/<objectId>/request_movement', methods=['POST'])
-@findObjectIdOr404
-def requestObjectMovement(cap):
-    global CONSOLE_OUTPUT
-    requestedLocation = [int(d) for d in json.loads(request.form["newLocation"])]
-    x, y, w, h = app.cm.cc.realSpaceBoundingBox()
-    with DATA_LOCK:
-        cap.newLocation = [requestedLocation[0] + x, requestedLocation[1] + y]
-        print(f"Requesting {cap.oid} move to {cap.newLocation}")
-        CONSOLE_OUTPUT = f"RQ-{cap.oid} move to {cap.newLocation}"
-        app.cm.expectObjectMovement(cap, cap.newLocation)
-    return getObjectTable()
-
-
 @harmony.route('/object_factory/<viewId>', methods=['GET'])
 def buildObjectFactory(viewId):
     selectedCell = SELECTED_CELLS[viewId].firstCell
@@ -545,14 +532,6 @@ def selectAdditionalPixel(viewId):
 def minimapGenerator(viewId=None):
     while True:
         camImage = app.cm.buildMiniMap()
-        if viewId and viewId in SELECTED_CELLS:
-            q, r = SELECTED_CELLS[viewId].firstCell
-            cell_poly = app.cc.hex_at_axial(q, r)
-            cv2.fillPoly(camImage, [cell_poly], (0, 255, 0))
-            if SELECTED_CELLS[viewId].secondCell:
-                q, r = SELECTED_CELLS[viewId].secondCell
-                cell_poly = app.cc.hex_at_axial(q, r)
-                cv2.fillPoly(camImage, [cell_poly], (255, 165, 0))
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
