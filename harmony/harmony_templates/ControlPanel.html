@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>Harmony Control Panel</title>
+    <link rel="stylesheet" href="/bootstrap.min.css">
+    <script src="/bootstrap.min.js"></script>
+    <style>
+        .table td,
+        .table th {
+            vertical-align: middle;
+            text-align: center;
+        }
+
+        .oid-col {
+            text-align: left !important;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container mt-4">
+        <h1>Control Panel</h1>
+        <h5>Session: <small class="text-muted">{{ viewId }}</small></h5>
+        <a href="/harmony/control" class="btn btn-secondary btn-sm mb-3">&larr; Back to Session List</a>
+        <a href="/harmony/canvas_data/{{ viewId }}" class="btn btn-info btn-sm mb-3" target="_blank">View JSON Data</a>
+
+        <div class="card">
+            <div class="card-header">
+                Object Configuration
+            </div>
+            <div class="card-body">
+                <form method="POST" action="/harmony/control/{{ viewId }}/update">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover table-bordered">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th class="oid-col">Object ID</th>
+                                    <th>Selectable</th>
+                                    <th>Terrain</th>
+                                    <th>Targetable</th>
+                                    <th>Enemies</th>
+                                    <th>Allies</th>
+                                    <th>Moveable</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for obj in objects %}
+                                <tr>
+                                    <td class="oid-col">{{ obj.oid }}</td>
+                                    <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_selectable"
+                                            {% if obj.oid in config.selectable %}checked{% endif %}></td>
+                                    <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_terrain" {%
+                                            if obj.oid in config.terrain %}checked{% endif %}></td>
+                                    <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_targetable"
+                                            {% if obj.oid in config.targetable %}checked{% endif %}></td>
+                                    <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_enemies" {%
+                                            if obj.oid in config.enemies %}checked{% endif %}></td>
+                                    <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_allies" {%
+                                            if obj.oid in config.allies %}checked{% endif %}></td>
+                                    <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_moveable" {%
+                                            if obj.oid in config.moveable %}checked{% endif %}></td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="7">No objects found in memory.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <input type="submit" class="btn btn-primary" value="Save Changes">
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>Harmony Sessions</title>
+    <link rel="stylesheet" href="/bootstrap.min.css">
+    <script src="/bootstrap.min.js"></script>
+</head>
+
+<body>
+    <div class="container mt-4">
+        <h1>Active Harmony Sessions</h1>
+        <p>Select a session to configure object tags.</p>
+        <ul class="list-group">
+            {% for sid in sessions %}
+            <li class="list-group-item">
+                <a href="/harmony/control/{{ sid }}">Session {{ sid }}</a>
+                <span class="badge bg-secondary float-end">Active</span>
+            </li>
+            {% else %}
+            <li class="list-group-item">No active sessions found. Open <a href="/harmony">Harmony</a> in a new tab to
+                start a session.</li>
+            {% endfor %}
+        </ul>
+        <div class="mt-3">
+            <a href="/harmony" class="btn btn-success" target="_blank">Open New Harmony Session</a>
+            <a href="/harmony/control" class="btn btn-secondary">Refresh List</a>
+        </div>
+    </div>
+</body>
+
+</html>
