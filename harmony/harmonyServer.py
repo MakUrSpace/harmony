@@ -507,11 +507,16 @@ def selectPixel():
                 <input type="button" class="btn btn-danger" value="Clear Selected Pixel" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
                 """)
     else:
+        additional_info = ""
+        if selected.additionalCells:
+            additional_info = f"<h3>Additional cells: {len(selected.additionalCells)}</h3>"
+
         if selected.secondCell:
             distance = current_app.cm.cc.axial_distance(selected.firstCell, selected.secondCell)
             distance = f"{distance} {'cell' if abs(distance) == 1 else 'cells'}"
             return interactor_template.format(info=f"""
                     <h2>Selected cell: {selected.firstCell}</h2>
+                    {additional_info}
                     <h3>Distance to {selected.secondCell}  --  {distance}</h3>
                 """,
                                                 actions=f"""

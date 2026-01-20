@@ -238,7 +238,7 @@
                                 if (data.selection.additionalCells) {
                                     data.selection.additionalCells.forEach(cell => {
                                         const poly = getPoly(cell);
-                                        if (poly) drawPoly(poly, scale, true, 255, 160, 0); // Orange for additional
+                                        if (poly) drawPoly(poly, scale, true, 255, 0, 255); // Magenta for additional
                                     });
                                 }
                                 if (data.selection.firstCell) {
@@ -427,7 +427,7 @@
             </div>
             <div class="row justify-content-center" align="center" style="min-width: 500px">
                 <div id="interactor" class="row"></div>
-                <hr>
+                <!-- <hr> removed -->
                 <div id="objectTable" class="row">
                     <div id="objectFilterRetriever" hx-get="{harmonyURL}objects" hx-trigger="every 1s"
                         hx-target="#objectFilterRetriever"></div>
