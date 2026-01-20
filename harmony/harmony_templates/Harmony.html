@@ -184,13 +184,15 @@
                             }
                         }
 
-                        function drawGroup(group, r, g, b) {
+                        function drawGroup(group, r, g, b, drawnSet) {
                             const scale = getScale();
                             group.forEach(name => {
+                                if (drawnSet && drawnSet.has(name)) return;
                                 if (data.objects[name]) {
                                     const poly = getPoly(data.objects[name]);
                                     if (!poly) return;
                                     drawPoly(poly, scale, true, r, g, b);
+                                    if (drawnSet) drawnSet.add(name);
                                 }
                             });
                         }
@@ -198,42 +200,52 @@
                         function draw() {
                             ctx.clearRect(0, 0, canvas.width, canvas.height);
                             const scale = getScale();
-                            
+                            const drawnSet = new Set();
+
                             // selectable (lowest priority, “neutral hint”): RGB(180, 190, 205)
-                            
+
                             // terrain (background structure, stone/metal vibe): RGB(120, 125, 135)
-                            
+
                             // targetable (actionable, “UI accent” cyan): RGB(0, 200, 255)
-                            
+
                             // enemies (danger, strong red): RGB(230, 60, 70)
-                            
+
                             // allies (safe/positive, strong green): RGB(0, 210, 120)
-                            
+
                             // moveable (interactive edit mode, vivid purple): RGB(170, 80, 255)
-                            
+
                             // selection (highest priority, unmistakable gold): RGB(255, 210, 70)
-                            
-                            if (data.selectable) {
-                                drawGroup(data.selectable, 180, 190, 205);
-                            }                            
-                            if (data.terrain) {
-                                drawGroup(data.terrain, 120, 125, 135);
-                            }
-                            if (data.targetable) {
-                                drawGroup(data.targetable, 0, 200, 255);
-                            }
-                            if (data.enemies) {
-                                drawGroup(data.enemies, 230, 60, 70);
+
+                            if (data.moveable) {
+                                drawGroup(data.moveable, 170, 80, 255, drawnSet);
                             }
                             if (data.allies) {
-                                drawGroup(data.allies, 0, 210, 120);
+                                drawGroup(data.allies, 0, 210, 120, drawnSet);
                             }
-                            if (data.moveable) {
-                                drawGroup(data.moveable, 170, 80, 255);
+                            if (data.enemies) {
+                                drawGroup(data.enemies, 230, 60, 70, drawnSet);
                             }
-                            // if (data.selection) {
-                            //     drawGroup(data.targetable, 230, 60, 70);
-                            // }
+                            if (data.targetable) {
+                                drawGroup(data.targetable, 0, 200, 255, drawnSet);
+                            }
+                            if (data.terrain) {
+                                drawGroup(data.terrain, 120, 125, 135, drawnSet);
+                            }
+                            if (data.selectable) {
+                                drawGroup(data.selectable, 180, 190, 205, drawnSet);
+                            }
+                            if (data.selection) {
+                                if (data.selection.additionalCells) {
+                                    data.selection.additionalCells.forEach(cell => {
+                                        const poly = getPoly(cell);
+                                        if (poly) drawPoly(poly, scale, true, 255, 160, 0); // Orange for additional
+                                    });
+                                }
+                                if (data.selection.firstCell) {
+                                    const poly = getPoly(data.selection.firstCell);
+                                    if (poly) drawPoly(poly, scale, true, 255, 210, 70); // Gold for first
+                                }
+                            }
                         }
 
                         canvas.onmousedown = function (e) {
@@ -447,6 +459,10 @@
                                 loadGameForm.requestSubmit()
                             }
                         </script>
+                    </div>
+                    <div class="col" align="center">
+                        <button class="btn btn-info" onclick=" window.open('{harmonyURL}control','_blank')">Session
+                            Control Panels</button>
                     </div>
                     <div class="col" align="right">
                         <input class="btn btn-danger" type="button" value="Reset Game" hx-get="{harmonyURL}reset">
