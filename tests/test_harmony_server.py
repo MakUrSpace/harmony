@@ -9,27 +9,28 @@ import os
 # Adjust path to include the parent directory so we can import 'harmony'
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Mock cv2 before importing harmonyServer
-sys.modules['cv2'] = mock.MagicMock()
-sys.modules['matplotlib'] = mock.MagicMock()
-sys.modules['matplotlib.backends'] = mock.MagicMock()
-sys.modules['matplotlib.backends.backend_agg'] = mock.MagicMock()
-sys.modules['matplotlib.figure'] = mock.MagicMock()
+# Mocking modules only for the import of harmonyServer
+with mock.patch.dict(sys.modules):
+    # Mock cv2 before importing harmonyServer
+    sys.modules['cv2'] = mock.MagicMock()
+    sys.modules['matplotlib'] = mock.MagicMock()
+    sys.modules['matplotlib.backends'] = mock.MagicMock()
+    sys.modules['matplotlib.backends.backend_agg'] = mock.MagicMock()
+    sys.modules['matplotlib.figure'] = mock.MagicMock()
 
-# Mock ipynb and observer
-sys.modules['ipynb'] = mock.MagicMock()
-sys.modules['ipynb.fs'] = mock.MagicMock()
-sys.modules['ipynb.fs.full'] = mock.MagicMock()
-sys.modules['ipynb.fs.full.HarmonyMachine'] = mock.MagicMock()
-sys.modules['ipynb.fs.full.Observer'] = mock.MagicMock()
-sys.modules['observer'] = mock.MagicMock()
-# Mock submodules referenced in harmonyServer imports
-sys.modules['observer.configurator'] = mock.MagicMock()
-sys.modules['observer.observerServer'] = mock.MagicMock()
-sys.modules['observer.calibrator'] = mock.MagicMock()
+    # Mock ipynb and observer
+    sys.modules['ipynb'] = mock.MagicMock()
+    sys.modules['ipynb.fs'] = mock.MagicMock()
+    sys.modules['ipynb.fs.full'] = mock.MagicMock()
+    sys.modules['ipynb.fs.full.HarmonyMachine'] = mock.MagicMock()
+    sys.modules['ipynb.fs.full.Observer'] = mock.MagicMock()
+    sys.modules['observer'] = mock.MagicMock()
+    # Mock submodules referenced in harmonyServer imports
+    sys.modules['observer.configurator'] = mock.MagicMock()
+    sys.modules['observer.observerServer'] = mock.MagicMock()
+    sys.modules['observer.calibrator'] = mock.MagicMock()
 
-
-from harmony import harmonyServer
+    from harmony import harmonyServer
 
 # Helper to mock generators
 def mock_gen(*args, **kwargs):
@@ -44,24 +45,14 @@ class TestHarmonyServer(unittest.TestCase):
         self.client = self.app.test_client()
         
         # Patch generators
+        # Patch generators
         self.patchers = [
-            mock.patch('harmony.harmonyServer.getConsoleImage', side_effect=mock_gen), # Changed from renderConsole to getConsoleImage which uses renderConsole internally? No, getConsoleImage calls renderConsole.
-            # Wait, let's check the file content again.
-            # Line 60: return Response(stream_with_context(renderConsole()), ...
-            # renderConsole is imported or defined?
-            # It's not defined in the snippet I saw. It must be imported?
-            # Line 58: @harmony.route('/harmony_console', methods=['GET'])
-            # Line 59: def getConsoleImage():
-            # Line 60:     return Response(stream_with_context(renderConsole()), ...
-            # I don't see renderConsole importation.
-            # Only: from observer import HexGridConfiguration...
-            # Maybe it's missing? Or I missed the import line.
-            
-            mock.patch('harmony.harmonyServer.renderConsole', side_effect=mock_gen, create=True), # Create=True just in case it's dynamically imported
-            mock.patch('harmony.harmonyServer.genCombinedCamerasView', side_effect=mock_gen),
-            mock.patch('harmony.harmonyServer.genCombinedCameraWithChangesView', side_effect=mock_gen),
-            mock.patch('harmony.harmonyServer.genCameraWithGrid', side_effect=mock_gen), # Also need to mock this as it uses cv2
-            mock.patch('harmony.harmonyServer.minimapGenerator', side_effect=mock_gen)
+            mock.patch.object(harmonyServer, 'getConsoleImage', side_effect=mock_gen),
+            mock.patch.object(harmonyServer, 'renderConsole', side_effect=mock_gen, create=True),
+            mock.patch.object(harmonyServer, 'genCombinedCamerasView', side_effect=mock_gen),
+            mock.patch.object(harmonyServer, 'genCombinedCameraWithChangesView', side_effect=mock_gen),
+            mock.patch.object(harmonyServer, 'genCameraWithGrid', side_effect=mock_gen),
+            mock.patch.object(harmonyServer, 'minimapGenerator', side_effect=mock_gen)
         ]
         for patcher in self.patchers:
             patcher.start()
@@ -203,7 +194,7 @@ class TestHarmonyServer(unittest.TestCase):
             # Use current_app.cm since we are in context
             self.app.cm.memory = [mock_c, mock_b, mock_a] 
             
-            with mock.patch('harmony.harmonyServer.captureToChangeRow') as mock_row:
+            with mock.patch.object(harmonyServer, 'captureToChangeRow') as mock_row:
                 mock_row.side_effect = lambda x, color=None: x.oid
                 output = harmonyServer.buildObjectTable(view_id)
             
@@ -248,10 +239,11 @@ class TestHarmonyServer(unittest.TestCase):
             mock_capture.oid = "ObjColor"
             
             # Mock custom_object_visual and object_visual
-            with mock.patch('harmony.harmonyServer.custom_object_visual') as mock_custom, \
+            # Mock custom_object_visual and object_visual
+            with mock.patch.object(harmonyServer, 'custom_object_visual') as mock_custom, \
                  mock.patch('harmony.harmonyServer.current_app.cm.object_visual') as mock_default, \
-                 mock.patch('harmony.harmonyServer.imageToBase64', return_value="fake_b64"), \
-                 mock.patch('harmony.harmonyServer.url_for', return_value="/fake_url"), \
+                 mock.patch.object(harmonyServer, 'imageToBase64', return_value="fake_b64"), \
+                 mock.patch.object(harmonyServer, 'url_for', return_value="/fake_url"), \
                  mock.patch('harmony.harmonyServer.current_app.cm.cc.trackedObjectLastDistance', return_value=10.0):
                 
                 # Call with color
