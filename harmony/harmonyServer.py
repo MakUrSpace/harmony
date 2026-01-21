@@ -41,6 +41,7 @@ try:
     observerDirectory = os.path.dirname(os.path.realpath(__file__))
     sys.path.insert(0, observerDirectory)
     from ipynb.fs.full.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
+    from ipynb.fs.full.Observer import hStackImages, clipImage
 finally:
     os.chdir(oldPath)
 
@@ -322,20 +323,12 @@ def update_session_id():
         return "Invalid Request", 400
         
     if new_id in SESSIONS:
-         return "Session ID already exists", 409
+        # Reclaiming session: redirect to new_id
+        return f"""<script>window.location.href = "{url_for('.buildHarmony')}?viewId={new_id}";</script>"""
 
     with DATA_LOCK:
         if old_id in SESSIONS:
             SESSIONS[new_id] = SESSIONS.pop(old_id)
-            # Must update the viewId inside the session config if it's stored there? 
-            # SessionConfig has 'selection' which has 'viewId' in CellSelection's init but it's not stored in SessionConfig directly.
-            # However CellSelection stores viewId? No, CellSelection definition:
-            # @dataclass
-            # class CellSelection:
-            #    firstCell: tuple | None = None
-            #    additionalCells: list[tuple] | None = None
-            # It doesn't seem to store viewId.
-            
             return f"""<script>window.location.href = "{url_for('.buildHarmony')}?viewId={new_id}";</script>"""
         else:
             return "Session not found", 404
@@ -379,35 +372,124 @@ def buildHarmony():
 
 
 
-def captureToChangeRow(capture):
-    name = "None"
-    objType = "None"
-    center = ", ".join(["0", "0"])
-    with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectRow.html") as f:
-        changeRowTemplate = f.read()
+
+# Colors in BGR format to match Harmony.html RGB definitions
+GROUP_COLORS = {
+    "moveable": (255, 80, 170),   # RGB(170, 80, 255) -> BGR
+    "allies": (120, 210, 0),      # RGB(0, 210, 120) -> BGR
+    "enemies": (70, 60, 230),     # RGB(230, 60, 70) -> BGR
+    "targetable": (255, 200, 0),  # RGB(0, 200, 255) -> BGR
+    "terrain": (135, 125, 120),   # RGB(120, 125, 135) -> BGR
+    "selectable": (205, 190, 180) # RGB(180, 190, 205) -> BGR
+}
+
+def custom_object_visual(cm, changeSet, color, margin=0):
+    cameras = cm.cc.cameras
+    if changeSet.empty:
+        return np.zeros([10, 10], dtype="float32")
+
+    images = {cam: change.after for cam, change in changeSet.changeSet.items() if change.changeType not in ["delete", None]}
+    
+    maxHeight =  max([im.shape[0] + margin * 2 for im in images.values()])
+    filler = np.zeros((maxHeight, 50, 3), np.uint8)
+
+    margins = [-margin, -margin, margin * 2, margin * 2]
+
+    for camName, change in changeSet.changeSet.items():
+        if change.changeType == "delete":
+            images[camName] = filler
+        else:
+            # Always with contours for this visual, but using custom color
+            images[camName] = clipImage(cv2.addWeighted(
+                    cameras[camName].mostRecentFrame.copy(),
+                    0.6,
+                    cv2.drawContours(
+                        cameras[camName].mostRecentFrame.copy(),
+                        change.changeContours, 
+                        -1,
+                        color, # Custom color here
+                        -1
+                    ),
+                    0.4,
+                    0
+                ),
+                [dim + m for dim, m in zip(change.clipBox, margins)]
+            )
+
+    return hStackImages(images.values())
+
+
+# Load the template once globally or pass it around if it's static
+with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectRow.html") as f:
+    _TRACKED_OBJECT_ROW_TEMPLATE = f.read()
+
+def captureToChangeRow(capture, color=None):
     moveDistance = current_app.cm.cc.trackedObjectLastDistance(capture)
     moveDistance = "None" if moveDistance is None else f"{moveDistance:6.0f}"
-    changeRow = changeRowTemplate.replace(
+    
+    if color is not None:
+        visual_image = custom_object_visual(current_app.cm, capture, color)
+    else:
+        visual_image = current_app.cm.object_visual(capture)
+
+    changeRow = _TRACKED_OBJECT_ROW_TEMPLATE.replace(
         "{objectName}", capture.oid).replace(
         "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in current_app.cm.cc.changeSetToAxialCoord(capture)])).replace(
         "{moveDistance}", moveDistance).replace(
         "{observerURL}", url_for(".buildHarmony")).replace(
-        "{encodedBA}", imageToBase64(current_app.cm.object_visual(capture)))
+        "{encodedBA}", imageToBase64(visual_image))
     return changeRow
     
 
-def buildObjectTable():
+def buildObjectTable(viewId=None):
     changeRows = []
-    print(f"Structure object table")
+    print(f"Structure object table for viewId: {viewId}")
+    
+    seen_oids = set()
+    
+    if viewId and viewId in SESSIONS:
+        session = SESSIONS[viewId]
+        # Priority order: moveable, allies, enemies, targetable, terrain, selectable
+        groups = [
+            ("moveable", session.moveable),
+            ("allies", session.allies),
+            ("enemies", session.enemies),
+            ("targetable", session.targetable),
+            ("terrain", session.terrain)
+        ]
+        
+        for group_name, oids in groups:
+            group_rows = []
+            color = GROUP_COLORS.get(group_name)
+            for oid in oids:
+                if oid not in seen_oids:
+                    # Find the object in memory
+                    for capture in current_app.cm.memory:
+                        if capture.oid == oid:
+                            group_rows.append(captureToChangeRow(capture, color))
+                            seen_oids.add(oid)
+                            break
+            if group_rows:
+                changeRows.append(f"<h4>{group_name.capitalize()}</h4>" + " ".join(group_rows))
+                            
+    # 'selectable' (all remaining objects)
+    selectable_rows = []
+    selectable_color = GROUP_COLORS.get("selectable")
     for capture in current_app.cm.memory:
-        print(f"Cap {capture.oid}")
-        changeRows.append(captureToChangeRow(capture))
+        if capture.oid not in seen_oids:
+            selectable_rows.append(captureToChangeRow(capture, selectable_color))
+            seen_oids.add(capture.oid)
+            
+    if selectable_rows:
+        changeRows.append(f"<h4>Selectable</h4>" + " ".join(selectable_rows))
+            
     return " ".join(changeRows)
 
 
 @harmony.route('/objects', methods=['GET'])
 def getObjectTable():
-    return buildObjectTable()
+    viewId = request.args.get('viewId')
+    return buildObjectTable(viewId)
 
 
 def getInteractor():

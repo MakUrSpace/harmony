@@ -100,13 +100,18 @@
           name = "harmony-ngrok";
           runtimeInputs = [ self'.packages.harmony ngrok tmux ];
           text = ''
-            # Starts a tmux session with 2 windows:
-            #   1. Python server
-            #   2. ngrok tunnel
+            # Starts a tmux session with 3 panes:
+            #   1. Python server (port 7000/7001)
+            #   2. ngrok tunnel for Harmony (7000)
+            #   3. ngrok tunnel for Admin (7001)
             
             SESSION_NAME="harmony"
             PORT="''${PORT:-7000}"
-            HARMONY_NGROK_URL="''${HARMONY_NGROK_URL:-harmony.ngrok.app}"
+            ADMIN_PORT="''${ADMIN_PORT:-7001}"
+            
+            # Arguments for URLs
+            HARMONY_URL="''${1:-harmony.ngrok.app}"
+            ADMIN_URL="''${2:-harmony-admin.ngrok.app}"
             
             # If the session already exists, just attach
             if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -116,17 +121,22 @@
             
             echo "Creating tmux session '$SESSION_NAME'..."
             
-            # Create new detached session
-            tmux new-session -d -s "$SESSION_NAME" -n "server" \
+            # Create new detached session with the server
+            tmux new-session -d -s "$SESSION_NAME" -n "harmony-stack" \
               "PYTHONUNBUFFERED=1 harmony; read"
             
-            # Second window: ngrok
-            echo "Starting session at https://$HARMONY_NGROK_URL"
-            tmux new-window -t "$SESSION_NAME" -n "ngrok" \
-              "ngrok http $PORT --url https://$HARMONY_NGROK_URL; read"
+            # Split for Harmony Ngrok (horizontal split)
+            tmux split-window -t "$SESSION_NAME:0" -h \
+              "echo 'Exposing Harmony on $HARMONY_URL -> $PORT'; ngrok http $PORT --domain=$HARMONY_URL; read"
             
-            # Show both windows
-            tmux select-window -t "$SESSION_NAME:0"
+            # Split for Admin Ngrok (vertical split of the new pane)
+            tmux split-window -t "$SESSION_NAME:0.1" -v \
+              "echo 'Exposing Admin on $ADMIN_URL -> $ADMIN_PORT'; ngrok http $ADMIN_PORT --domain=$ADMIN_URL; read"
+            
+            # Reorganize tiles
+            tmux select-layout -t "$SESSION_NAME:0" tiled
+            
+            # Attach
             tmux attach -t "$SESSION_NAME"
           '';
         };

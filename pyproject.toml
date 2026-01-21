@@ -15,5 +15,5 @@ include-package-data = true
 "observer" = ["**/*.ipynb", "**/*.html", "**/*.css", "**/*.js"]
 
 [project.scripts]
-harmony = "harmony.harmonyServer:main"
+harmony = "harmony.harmonyServer:start_servers"
 observer = "observer.observerServer:main"
