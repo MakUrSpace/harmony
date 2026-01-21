@@ -267,5 +267,34 @@ class TestHarmonyServer(unittest.TestCase):
                 mock_custom.assert_not_called()
                 mock_default.assert_called_once()
 
+    def test_session_cookie_logic(self):
+        """Test session ID persistence via cookies."""
+        # Case 1: No cookie, no param -> Should set cookie
+        response = self.client.get('/harmony/')
+        self.assertEqual(response.status_code, 200)
+        cookie = None
+        # Werkzeug 2.x/3.x cookie handling in test client
+        # response.headers['Set-Cookie'] might contain it
+        self.assertTrue(any('session_view_id=' in h[1] for h in response.headers if h[0] == 'Set-Cookie'))
+        
+        # Extract the set cookie value
+        cookie_header = [h[1] for h in response.headers if h[0] == 'Set-Cookie'][0]
+        # format: session_view_id=VALUE; Path=/
+        val = cookie_header.split(';')[0].split('=')[1]
+        
+        # Case 2: Send cookie -> Should maintain session
+        self.client.set_cookie('session_view_id', val)
+        response2 = self.client.get('/harmony/')
+        self.assertEqual(response2.status_code, 200)
+        # Verify the viewId in the page matches our cookie
+        self.assertIn(f"Session ID: {val}".encode(), response2.data)
+        
+        # Case 3: Send Param -> Should override cookie and update it
+        new_val = "OVERRIDE-SESSION"
+        response3 = self.client.get(f'/harmony/?viewId={new_val}')
+        self.assertEqual(response3.status_code, 200)
+        self.assertTrue(any(f'session_view_id={new_val}' in h[1] for h in response3.headers if h[0] == 'Set-Cookie'))
+        self.assertIn(f"Session ID: {new_val}".encode(), response3.data)
+
 if __name__ == '__main__':
     unittest.main()

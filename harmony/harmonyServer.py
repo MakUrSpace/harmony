@@ -351,9 +351,16 @@ def buildHarmony():
     # Check for existing session
     view_id = request.args.get('viewId')
     
+    # Priority: 1. Query Param, 2. Cookie
+    if not view_id:
+        view_id = request.cookies.get('session_view_id')
+
     if view_id and view_id in SESSIONS:
         # Resume session
         pass
+    elif view_id:
+        # Register requested session (Deep link / param override calling for new session)
+        SESSIONS[view_id] = SessionConfig()
     else:
         # Register new session
         # Ensure uniqueness
@@ -363,12 +370,19 @@ def buildHarmony():
                 break
         SESSIONS[view_id] = SessionConfig()
     
-    return template.replace(
+    rendered = template.replace(
         "{viewId}", view_id).replace(
         "{defaultCamera}", defaultCam).replace(
         "{cameraButtons}", cameraButtons).replace(
         "{harmonyURL}", url_for('.buildHarmony')).replace(
         "{configuratorURL}", '/configurator')
+        
+    resp = make_response(rendered)
+    cookie_val = request.cookies.get('session_view_id')
+    if cookie_val != view_id:
+        resp.set_cookie('session_view_id', view_id)
+        
+    return resp
 
 
 
