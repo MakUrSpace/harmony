@@ -110,8 +110,8 @@
             ADMIN_PORT="''${ADMIN_PORT:-7001}"
             
             # Arguments for URLs
-            HARMONY_URL="''${1:-harmony.ngrok.app}"
-            ADMIN_URL="''${2:-harmony-admin.ngrok.app}"
+            HARMONY_URL="''${1:-harmony-admin.ngrok.app}"
+            ADMIN_URL="''${2:-harmony.ngrok.app}"
             
             # If the session already exists, just attach
             if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
