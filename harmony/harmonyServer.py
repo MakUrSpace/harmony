@@ -682,10 +682,8 @@ def selectPixel():
         if existing.firstCell:
             if existing.secondCell is None:
                 SESSIONS[viewId].selection.additionalCells = [axial_coord]
-            elif appendPixel:
+            elif appendPixel and axial_coord not in SESSIONS[viewId].selection.additionalCells:
                 SESSIONS[viewId].selection.additionalCells.insert(0, axial_coord)
-            else:
-                SESSIONS[viewId].selection = CellSelection(viewId, axial_coord)
         else:
             SESSIONS[viewId].selection = CellSelection(firstCell=axial_coord)
     q, r = axial_coord
