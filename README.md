@@ -12,9 +12,11 @@ Harmony's primary dependency is nix which manages packaging and running Harmony.
 
 ### Cameras
 
-Recommended Camera: [SV3C 5MP WiFi Outdoor Pan-Tilt-Zoom Camera](https://www.amazon.com/SV3C-Tracking-Floodlight-Detection-Waterproof/dp/B09V15K1JC/ref=sr_1_6)
+Harmony relies on video streams from IP Cameras using either a GET request or RTSP stream. The [SV3C 5MP WiFi Outdoor Pan-Tilt-Zoom Camera](https://www.amazon.com/SV3C-Tracking-Floodlight-Detection-Waterproof/dp/B09V15K1JC/ref=sr_1_6) is a recommended camera for its image quality and network interface. Before using Harmony, you will need to install and configure your IP cameras. If using an SV3C camera, this is done with the [CamHiPro app](https://play.google.com/store/apps/details).
 
-### Execute Harmony
+Once installed and configured, note your camera's IP address and authentication information. This will be entered into Harmony's configuration form later. If using CamHipro, a camera's IP address can be found in the camera's settings menu under `Device Information`.
+
+### Run Harmony
 
 `nix run --impure "github:makurspace/harmony#harmony" --refresh`
 
