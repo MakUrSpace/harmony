@@ -65,7 +65,7 @@ def genCombinedCamerasView():
             camImages.append(camImage)
         camImage = vStackImages(camImages)
         camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
-        ret, camImage = cv2.imencode('.jpg', camImage)
+        ret, camImage = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 
@@ -101,8 +101,8 @@ def genCameraWithChangesView(camName):
             if lastClass is not None and lastClass.changeType not in ['delete', None]:
                 lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
                 camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
-        camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
-        ret, camImage = cv2.imencode('.jpg', camImage)
+        camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_LINEAR)
+        ret, camImage = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 
@@ -158,7 +158,7 @@ def genCombinedCameraWithChangesView():
             camImages.append(camImage)
         camImage = vStackImages(camImages)
         camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
-        ret, camImage = cv2.imencode('.jpg', camImage)
+        ret, camImage = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
 

@@ -10,6 +10,10 @@ Harmony's primary dependency is nix which manages packaging and running Harmony.
 1. Install Nix: `sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon`
 1. Add to `/etc/nix/nix.conf`: `experimental-features = flakes nix-command`
 
+### Cameras
+
+Recommended Camera: [SV3C 5MP WiFi Outdoor Pan-Tilt-Zoom Camera](https://www.amazon.com/SV3C-Tracking-Floodlight-Detection-Waterproof/dp/B09V15K1JC/ref=sr_1_6)
+
 ### Execute Harmony
 
 `nix run --impure "github:makurspace/harmony#harmony" --refresh`

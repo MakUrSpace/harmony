@@ -32,6 +32,7 @@ def app():
         # Expected scale: x=19.2, y=5.4
         mock_frame = np.zeros((200, 100, 3), dtype=np.uint8) 
         mock_cam.mostRecentFrame = mock_frame
+        mock_cam.activeZoneBoundingBox = (0, 0, 100, 200) # x, y, w, h
         
         app.cc.cameras = {'Camera 1': mock_cam}
         

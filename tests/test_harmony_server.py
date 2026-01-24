@@ -51,11 +51,15 @@ class TestHarmonyServer(unittest.TestCase):
             mock.patch.object(harmonyServer, 'renderConsole', side_effect=mock_gen, create=True),
             mock.patch.object(harmonyServer, 'genCombinedCamerasView', side_effect=mock_gen),
             mock.patch.object(harmonyServer, 'genCombinedCameraWithChangesView', side_effect=mock_gen),
-            mock.patch.object(harmonyServer, 'genCameraWithGrid', side_effect=mock_gen),
-            mock.patch.object(harmonyServer, 'minimapGenerator', side_effect=mock_gen)
+            mock.patch.object(harmonyServer, 'get_broadcaster')
         ]
         for patcher in self.patchers:
-            patcher.start()
+            mock_obj = patcher.start()
+            if patcher.attribute == 'get_broadcaster':
+                # Mock broadcaster instance
+                mock_broadcaster = mock.MagicMock()
+                mock_broadcaster.subscribe.side_effect = mock_gen
+                mock_obj.return_value = mock_broadcaster
 
     def tearDown(self):
         for patcher in self.patchers:

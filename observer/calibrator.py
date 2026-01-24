@@ -9,7 +9,7 @@ import argparse
 import json
 from io import BytesIO
 
-from ipynb.fs.full.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver, CalibratedObserver
+from ipynb.fs.full.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver, CalibratedObserver, Camera, cv2, CameraChange
 
 import threading
 import atexit
@@ -18,7 +18,9 @@ from traceback import format_exc
 
 
 CONSOLE_OUTPUT = "No Output Yet"
+CONSOLE_OUTPUT = "No Output Yet"
 POOL_TIME = 0.01 #Seconds
+ENABLE_CYCLE = True
 ENABLE_CYCLE = True
 DATA_LOCK = threading.Lock()
 
@@ -44,7 +46,17 @@ def registerCaptureService(app):
                     print(f"Unrecognized error: {e}")
                     CONSOLE_OUTPUT = e
         # Set the next timeout to happen
-        captureTimer = threading.Timer(POOL_TIME, cycleMachine, ())
+        
+        # Dynamic POOL_TIME based on Machine Type
+        # Calibrator needs slow cycles (1s), others need fast cycles (0.01s)
+        next_pool_time = 0.01
+        try:
+            if isinstance(app.cm, CalibrationObserver):
+                next_pool_time = 1.0
+        except Exception:
+            pass
+            
+        captureTimer = threading.Timer(next_pool_time, cycleMachine, ())
         captureTimer.start()
 
     def initialize():

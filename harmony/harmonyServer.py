@@ -1,5 +1,3 @@
-
-
 from math import ceil
 import base64
 import argparse
@@ -32,7 +30,6 @@ from observer.observerServer import observer, configurator, registerCaptureServi
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
 
 
-
 import sys
 import os
 
@@ -41,7 +38,7 @@ try:
     observerDirectory = os.path.dirname(os.path.realpath(__file__))
     sys.path.insert(0, observerDirectory)
     from ipynb.fs.full.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
-    from ipynb.fs.full.Observer import hStackImages, clipImage
+    from ipynb.fs.full.Observer import hStackImages, clipImage, Camera
 finally:
     os.chdir(oldPath)
 
@@ -49,7 +46,8 @@ finally:
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
 
 
-perspective_res = [1920, 1080]
+perspective_res = (1920, 1080)
+virtual_map_res = (1200, 1200)
 
 
 def imageToBase64(img):
@@ -59,6 +57,135 @@ def imageToBase64(img):
 @harmony.route('/harmony_console', methods=['GET'])
 def getConsoleImage():
     return Response(stream_with_context(renderConsole()), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+
+# ----------------------------------------------------------------------------------
+# Frame Broadcasting System
+# ----------------------------------------------------------------------------------
+
+BROADCASTERS = {}
+
+class FrameBroadcaster:
+    def __init__(self, key, render_func, fps=15):
+        self.key = key
+        self.render_func = render_func
+        self.interval = 1.0 / fps
+        self.last_frame = None
+        self.lock = threading.Lock()
+        self.condition = threading.Condition(self.lock)
+        self.running = False
+        self.thread = None
+        self.clients = 0
+
+    def start(self):
+        with self.lock:
+            if not self.running:
+                self.running = True
+                self.thread = threading.Thread(target=self._run, daemon=True)
+                self.thread.start()
+                print(f"Broadcaster started for {self.key}")
+
+    def stop(self):
+        with self.lock:
+            self.running = False
+
+    def _run(self):
+        while self.running:
+            start_time = time.time()
+            try:
+                frame_bytes = self.render_func()
+                if frame_bytes:
+                    with self.lock:
+                        self.last_frame = frame_bytes
+                        self.condition.notify_all()
+            except Exception as e:
+                print(f"Error in broadcaster {self.key}: {e}")
+            
+            elapsed = time.time() - start_time
+            sleep_time = max(0, self.interval - elapsed)
+            time.sleep(sleep_time)
+
+    def subscribe(self):
+        """Yields frames to a client."""
+        # Send last frame immediately if available (Zero TTFF)
+        with self.lock:
+            self.clients += 1
+            if self.last_frame:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpg\r\n\r\n' + self.last_frame + b'\r\n')
+        
+        try:
+            while True:
+                with self.condition:
+                    self.condition.wait()
+                    if not self.running:
+                        break
+                    frame = self.last_frame
+                
+                if frame:
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpg\r\n\r\n' + frame + b'\r\n')
+        finally:
+            with self.lock:
+                self.clients -= 1
+
+
+def render_minimap(cm):
+    try:
+        if not cm:
+            print("render_minimap: cm is None")
+            return None
+            
+        camImage = cm.buildMiniMap()
+        
+        x, y, w, h = cm.cc.realSpaceBoundingBox()
+        x, y, w, h = int(x), int(y), int(w), int(h)
+        
+        if w > 0 and h > 0:
+            camImage = camImage[y:y+h, x:x+w]
+        
+        camImage = cv2.resize(camImage, virtual_map_res, interpolation=cv2.INTER_AREA)
+        ret, encoded = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+        return encoded.tobytes()
+    except Exception as e:
+        print(f"Minimap render error: {e}")
+        return None
+
+
+def render_camera(cc, camName):
+    try:
+        cam = cc.cameras.get(camName)
+        if not cam:
+            return None
+            
+        x, y, w, h = cam.activeZoneBoundingBox
+        
+        frame = cam.mostRecentFrame
+        if frame is None:
+            return None
+            
+        masked = cam.cropToActiveZone(frame.copy())
+        
+        grid = cc.cameraGriddle(camName)
+        if grid is not None:
+             masked = cam.cropToActiveZone(cv2.addWeighted(grid, 0.3, masked, 0.7, 0.0))
+             
+        cropped = masked[y:y+h, x:x+w]
+        camImage = cv2.resize(cropped, tuple(perspective_res), interpolation=cv2.INTER_LINEAR)
+
+        ret, encoded = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+        return encoded.tobytes()
+    except Exception as e:
+        print(f"Camera render error {camName}: {e}")
+        return None
+
+
+def get_broadcaster(key, render_func):
+    if key not in BROADCASTERS:
+        BROADCASTERS[key] = FrameBroadcaster(key, render_func)
+        BROADCASTERS[key].start()
+    return BROADCASTERS[key]
 
 
 def genCombinedCamerasView():
@@ -107,24 +234,15 @@ SESSIONS = {}
 APPS = []
 
 
-def genCameraWithGrid(camName):
-    camName = str(camName)
-    cam = current_app.cc.cameras[camName]
-    while True:
-        camImage = cam.cropToActiveZone(cam.mostRecentFrame.copy())
-        grid = current_app.cc.cameraGriddle(camName)
-        camImage = cam.cropToActiveZone(cv2.addWeighted(grid, 0.3, camImage, 1.0 - 0.3, 0.0))
-        camImage = cv2.resize(camImage, perspective_res, interpolation=cv2.INTER_AREA)
-        ret, camImage = cv2.imencode('.jpg', camImage)
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
-
-
 @harmony.route('/camWithChanges/<camName>/<viewId>')
 def cameraViewWithChangesResponse(camName, viewId):
     if camName == "VirtualMap":
-        return Response(stream_with_context(minimapGenerator()), mimetype='multipart/x-mixed-replace; boundary=frame')
-    return Response(stream_with_context(genCameraWithGrid(camName)), mimetype='multipart/x-mixed-replace; boundary=frame')
+        # Pass current_app.cm to lambda to creation, but cached one uses its own cm
+        broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(current_app.cm))
+    else:
+        broadcaster = get_broadcaster(camName, lambda: render_camera(current_app.cc, camName))
+        
+    return Response(stream_with_context(broadcaster.subscribe()), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 def safe_point(pt):
@@ -134,33 +252,91 @@ def safe_point(pt):
         return (p[0][0], p[0][1])
     return (p[0], p[1])
 
-def get_scale_factor(cam_name):
+def get_conversion_params(cam_name):
+    # Returns (scale_x, scale_y, offset_x, offset_y)
     try:
-        if cam_name == "VirtualMap":
-            return 1.0, 1.0
-        cam = current_app.cc.cameras.get(cam_name)
-        if cam is None or cam.mostRecentFrame is None:
-            return 1.0, 1.0
+        am_virtual_map = (cam_name == "VirtualMap")
         
-        h, w = cam.mostRecentFrame.shape[:2]
-        if w == 0 or h == 0:
-            return 1.0, 1.0
+        if am_virtual_map:
+            if current_app.cm and hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
+                rsbb = current_app.cm.cc.realSpaceBoundingBox()
+                min_x = rsbb[0]
+                min_y = rsbb[1]
+                w = rsbb[2]
+                h = rsbb[3]
+                
+                if w == 0 or h == 0:
+                    return 1.0, 1.0, min_x, min_y
+                
+                scale_x = virtual_map_res[0] / w
+                scale_y = virtual_map_res[1] / h
+                return scale_x, scale_y, min_x, min_y
+            else:
+                 return 1.0, 1.0, 0, 0
+        
+        cam = current_app.cc.cameras.get(cam_name)
+        if cam is None:
+            return 1.0, 1.0, 0, 0
             
-        # perspective_res is global [1920, 1080]
-        return perspective_res[0] / w, perspective_res[1] / h
-    except Exception:
-        return 1.0, 1.0
+        x, y, w, h = cam.activeZoneBoundingBox
+        if w == 0 or h == 0:
+            return 1.0, 1.0, 0, 0
+            
+        # Target resolution is 1920x1080 for physical cameras
+        scale_x = perspective_res[0] / w
+        scale_y = perspective_res[1] / h
+        return scale_x, scale_y, x, y
+        
+    except Exception as e:
+        print(f"Error in get_conversion_params: {e}")
+        return 1.0, 1.0, 0, 0
+
+def scale_point_new(pt, params):
+    sx, sy, ox, oy = params
+    return ((pt[0] - ox) * sx, (pt[1] - oy) * sy)
+
+def get_scale_factor(cam_name):
+    # Legacy wrapper if needed, but we should use get_conversion_params
+    sx, sy, _, _ = get_conversion_params(cam_name)
+    return sx, sy
 
 def scale_point(pt, scale):
     return (pt[0] * scale[0], pt[1] * scale[1])
 
 def axial_to_ui_object(q, r):
+    # For VirtualMap, we need to handle its offset.
+    # The buildMiniMap function (in Observer.ipynb) uses self.cc.realSpaceBoundingBox to crop.
+    # realSpaceBoundingBox is [min_x, min_y, max_x, max_y] (or w, h?)
+    # Let's check Observer.ipynb if we can... we can't easily see it right now.
+    # But usually bounding box is x, y, w, h or min/max.
+    # Assuming realSpaceBoundingBox is available on cc.
+    
+    if current_app.cm and hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
+        rsbb = current_app.cm.cc.realSpaceBoundingBox()
+        # rsbb is (min_x, min_y, w, h)
+        min_x = rsbb[0]
+        min_y = rsbb[1]
+        
+        raw_vm_points = current_app.cm.cc.hex_at_axial(q, r)
+        # Shift by min_x, min_y
+        scale_x, scale_y, _, _ = get_conversion_params("VirtualMap") # Get scale and offset from conversion params
+        vm_points = []
+        for raw_pt in raw_vm_points:
+            pt = safe_point(raw_pt)
+            # Offset then Scale
+            off_x = pt[0] - min_x
+            off_y = pt[1] - min_y
+            scaled_x = off_x * scale_x
+            scaled_y = off_y * scale_y
+            vm_points.append((scaled_x, scaled_y))
+        
+    else:
+        vm_points = [safe_point(pt) for pt in current_app.cm.cc.hex_at_axial(q, r)]
+
     return {
-        "VirtualMap": [
-            safe_point(pt)
-            for pt in current_app.cm.cc.hex_at_axial(q, r)],
+        "VirtualMap": vm_points,
         **{camName: [
-            scale_point(safe_point(pt), get_scale_factor(camName))
+            scale_point_new(safe_point(pt), get_conversion_params(camName))
             for pt in current_app.cm.cc.cam_hex_at_axial(camName, q, r)] for camName in current_app.cc.cameras.keys()}
     }
 
@@ -169,12 +345,33 @@ def axial_to_ui_object(q, r):
 def getCanvasData(viewId):
     objects = {}
     for obj in current_app.cm.memory:
+        vm_pts = []
+        if current_app.cm and hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
+            rsbb = current_app.cm.cc.realSpaceBoundingBox()
+            min_x = rsbb[0]
+            min_y = rsbb[1]
+            # changeSetToAxialCoord gives (q, r). hex_at_axial gives list of points.
+            q, r = current_app.cm.cc.changeSetToAxialCoord(obj)
+            raw_vm_pts = current_app.cm.cc.hex_at_axial(q, r)
+            # Use same scaling logic
+            scale_x, scale_y, _, _ = get_conversion_params("VirtualMap")
+            vm_points = []
+            for raw_pt in raw_vm_pts:
+                pt = safe_point(raw_pt)
+                off_x = pt[0] - min_x
+                off_y = pt[1] - min_y
+                scaled_x = off_x * scale_x
+                scaled_y = off_y * scale_y
+                vm_points.append((scaled_x, scaled_y))
+            vm_pts = vm_points
+        else:
+            q, r = current_app.cm.cc.changeSetToAxialCoord(obj)
+            vm_pts = [safe_point(pt) for pt in current_app.cm.cc.hex_at_axial(q, r)]
+
         objects[obj.oid] = {
-            "VirtualMap": [
-                safe_point(pt)
-                for pt in current_app.cm.cc.hex_at_axial(*current_app.cm.cc.changeSetToAxialCoord(obj))],
+            "VirtualMap": vm_pts,
             **{
-                camName: [scale_point((pt[0], pt[1]), get_scale_factor(camName)) for pt in obj.changeSet[camName].changePoints]
+                camName: [scale_point_new((pt[0], pt[1]), get_conversion_params(camName)) for pt in obj.changeSet[camName].changePoints]
                 for camName in current_app.cc.cameras.keys()}
         }
     
@@ -202,8 +399,8 @@ def genCombinedCameraWithChangesView():
                 print("Has class")
             camImages = current_app.cm.getCameraImagesWithChanges(current_app.cc.cameras.keys()).values()
             camImage = vStackImages(camImages)
-            camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
-            ret, camImage = cv2.imencode('.jpg', camImage)
+            camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_LINEAR)
+            ret, camImage = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
         time.sleep(0.1)
@@ -393,8 +590,8 @@ GROUP_COLORS = {
     "allies": (120, 210, 0),      # RGB(0, 210, 120) -> BGR
     "enemies": (70, 60, 230),     # RGB(230, 60, 70) -> BGR
     "targetable": (255, 200, 0),  # RGB(0, 200, 255) -> BGR
-    "terrain": (135, 125, 120),   # RGB(120, 125, 135) -> BGR
-    "selectable": (205, 190, 180) # RGB(180, 190, 205) -> BGR
+    "terrain": (30, 105, 210),    # RGB(210, 105, 30) -> BGR
+    "selectable": (180, 105, 255) # RGB(255, 105, 180) -> BGR
 }
 
 def custom_object_visual(cm, changeSet, color, margin=0):
@@ -673,9 +870,40 @@ def selectPixel():
     cam = request.form["selectedCamera"]
     appendPixel = bool(request.form["appendPixel"])
     if cam == "VirtualMap":
-        axial_coord = current_app.cm.cc.pixel_to_axial(x, y)
+        # Virtual Map Input Logic
+        # UI coordinates are offset by min_x, min_y.
+        # We need to map UI (0,0) back to Real (min_x, min_y).
+        # And apply reverse scaling.
+        real_x = x
+        real_y = y
+        if current_app.cm and hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
+            rsbb = current_app.cm.cc.realSpaceBoundingBox()
+            min_x = rsbb[0]
+            min_y = rsbb[1]
+            scale_x, scale_y, _, _ = get_conversion_params("VirtualMap")
+            
+            # UI = (Raw - Offset) * Scale
+            # (Raw - Offset) = UI / Scale
+            # Raw = (UI / Scale) + Offset
+            
+            real_x = (x / scale_x) + min_x
+            real_y = (y / scale_y) + min_y
+            
+        axial_coord = current_app.cm.cc.pixel_to_axial(real_x, real_y)
     else:
-        axial_coord = current_app.cm.cc.camCoordToAxial(cam, (x, y))
+        # Camera Input Logic
+        # Client sends coordinates in 1920x1080 of the Active Zone.
+        # We need to map back to full camera frame coordinates.
+        scale_x, scale_y, offset_x, offset_y = get_conversion_params(cam)
+        
+        # UI = (Raw - Offset) * Scale
+        # Raw - Offset = UI / Scale
+        # Raw = (UI / Scale) + Offset
+        
+        raw_x = (x / scale_x) + offset_x
+        raw_y = (y / scale_y) + offset_y
+        
+        axial_coord = current_app.cm.cc.camCoordToAxial(cam, (raw_x, raw_y))
     print(f"viewId {viewId} || Received: Pixel {pixel} on Cam {cam} || Translated to Axial: {axial_coord}")
     with DATA_LOCK:
         existing = SESSIONS.get(viewId, SessionConfig()).selection
@@ -688,81 +916,101 @@ def selectPixel():
             SESSIONS[viewId].selection = CellSelection(firstCell=axial_coord)
     q, r = axial_coord
 
-    overlaps = []
-    targets = []
     selected = SESSIONS[viewId].selection
-    for mem in current_app.cm.memory:
-        mem_axial = current_app.cm.cc.changeSetToAxialCoord(mem)
-        if mem_axial == selected.firstCell:
-            overlaps.append(mem)
-        if mem_axial == selected.secondCell:
-            targets.append(mem)
+    first = selected.firstCell
+    
+    if not first:
+        return ""
 
-    if overlaps:
-        overlap = overlaps[0]
-        if selected.secondCell:
-            distance = current_app.cm.cc.axial_distance(selected.firstCell, selected.secondCell)
-            distance = f"{distance} {'cell' if abs(distance) == 1 else 'cells'}"
-            return interactor_template.format(info=f"""
-                    <h2>Selected cell: {selected.firstCell}</h2>
-                    <h2>Object name: {overlap.oid}</h2>
-                    <h3>Distance to {selected.secondCell}  --  {distance}</h3>
-                """,
-                                                actions=f"""
-                    <input type="button" class="btn btn-info" value="Move Object" hx-get="{url_for(".buildHarmony")}request_move/{overlap.oid}/{viewId}" hx-target="#interactor">
-                    <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
-                """)
-        else:
-            return interactor_template.format(info=f"""
-                    <h2>Selected cell: {selected.firstCell}</h2>
-                    <h2>Object name: {overlap.oid}</h2>
-                """,
-                                                actions=f"""
-                <div id="object_factory">
-                    <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#object_factory">
-                </div>
-                <hr>
-                <input type="button" class="btn btn-danger" value="Clear Selected Pixel" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
-                """)
-    else:
-        # Check additional cells for objects
-        additional_info = ""
-        if selected.additionalCells:
-            count = len(selected.additionalCells)
-            additional_info += f"<h3>Additional cells: {count - 1}</h3>"
+    # Helper to resolve type from SESSIONS config
+    def get_object_type(oid, viewId):
+        session = SESSIONS.get(viewId)
+        if not session: return "Unknown"
+        
+        # Priority Order
+        if oid in session.moveable: return "Moveable"
+        if oid in session.allies: return "Ally"
+        if oid in session.enemies: return "Enemy"
+        if oid in session.targetable: return "Targetable"
+        if oid in session.terrain: return "Terrain"
+        
+        # Default fallback
+        return "Selectable"
+
+    # Helper to find object at cell
+    def find_object_at(cell):
+        for mem in current_app.cm.memory:
+            if current_app.cm.cc.changeSetToAxialCoord(mem) == cell:
+                return mem
+        return None
+
+    # Build info string
+    info_html = f"<h2>Selected First Cell: {first}</h2>"
+
+    first_obj = find_object_at(first)
+    if first_obj:
+        o_type = get_object_type(first_obj.oid, viewId)
+        info_html += f"<h3>Object: {first_obj.oid} <br><small>Type: {o_type}</small></h3>"
+        
+    # Additional cells
+    if selected.additionalCells:
+        info_html += "<hr><h3>Additional Selections:</h3>"
+        for i, cell in enumerate(selected.additionalCells):
+            if i > 0:
+                 info_html += "<hr style='margin: 10px 0; border-top: 1px dashed #ccc;'>"
+
+            dist = current_app.cm.cc.axial_distance(first, cell)
             
-            # Iterate through additional cells to find objects
-            for cell in selected.additionalCells:
-                cell_objects = []
-                for mem in current_app.cm.memory:
-                    mem_axial = current_app.cm.cc.changeSetToAxialCoord(mem)
-                    if mem_axial == cell:
-                        cell_objects.append(mem.oid)
-                
-                if cell_objects:
-                    additional_info += f"<div>Cell {cell}: Object(s) {', '.join(cell_objects)}</div>"
+            cell_obj = find_object_at(cell)
+            obj_str = ""
+            if cell_obj:
+                o_type = get_object_type(cell_obj.oid, viewId)
+                obj_str = f" <br>-> Object: {cell_obj.oid} ({o_type})"
+            
+            # Highlight most recent (index 0)
+            style = "border: 2px solid cyan; padding: 5px; margin: 2px;" if i == 0 else "padding: 5px; margin: 2px;"
+            label = "Latest Selection" if i == 0 else f"Selection {i+1}"
+            
+            info_html += f"<div style='{style}'><b>{label}: {cell}</b><br>Dist to First: {dist} cells{obj_str}</div>"
 
-        if selected.secondCell:
-            distance = current_app.cm.cc.axial_distance(selected.firstCell, selected.secondCell)
-            distance = f"{distance} {'cell' if abs(distance) == 1 else 'cells'}"
-            return interactor_template.format(info=f"""
-                    <h2>Selected cell: {selected.firstCell}</h2>
-                    {additional_info}
-                    <h3>Distance to {selected.secondCell}  --  {distance}</h3>
-                """,
-            actions=f"""
-                    <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
-                """)
+    # Actions
+    actions_html = ""
+    
+    if first_obj:
+        if selected.additionalCells:
+            # Move to latest selection
+            target = selected.additionalCells[0] 
+            
+            # Check permissions: Admin can always move, User only if Moveable
+            is_admin = current_app.config.get('HARMONY_TEMPLATE') == "Harmony.html"
+            session = SESSIONS.get(viewId)
+            is_moveable = session and first_obj.oid in session.moveable
+            
+            if is_admin or is_moveable:
+                actions_html += f"""
+                    <input type="button" class="btn btn-info" value="Move {first_obj.oid} Here" hx-get="{url_for(".buildHarmony")}request_move/{first_obj.oid}/{viewId}" hx-target="#interactor">
+                """
         else:
-            return interactor_template.format(info=f"""
-                    <h2>Selected cell: {selected.firstCell}</h2>
-                """,
-                                                actions=f"""
-                <div id="object_factory">
-                    <input type="button" class="btn btn-success" value="Define Object" hx-get="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#object_factory">
-                </div>
-                <input type="button" class="btn btn-danger" value="Clear Selected Pixel" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
-                """)
+             # Only allow Admin to delete (Harmony.html)
+             if current_app.config.get('HARMONY_TEMPLATE') == "Harmony.html":
+                 actions_html += f"""
+                    <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#interactor">
+                 """
+
+    else:
+        # If no object at first cell, allow defining one
+        actions_html += f"""
+            <div id="object_factory">
+                <input type="button" class="btn btn-success" value="Define Object" hx-get="{url_for(".buildHarmony")}object_factory/{viewId}" hx-target="#object_factory">
+            </div>
+        """
+        
+    actions_html += f"""
+        <hr>
+        <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="{url_for(".buildHarmony")}clear_pixel/{viewId}" hx-target="#interactor">
+    """
+
+    return interactor_template.format(info=info_html, actions=actions_html)
 
 
 @harmony.route('/select_additional_pixel/<viewId>', methods=['POST'])
@@ -770,17 +1018,10 @@ def selectAdditionalPixel(viewId):
     pass
 
 
-def minimapGenerator():
-    while True:
-        camImage = current_app.cm.buildMiniMap()
-        ret, camImage = cv2.imencode('.jpg', camImage)
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
-
-
 @harmony.route('/minimap/<viewId>')
 def minimapResponse(viewId):
-    return Response(stream_with_context(minimapGenerator()), mimetype='multipart/x-mixed-replace; boundary=frame')
+    broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(current_app.cm))
+    return Response(stream_with_context(broadcaster.subscribe()), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 @harmony.route('/control')
@@ -898,15 +1139,28 @@ def start_servers():
     cm = HarmonyMachine(cc)
     
     # Helper to create configured app sharing state
-    def make_app(template_name):
+    def make_app(template_name, register_capture=False):
         new_app = Flask(__name__)
+        new_app.secret_key = str(uuid4())
         new_app.config['HARMONY_TEMPLATE'] = template_name
-        new_app.cc = cc
-        new_app.cm = cm
         
+        if APPS:
+            new_app.cm = APPS[0].cm
+            new_app.cc = APPS[0].cc # Ensure cc is also shared if cm is
+        else:
+            # Use the shared state initialized in start_servers
+            new_app.cc = cc
+            new_app.cm = cm
+            
         # Register blueprints
-        new_app.register_blueprint(configurator, url_prefix='/configurator')
+        # Configurator blueprint should only be registered for the admin app
+        if register_capture: # Using register_capture as a proxy for admin app
+            new_app.register_blueprint(configurator, url_prefix='/configurator')
         new_app.register_blueprint(harmony, url_prefix='/harmony')
+        
+        # Register other blueprints if needed, but observer/calibrator logic might need app instance
+        # They are registered below in start_servers for the admin app mostly?
+        # No, make_app seems to be general.
         
         # Register routes
         @new_app.route('/')
@@ -936,19 +1190,77 @@ def start_servers():
             with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyTemplate.css", "r") as f:
                 css = f.read()
             return Response(css, mimetype="text/css")
+
+        @new_app.route('/HarmonyCanvas.js', methods=['GET'])
+        def getHarmonyCanvasJS():
+            with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyCanvas.js", "r") as f:
+                js = f.read()
+            return Response(js, mimetype="application/javascript")
             
-        registerCaptureService(new_app)
+        if register_capture:
+            registerCaptureService(new_app)
         APPS.append(new_app)
         return new_app
 
     # Create Apps
-    admin_app = make_app("Harmony.html")
-    user_app = make_app("HarmonyUser.html")
+    admin_app = make_app("Harmony.html", register_capture=True)
+    user_app = make_app("HarmonyUser.html", register_capture=False)
     
     app = admin_app # For legacy external usage if any
     
+    # Monkey Patch for RTSPCamera to ensure threads are started
+    try:
+        from ipynb.fs.full.Observer import RTSPCamera
+        
+        original_collectImage = RTSPCamera.collectImage
+        
+        def patched_collectImage(self, timeout_s=5):
+            # Ensure thread is started
+            if self._cap_thread is None or not self._cap_thread.is_alive():
+                print(f"Auto-starting capture thread for {self.camName}")
+                self.start_capture()
+                # Give it a moment to start
+                time.sleep(0.1)
+                
+            return original_collectImage(self, timeout_s)
+            
+        RTSPCamera.collectImage = patched_collectImage
+        print("Monkey Patched RTSPCamera.collectImage to auto-start threads")
+    except ImportError:
+        print("Could not import RTSPCamera for patching (might not be in use or import failed)")
+        pass
+
     setConfiguratorApp(admin_app) 
     setObserverApp(admin_app)
+    
+    # --- Monkey Patch for Calibrator App Sync ---
+    # Ensure Calibrator uses the correct app instance and updates all APPS on reset
+    try:
+        from observer.calibrator import CalibrationObserver
+        import observer.calibrator
+        
+        # Set the global app in calibrator module if not set via setCalibratorApp (which seems missing)
+        # Assuming we can just inject it.
+        observer.calibrator.app = admin_app 
+        
+        original_reset = observer.calibrator.resetCalibrationObserver
+        
+        def patched_reset():
+            with DATA_LOCK:
+                # Create new CM attached to the CC
+                new_cm = CalibrationObserver(admin_app.cc)
+                # Update all apps
+                for a in APPS:
+                    a.cm = new_cm
+                # Update global app in calibrator if needed
+                observer.calibrator.app.cm = new_cm
+            print("Monkey Patched Reset: Switched all apps to CalibrationObserver")
+
+        observer.calibrator.resetCalibrationObserver = patched_reset
+        
+    except ImportError:
+        print("Could not patch Calibrator Observer reset")
+    # --------------------------------------------
     
     # Launch User Server in Thread
     def run_user():
@@ -961,6 +1273,22 @@ def start_servers():
     
     # Launch Admin Server
     print("Launching Harmony Server on 7000")
+    
+    # Pre-warm Broadcasters
+    # We do this after creating the app and getting CC/CM
+    try:
+        # VirtualMap
+        get_broadcaster("VirtualMap", lambda: render_minimap(admin_app.cm))
+        
+        # Cameras
+        for camName in admin_app.cc.cameras.keys():
+            # Lambda capture issue: must bind camName
+            # Also bind cc to local variable in loop or just use admin_app.cc
+            get_broadcaster(camName, lambda c=camName: render_camera(admin_app.cc, c))
+            
+    except Exception as e:
+        print(f"Failed to start broadcasters: {e}")
+
     admin_app.run(host="0.0.0.0", port=7000, use_reloader=False)
 
 if __name__ == "__main__":

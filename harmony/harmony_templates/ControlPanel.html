@@ -51,7 +51,10 @@
                                 <tr>
                                     <td class="oid-col">{{ obj.oid }}</td>
                                     <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_selectable"
-                                            {% if obj.oid in config.selectable %}checked{% endif %}></td>
+                                            {% if obj.oid in config.selectable or (obj.oid not in config.terrain and
+                                            obj.oid not in config.targetable and obj.oid not in config.enemies and
+                                            obj.oid not in config.allies and obj.oid not in config.moveable) %}checked{%
+                                            endif %}></td>
                                     <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_terrain" {%
                                             if obj.oid in config.terrain %}checked{% endif %}></td>
                                     <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_targetable"
