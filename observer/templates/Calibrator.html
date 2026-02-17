@@ -27,7 +27,7 @@
         <div class="col" style="min-width: 40%">
             <div class="row justify-content-center">
                 <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
-                <img id="liveCam" class="img-responsive border border-primary bg-primary" src="{calibratorURL}/camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
+                <img id="liveCam" class="img-responsive border border-primary bg-primary" src="{calibratorURL}camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
             </div>
             <div class="row justify-content-center">
                 <script>
@@ -35,7 +35,7 @@
                         var header = document.querySelector("#liveCamHeader")
                         header.innerText = `Live Cameras (Selected ${camNum})`
                         var img = document.querySelector("#liveCam")
-                        img.src = `{calibratorURL}/camWithChanges/${camNum}`
+                        img.src = `{calibratorURL}camWithChanges/${camNum}`
                     }}
                 </script>
                 {cameraButtons}
@@ -50,7 +50,7 @@
                     <img class="img-fluid border border-primary" src="{calibratorURL}observer_console" style="border-radius: 50px;">
                 </div>
                 <div class="row">
-                    <input type="button" class="btn btn-success" name="commitbtn" id="commitbtn" value="Commit Calibration" hx-get="{calibratorURL}/commit_calibration">
+                    <input type="button" class="btn btn-success" name="commitbtn" id="commitbtn" value="Commit Calibration" hx-get="{calibratorURL}commit_calibration">
                 </div>
             </div>
         </div>
