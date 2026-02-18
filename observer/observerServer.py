@@ -14,8 +14,9 @@ import atexit
 from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for
 from traceback import format_exc
 
-from configurator import configurator, setConfiguratorApp
-from calibrator import calibrator, CalibratedObserver, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK
+# from configurator import configurator, setConfiguratorApp # Moved to configuratorServer.py
+from calibrator import calibrator, CalibratedObserver, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, setCalibratorApp
+from file_lock import FileLock
 
 app = None
 
@@ -40,7 +41,12 @@ def renderConsole():
 
         consoleImage = cv2.putText(zeros, f'Cycle {app.cm.cycleCounter}',
             (50, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'Mode: {app.cm.mode:7}',
+        mode = f'Mode: {app.cm.mode:7}'
+        # If it's CalibrationObserver, it might have dowel_position
+        if hasattr(app.cm, 'dowel_position') and app.cm.dowel_position:
+             mode += f'-{app.cm.dowel_position}'
+        
+        consoleImage = cv2.putText(zeros, mode,
             (50, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
         consoleImage = cv2.putText(zeros, f'Board State: {app.cm.state:10}',
             (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
@@ -350,13 +356,23 @@ def setObserverApp(newApp):
 
 
 def main():
+    lock = FileLock()
+    lock.acquire()
+
     app = Flask(__name__)
+    # Register shutdown hook
+    atexit.register(lock.release)
+    
     app.cc = CalibratedCaptureConfiguration()
     app.cc.capture()
     app.register_blueprint(observer, url_prefix='/observer')
-    app.register_blueprint(configurator, url_prefix='/configurator')
+    app.register_blueprint(calibrator, url_prefix='/calibrator')
+    # Configurator is now a separate app
+    # app.register_blueprint(configurator, url_prefix='/configurator')
     app.cm = CalibratedObserver(app.cc)
-    setConfiguratorApp(app)
+    
+    # setConfiguratorApp(app) # No longer needed in observer
+    setCalibratorApp(app)
 
     @app.route('/')
     def index():
@@ -382,7 +398,10 @@ def main():
     
     registerCaptureService(app)
     print(f"Launching Observer Server on {PORT}")
-    app.run(host="0.0.0.0", port=PORT)
+    try:
+        app.run(host="0.0.0.0", port=PORT)
+    finally:
+        lock.release()
 
 
 if __name__ == "__main__":

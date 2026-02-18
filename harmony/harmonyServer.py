@@ -25,8 +25,8 @@ from matplotlib.figure import Figure
 from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for, jsonify, current_app, stream_with_context
 
 from observer import HexGridConfiguration, HexCaptureConfiguration
-from observer.configurator import configurator, setConfiguratorApp
-from observer.observerServer import observer, configurator, registerCaptureService, setConfiguratorApp, setObserverApp
+# from observer.configurator import configurator, setConfiguratorApp # Removed
+from observer.observerServer import observer, registerCaptureService, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
 
 
@@ -1093,11 +1093,12 @@ def create_harmony_app(template_name="Harmony.html"):
         app.cc.hex = HexGridConfiguration()
     app.cc.capture()
     app.cm = HarmonyMachine(app.cc)
-    app.register_blueprint(configurator, url_prefix='/configurator')
+    app.cm = HarmonyMachine(app.cc)
+    # app.register_blueprint(configurator, url_prefix='/configurator') # Separated
     app.register_blueprint(harmony, url_prefix='/harmony')
     with app.app_context():
         resetHarmony()
-    setConfiguratorApp(app)
+    # setConfiguratorApp(app) # Separated
     setObserverApp(app)
     
     @app.route('/')
@@ -1154,8 +1155,8 @@ def start_servers():
             
         # Register blueprints
         # Configurator blueprint should only be registered for the admin app
-        if register_capture: # Using register_capture as a proxy for admin app
-            new_app.register_blueprint(configurator, url_prefix='/configurator')
+        # if register_capture: # Using register_capture as a proxy for admin app
+        #    new_app.register_blueprint(configurator, url_prefix='/configurator')
         new_app.register_blueprint(harmony, url_prefix='/harmony')
         
         # Register other blueprints if needed, but observer/calibrator logic might need app instance
@@ -1230,36 +1231,12 @@ def start_servers():
         print("Could not import RTSPCamera for patching (might not be in use or import failed)")
         pass
 
-    setConfiguratorApp(admin_app) 
+    # setConfiguratorApp(admin_app) # Separated
     setObserverApp(admin_app)
     
     # --- Monkey Patch for Calibrator App Sync ---
-    # Ensure Calibrator uses the correct app instance and updates all APPS on reset
-    try:
-        from observer.calibrator import CalibrationObserver
-        import observer.calibrator
-        
-        # Set the global app in calibrator module if not set via setCalibratorApp (which seems missing)
-        # Assuming we can just inject it.
-        observer.calibrator.app = admin_app 
-        
-        original_reset = observer.calibrator.resetCalibrationObserver
-        
-        def patched_reset():
-            with DATA_LOCK:
-                # Create new CM attached to the CC
-                new_cm = CalibrationObserver(admin_app.cc)
-                # Update all apps
-                for a in APPS:
-                    a.cm = new_cm
-                # Update global app in calibrator if needed
-                observer.calibrator.app.cm = new_cm
-            print("Monkey Patched Reset: Switched all apps to CalibrationObserver")
-
-        observer.calibrator.resetCalibrationObserver = patched_reset
-        
-    except ImportError:
-        print("Could not patch Calibrator Observer reset")
+    # Separated to configuratorServer.py, likely not needed here anymore or logic needs change if they ran together.
+    # But since they don't, we remove it.
     # --------------------------------------------
     
     # Launch User Server in Thread

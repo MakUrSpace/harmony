@@ -17,3 +17,4 @@ include-package-data = true
 [project.scripts]
 harmony = "harmony.harmonyServer:start_servers"
 observer = "observer.observerServer:main"
+configurator = "observer.configuratorServer:main"

@@ -340,7 +340,7 @@ if __name__ == "__main__":
     app.cc = CalibratedCaptureConfiguration()
     app.cc.capture()
     app.register_blueprint(calibrator, url_prefix='/calibrator')
-    app.cm = CalibrationObserver(cc)
+    app.cm = CalibrationObserver(app.cc)
 
     @app.route('/<page>')
     def getPage(page):
