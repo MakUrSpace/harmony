@@ -49,6 +49,11 @@ def app():
         # Mock changeSetToAxialCoord for VirtualMap
         app.cm.cc.changeSetToAxialCoord.return_value = (0, 0)
         
+        # Mock realSpaceBoundingBox
+        app.cm.cc.realSpaceBoundingBox.return_value = (0, 0, 800, 800)
+        app.cm.cc.hex.width = 1600
+        app.cm.cc.hex.height = 1600
+        
         app.cm.memory = [mock_obj]
         
         yield app
@@ -101,6 +106,36 @@ def test_get_canvas_data_scaling(client, app):
     # Currently it returns raw coordinates (10, 10)
     
     print(f"Received: ({x}, {y}), Expected: ({expected_x}, {expected_y})")
+    
+    assert abs(x - expected_x) < 0.1
+    assert abs(y - expected_y) < 0.1
+
+def test_virtualmap_crop_scaling(client, app):
+    """
+    Test that getCanvasData scales and offsets VirtualMap coordinates 
+    correctly when cropped with a 150px margin.
+    """
+    from harmonyServer import SESSIONS, SessionConfig
+    SESSIONS['test_view'] = SessionConfig()
+    
+    app.cm.cc.realSpaceBoundingBox.return_value = (500, 500, 800, 800)
+    
+    # We mock objectToHull to return a point at (500, 500)
+    app.cm.cc.objectToHull.return_value = np.array([[[500, 500]]], dtype=np.float32)
+    
+    response = client.get('/harmony/canvas_data/test_view')
+    assert response.status_code == 200
+    
+    data = response.get_json()
+    assert 'TestObject' in data['objects']
+    assert 'VirtualMap' in data['objects']['TestObject']
+    
+    pts = data['objects']['TestObject']['VirtualMap']
+    x, y = pts[0]
+    
+    # Logic: Offset = 500 - 150 = 350. Scale = 1200 / (800 + 300) = 1.090909
+    expected_x = (500 - 350) * (1200 / 1100)
+    expected_y = (500 - 350) * (1200 / 1100)
     
     assert abs(x - expected_x) < 0.1
     assert abs(y - expected_y) < 0.1

@@ -512,9 +512,27 @@ def render_minimap(cm):
         x, y, w, h = cm.cc.realSpaceBoundingBox()
         x, y, w, h = int(x), int(y), int(w), int(h)
         
-        if w > 0 and h > 0:
-            # camImage = camImage[y:y+h, x:x+w]
-            pass
+        shift_x = 0
+        shift_y = 0
+        if x < 0: shift_x = -x
+        if y < 0: shift_y = -y
+
+        map_x = x + shift_x
+        map_y = y + shift_y
+        
+        margin = 150
+        
+        crop_x = max(0, map_x - margin)
+        crop_y = max(0, map_y - margin)
+        
+        crop_w = w + margin * 2
+        crop_h = h + margin * 2
+        
+        if crop_w > 0 and crop_h > 0:
+            img_h, img_w = camImage.shape[:2]
+            end_x = min(img_w, crop_x + crop_w)
+            end_y = min(img_h, crop_y + crop_h)
+            camImage = camImage[crop_y:end_y, crop_x:end_x]
         
         camImage = cv2.resize(camImage, virtual_map_res, interpolation=cv2.INTER_AREA)
         ret, encoded = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
@@ -640,17 +658,6 @@ def get_conversion_params(cam_name):
         am_virtual_map = (cam_name == "VirtualMap")
         
         if am_virtual_map:
-
-            # Always use Full Canvas metrics for VirtualMap scaling/offset
-            # Since render_minimap is no longer cropping to active zone, 
-            # we treat the Viewport as the Full Canvas (0,0, W, H).
-            w, h = 1600, 1600
-            if hasattr(current_app.cm.cc, 'hex') and current_app.cm.cc.hex:
-                w = current_app.cm.cc.hex.width
-                h = current_app.cm.cc.hex.height
-
-            # FIX: Auto-expand to fit RealSpaceBoundingBox if available
-            # This must match patched_buildMiniMap logic
             try:
                 if hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
                     bx, by, bw, bh = current_app.cm.cc.realSpaceBoundingBox()
@@ -660,26 +667,51 @@ def get_conversion_params(cam_name):
                     if bx < 0: shift_x = -bx
                     if by < 0: shift_y = -by
                         
+                    map_x = int(bx) + shift_x
+                    map_y = int(by) + shift_y
+                    
+                    margin = 150
+                    crop_x = max(0, map_x - margin)
+                    crop_y = max(0, map_y - margin)
+                    
+                    crop_w = int(bw) + margin * 2
+                    crop_h = int(bh) + margin * 2
+                    
                     req_w = int(bx + bw + shift_x)
                     req_h = int(by + bh + shift_y)
                     
-                    w = max(w, req_w)
-                    h = max(h, req_h)
+                    w_canvas = 1600
+                    h_canvas = 1600
+                    if hasattr(current_app.cm.cc, 'hex') and current_app.cm.cc.hex:
+                        w_canvas = current_app.cm.cc.hex.width
+                        h_canvas = current_app.cm.cc.hex.height
+                        
+                    img_w = max(w_canvas, req_w)
+                    img_h = max(h_canvas, req_h)
+                    
+                    end_x = min(img_w, crop_x + crop_w)
+                    end_y = min(img_h, crop_y + crop_h)
+                    
+                    crop_w_actual = end_x - crop_x
+                    crop_h_actual = end_y - crop_y
+                    
+                    if crop_w_actual <= 0 or crop_h_actual <= 0:
+                        return 1.0, 1.0, 0, 0
+                        
+                    scale_x = virtual_map_res[0] / crop_w_actual
+                    scale_y = virtual_map_res[1] / crop_h_actual
+                    
+                    min_x = crop_x - shift_x
+                    min_y = crop_y - shift_y
+                    
+                    return scale_x, scale_y, min_x, min_y
+                    
             except Exception as e:
                 print(f"Error in get_conversion_params expansion: {e}")
             
-            # Offset is 0,0 because we are showing the full canvas starting at 0,0
-            min_x, min_y = 0, 0
-            
-            # Scale maps Full Canvas -> Virtual Map Resolution (1200x1200)
-            if w == 0 or h == 0:
-                 return 1.0, 1.0, 0, 0
-            
-            scale_x = virtual_map_res[0] / w
-            scale_y = virtual_map_res[1] / h
-            return scale_x, scale_y, min_x, min_y
+            # Fallback
+            return 1.0, 1.0, 0, 0
 
-        
         cam = current_app.cc.cameras.get(cam_name)
         if cam is None:
             return 1.0, 1.0, 0, 0
@@ -1272,17 +1304,14 @@ def selectPixel():
         real_x = x
         real_y = y
         if current_app.cm and hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
-            rsbb = current_app.cm.cc.realSpaceBoundingBox()
-            min_x = rsbb[0]
-            min_y = rsbb[1]
-            scale_x, scale_y, _, _ = get_conversion_params("VirtualMap")
+            scale_x, scale_y, min_x, min_y = get_conversion_params("VirtualMap")
             
             # UI = (Raw - Offset) * Scale
             # (Raw - Offset) = UI / Scale
             # Raw = (UI / Scale) + Offset
-            
-            real_x = (x / scale_x) + min_x
-            real_y = (y / scale_y) + min_y
+            if scale_x > 0 and scale_y > 0:
+                real_x = (x / scale_x) + min_x
+                real_y = (y / scale_y) + min_y
             
         axial_coord = current_app.cm.cc.pixel_to_axial(real_x, real_y)
     else:
