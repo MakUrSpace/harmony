@@ -66,4 +66,5 @@ def test_calibrator_endpoint(configurator_client):
     # So yes, /configurator/calibrator/
     
     response = configurator_client.get('/configurator/calibrator/')
-    assert response.status_code == 200
+    # Route is deprecated/removed in favor of integrated Configurator UI
+    assert response.status_code == 404

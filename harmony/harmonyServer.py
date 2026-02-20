@@ -42,6 +42,376 @@ try:
 finally:
     os.chdir(oldPath)
 
+# --- Monkey Patch for Dynamic Grid (Fixes Clipping) ---
+# HexCaptureConfiguration is already imported from observer above
+# from observer.dynamic_grid import draw_dynamic_grid_overlay, patched_cameraGriddle # Removed due to build issue
+import math
+
+def draw_dynamic_grid_overlay(self, cam):
+    """
+    Draws the hex grid dynamically based on the camera's FOV in real space.
+    Prevents clipping issues caused by fixed-size minimaps.
+    Monkey-patched into HexCaptureConfiguration.
+    """
+    if self.rsc is None:
+         print(f"DynamicGrid: RSC is None for {cam}")
+         return None
+
+    # Get camera frame size
+    if cam not in self.cameras:
+        print(f"DynamicGrid: Camera {cam} not found")
+        return None
+
+        
+    height, width = self.cameras[cam].mostRecentFrame.shape[:2]
+    overlay = np.zeros((height, width, 3), dtype=np.uint8)
+    
+    # Get converter for this camera
+    if str(cam) not in self.rsc.converters:
+        return None
+        
+    converter = self.rsc.converters[str(cam)][0]
+    
+    # Define 4 corners of the camera frame
+    corners_cam = [(0, 0), (width, 0), (width, height), (0, height)]
+    
+    # Project to Real Space
+    corners_real = []
+    for p in corners_cam:
+        try:
+            rp = converter.convertCameraToRealSpace(p)
+            corners_real.append(rp)
+        except Exception:
+            continue
+            
+    if not corners_real:
+        return None
+
+    # Convert to Axial to find range
+    qs = []
+    rs = []
+    for cr in corners_real:
+        q, r = self.pixel_to_axial(cr[0], cr[1])
+        qs.append(q)
+        rs.append(r)
+        
+    min_q, max_q = min(qs), max(qs)
+    min_r, max_r = min(rs), max(rs)
+    
+    # Add padding to ensure smooth edges
+    pad = 2
+    grid_color = (255, 255, 255)
+    
+    # Iterate Q, R within bounds
+    poly_count = 0
+    for q in range(min_q - pad, max_q + pad + 1):
+        for r in range(min_r - pad, max_r + pad + 1):
+            try:
+                # Use class method to get camera polygon for this hex
+                # cam_hex_at_axial(self, cam, q, r)
+                # This method maps real space hex (q,r) back to camera space using convertRealToCameraSpace
+                poly_cam = self.cam_hex_at_axial(cam, q, r)
+                
+                # Draw
+                cv2.polylines(overlay, [poly_cam], True, grid_color, 3, cv2.LINE_AA)
+                poly_count += 1
+            except Exception:
+                continue
+                
+    if poly_count == 0:
+        print(f"DynamicGrid: No polygons drawn for {cam}")
+    else:
+        print(f"DynamicGrid: Drawn {poly_count} polygons for {cam}")
+
+    return overlay
+
+def patched_cameraGriddle(self, cam, objectsAndColors=[]):
+    """
+    Monkey-patched replacement for cameraGriddle.
+    Uses dynamic grid generation when no objects are present.
+    """
+    height, width = self.cameras[cam].mostRecentFrame.shape[:2]
+
+    if self.rsc is None:
+         return np.zeros((height, width, 3), dtype="uint8")
+
+    # If no objects, use the dynamic grid for better quality/coverage
+    if not objectsAndColors:
+        # Call the injected method
+        if hasattr(self, 'draw_dynamic_grid_overlay'):
+             dynamic_grid = self.draw_dynamic_grid_overlay(cam)
+        else:
+             # Fallback if somehow not injected properly
+             dynamic_grid = draw_dynamic_grid_overlay(self, cam)
+             
+        if dynamic_grid is not None:
+            return dynamic_grid
+        # Fallback to legacy if dynamic failed
+    
+    # Legacy/Object path (clipped to 1200x1200mm usually)
+    # This path is still used if objects need to be drawn
+    try:
+        M = self.rsc.converters[cam][0].M
+        Minv = np.linalg.inv(M)
+
+        warped = cv2.warpPerspective(
+            self.buildMiniMap(objectsAndColors=objectsAndColors),
+            Minv,
+            (width, height),
+            flags=cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0),
+        )
+        return warped[:height, :width]
+    except Exception as e:
+        print(f"Error in legacy cameraGriddle: {e}")
+        return np.zeros((height, width, 3), dtype="uint8")
+
+def patched_objectToHull(self, obj):
+    """
+    Monkey-patched version of objectToHull to ensure consistent coordinate transformation
+    between Real Space (object positions) and Map Space (grid visualization).
+    """
+    all_points_real = []
+    
+    try:
+        # Iterate over camera views for this object
+        for cam_name, change in obj.changeSet.items():
+            if self.rsc is None:
+                continue
+                
+            # Skip cameras not in RSC
+            if cam_name not in self.rsc.converters:
+                continue
+                
+            converter = self.rsc.converters[cam_name][0]
+            
+            for contour in change.changeContours:
+                # contour is (N, 1, 2) or (N, 2)
+                for pt in contour:
+                    # Flatten info [x, y]
+                    if len(pt.shape) > 1:
+                        x, y = pt[0]
+                    else:
+                        x, y = pt
+                        
+                    # Convert Camera -> Real Space
+                    try:
+                        real_pt = converter.convertCameraToRealSpace((float(x), float(y)))
+                        all_points_real.append(real_pt)
+                    except Exception:
+                        continue
+                    
+        if not all_points_real:
+            return np.array([], dtype=np.int32)
+            
+        # Transform Real Space -> Map Pixel Space
+        pts_real = np.array(all_points_real, dtype=np.float32)
+        
+        if hasattr(self, 'apply_affine_pts'):
+            pts_map = self.apply_affine_pts(pts_real)
+        else:
+            print("Warning: apply_affine_pts missing in patched_objectToHull")
+            pts_map = pts_real 
+            
+        # Compute Convex Hull of mapped points
+        pts_map_i = np.round(pts_map).astype(np.int32)
+        hull = cv2.convexHull(pts_map_i)
+        
+        return hull
+        
+    except Exception as e:
+        print(f"Error in patched_objectToHull: {e}")
+        return np.array([], dtype=np.int32)
+
+def patched_buildMiniMap(self, objectsAndColors=[], hex_cfg=None):
+    """
+    Monkey-patched replacement for buildMiniMap.
+    Uses dynamic canvas size from HexGridConfiguration instead of hardcoded 1200.
+    """
+    width = 1600
+    height = 1600
+    if hasattr(self, 'hex') and self.hex:
+        width = self.hex.width
+        height = self.hex.height
+
+    # Transform and Draw RealSpaceContours (Active Zones)
+    # Ensure they align with the affine-transformed grid
+    # FIX: We now fetch Active Zones directly from self.cc.cameras to avoid warpPerspective clipping
+    shift_x = 0
+    shift_y = 0
+    
+    # Initialize with default or current dimensions to ensure 'image' exists
+    image = self.draw_hex_grid_overlay(
+        np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
+    )
+    
+    try:
+        true_real_contours = []
+        cameras = None
+        
+        # Determine where cameras are stored
+        if hasattr(self, 'cameras') and self.cameras:
+            cameras = self.cameras
+        elif hasattr(self, 'cc') and hasattr(self.cc, 'cameras'):
+            cameras = self.cc.cameras
+            
+        if cameras:
+            for cam_name, cam in cameras.items():
+                # Correct Property is 'activeZone' not 'activeZonePolygon'
+                # Check both for compatibility/safety
+                az = getattr(cam, 'activeZone', None)
+                if az is None:
+                    az = getattr(cam, 'activeZonePolygon', None)
+                
+                if az is not None and len(az) > 0:
+                    # These are in Camera Coordinates. Transform to Real Space.
+                    if hasattr(self, 'rsc') and cam_name in self.rsc.converters:
+                        converter = self.rsc.converters[cam_name][0]
+                        
+                        # Convert polygon points
+                        real_pts = []
+                        for pt in az:
+                            # Robustly handle (N, 2) and (N, 1, 2) shapes
+                            x, y = 0, 0
+                            try:
+                                is_nested = False
+                                if hasattr(pt, 'shape'):
+                                     if len(pt.shape) > 1:
+                                         is_nested = True
+                                elif hasattr(pt, '__len__') and len(pt) == 1 and hasattr(pt[0], '__len__'):
+                                     is_nested = True
+                                
+                                if is_nested:
+                                    x = float(pt[0][0])
+                                    y = float(pt[0][1])
+                                else:
+                                    x = float(pt[0])
+                                    y = float(pt[1])
+                            except Exception as e:
+                                print(f"MiniMap: Error processing point {pt}: {e}")
+                                continue
+
+                            r_pt = converter.convertCameraToRealSpace((x, y))
+                            real_pts.append(r_pt)
+                        
+                        true_real_contours.append(np.array(real_pts, dtype=np.float32))
+
+        # Calculate Global Bounding Box from these TRUE contours
+        if true_real_contours:
+            all_pts = np.vstack(true_real_contours)
+            min_x = np.min(all_pts[:, 0])
+            max_x = np.max(all_pts[:, 0])
+            min_y = np.min(all_pts[:, 1])
+            max_y = np.max(all_pts[:, 1])
+            
+            # Recalculate Shift & Dimensions based on TRUE bounds
+            shift_x = 0
+            shift_y = 0
+            if min_x < 0: shift_x = -min_x
+            if min_y < 0: shift_y = -min_y
+            
+            req_w = int(max_x - min_x) if min_x < 0 else int(max_x)
+            req_h = int(max_y - min_y) if min_y < 0 else int(max_y)
+
+            # Expand canvas if needed
+            width = max(width, req_w)
+            height = max(height, req_h)
+            
+            # Update hex config (Critical for grid alignment)
+            if hasattr(self, 'hex') and self.hex:
+                self.hex.width = width
+                self.hex.height = height
+                self.hex.offset_xy = (shift_x, shift_y)
+
+            # Re-initialize image with new dimensions if they changed
+            image = self.draw_hex_grid_overlay(
+                np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
+            )
+
+            # Draw the Unclipped Contours
+            transformed_contours = []
+            for pts_real in true_real_contours:
+                if hasattr(self, 'apply_affine_pts'):
+                    pts_map = self.apply_affine_pts(pts_real)
+                else:
+                    pts_map = pts_real
+                    print("ERROR: apply_affine_pts not found!")
+
+                # Apply the shift
+                pts_map[:, 0] += shift_x
+                pts_map[:, 1] += shift_y
+                    
+                cnt_map = np.round(pts_map).astype(np.int32).reshape(-1, 1, 2)
+                transformed_contours.append(cnt_map)
+            
+            cv2.drawContours(image, transformed_contours, -1, (125, 125, 125), 6)
+
+            # Draw Unified Boundary
+            if len(transformed_contours) > 0:
+                try:
+                    # Create a mask for the union of all active zones
+                    union_mask = np.zeros((height, width), dtype=np.uint8)
+                    
+                    # Fill all contours on the mask
+                    cv2.drawContours(union_mask, transformed_contours, -1, 255, -1)
+                    
+                    # Find the outer contour of the union
+                    # OpenCV 4.x returns (contours, hierarchy)
+                    # OpenCV 3.x returns (image, contours, hierarchy)
+                    cnts_res = cv2.findContours(union_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    if len(cnts_res) == 2:
+                        union_cnts = cnts_res[0]
+                    else:
+                        union_cnts = cnts_res[1]
+                    
+                    if len(union_cnts) > 0:
+                        # Draw the unified boundary (White, Thicker)
+                        cv2.drawContours(image, union_cnts, -1, (255, 255, 255), 4)
+
+                except Exception as e:
+                    print(f"Error drawing unified boundary: {e}")
+            
+    except Exception as e:
+        print(f"Error drawing true active zones: {e}")
+
+    drawnObjs = []
+    print(f"MiniMap: Rendering {len(objectsAndColors)} objects")
+    
+    for objAndColor in objectsAndColors[::-1]:
+        obj = objAndColor.object
+        color = objAndColor.color
+        if obj in drawnObjs:
+            continue
+        drawnObjs.append(obj)
+        
+        try:
+            hull = self.objectToHull(obj)
+            if hull is not None and len(hull) > 0:
+                # Hull is already in map coordinates (from patched_objectToHull)
+                # We need to apply the shift to it as well!
+                # patched_objectToHull uses apply_affine_pts but doesn't know about our local shift_x/y
+                
+                # Shift hull points
+                hull[:, 0, 0] += int(shift_x)
+                hull[:, 0, 1] += int(shift_y)
+                
+                image = cv2.drawContours(image, [hull], -1, color, -1)
+            else:
+                print(f"MiniMap: Zero-area/Empty hull for object {obj}")
+        except Exception as e:
+            print(f"MiniMap: Error drawing object hull: {e}")
+
+    return image
+
+HexCaptureConfiguration.draw_dynamic_grid_overlay = draw_dynamic_grid_overlay
+HexCaptureConfiguration.cameraGriddle = patched_cameraGriddle
+HexCaptureConfiguration.buildMiniMap = patched_buildMiniMap
+HexCaptureConfiguration.objectToHull = patched_objectToHull
+print("Monkey Patched HexCaptureConfiguration methods for dynamic grid/minimap generation")
+# ------------------------------------------------------
+
 
 harmony = Blueprint('harmony', __name__, template_folder='harmony_templates')
 
@@ -143,7 +513,8 @@ def render_minimap(cm):
         x, y, w, h = int(x), int(y), int(w), int(h)
         
         if w > 0 and h > 0:
-            camImage = camImage[y:y+h, x:x+w]
+            # camImage = camImage[y:y+h, x:x+w]
+            pass
         
         camImage = cv2.resize(camImage, virtual_map_res, interpolation=cv2.INTER_AREA)
         ret, encoded = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
@@ -165,11 +536,22 @@ def render_camera(cc, camName):
         if frame is None:
             return None
             
-        masked = cam.cropToActiveZone(frame.copy())
+        masked = frame.copy()
         
         grid = cc.cameraGriddle(camName)
         if grid is not None:
-             masked = cam.cropToActiveZone(cv2.addWeighted(grid, 0.3, masked, 0.7, 0.0))
+             try:
+                 # Check if grid has content
+                 if np.sum(grid) > 0:
+                     masked = cv2.addWeighted(grid, 0.3, masked, 0.7, 0.0)
+                 else:
+                     print(f"Grid for {camName} is empty (all zeros)")
+             except Exception as e:
+                 print(f"Grid blend error: {e}")
+        else:
+             print(f"Grid for {camName} returned None")
+             
+        masked = cam.cropToActiveZone(masked)
              
         cropped = masked[y:y+h, x:x+w]
         camImage = cv2.resize(cropped, tuple(perspective_res), interpolation=cv2.INTER_LINEAR)
@@ -258,21 +640,45 @@ def get_conversion_params(cam_name):
         am_virtual_map = (cam_name == "VirtualMap")
         
         if am_virtual_map:
-            if current_app.cm and hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
-                rsbb = current_app.cm.cc.realSpaceBoundingBox()
-                min_x = rsbb[0]
-                min_y = rsbb[1]
-                w = rsbb[2]
-                h = rsbb[3]
-                
-                if w == 0 or h == 0:
-                    return 1.0, 1.0, min_x, min_y
-                
-                scale_x = virtual_map_res[0] / w
-                scale_y = virtual_map_res[1] / h
-                return scale_x, scale_y, min_x, min_y
-            else:
+
+            # Always use Full Canvas metrics for VirtualMap scaling/offset
+            # Since render_minimap is no longer cropping to active zone, 
+            # we treat the Viewport as the Full Canvas (0,0, W, H).
+            w, h = 1600, 1600
+            if hasattr(current_app.cm.cc, 'hex') and current_app.cm.cc.hex:
+                w = current_app.cm.cc.hex.width
+                h = current_app.cm.cc.hex.height
+
+            # FIX: Auto-expand to fit RealSpaceBoundingBox if available
+            # This must match patched_buildMiniMap logic
+            try:
+                if hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
+                    bx, by, bw, bh = current_app.cm.cc.realSpaceBoundingBox()
+                    
+                    shift_x = 0
+                    shift_y = 0
+                    if bx < 0: shift_x = -bx
+                    if by < 0: shift_y = -by
+                        
+                    req_w = int(bx + bw + shift_x)
+                    req_h = int(by + bh + shift_y)
+                    
+                    w = max(w, req_w)
+                    h = max(h, req_h)
+            except Exception as e:
+                print(f"Error in get_conversion_params expansion: {e}")
+            
+            # Offset is 0,0 because we are showing the full canvas starting at 0,0
+            min_x, min_y = 0, 0
+            
+            # Scale maps Full Canvas -> Virtual Map Resolution (1200x1200)
+            if w == 0 or h == 0:
                  return 1.0, 1.0, 0, 0
+            
+            scale_x = virtual_map_res[0] / w
+            scale_y = virtual_map_res[1] / h
+            return scale_x, scale_y, min_x, min_y
+
         
         cam = current_app.cc.cameras.get(cam_name)
         if cam is None:
@@ -311,27 +717,21 @@ def axial_to_ui_object(q, r):
     # But usually bounding box is x, y, w, h or min/max.
     # Assuming realSpaceBoundingBox is available on cc.
     
-    if current_app.cm and hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
-        rsbb = current_app.cm.cc.realSpaceBoundingBox()
-        # rsbb is (min_x, min_y, w, h)
-        min_x = rsbb[0]
-        min_y = rsbb[1]
+    raw_vm_points = current_app.cm.cc.hex_at_axial(q, r)
+    
+    # Get scale and offset from conversion params (now handles VirtualMap correctly)
+    scale_x, scale_y, off_x_base, off_y_base = get_conversion_params("VirtualMap") 
+    
+    vm_points = []
+    for raw_pt in raw_vm_points:
+        pt = safe_point(raw_pt)
+        # Apply transformation: (pt - off) * scale
+        # get_conversion_params returns offset/scale such that:
+        # ui_x = (x - off_x) * scale_x
         
-        raw_vm_points = current_app.cm.cc.hex_at_axial(q, r)
-        # Shift by min_x, min_y
-        scale_x, scale_y, _, _ = get_conversion_params("VirtualMap") # Get scale and offset from conversion params
-        vm_points = []
-        for raw_pt in raw_vm_points:
-            pt = safe_point(raw_pt)
-            # Offset then Scale
-            off_x = pt[0] - min_x
-            off_y = pt[1] - min_y
-            scaled_x = off_x * scale_x
-            scaled_y = off_y * scale_y
-            vm_points.append((scaled_x, scaled_y))
-        
-    else:
-        vm_points = [safe_point(pt) for pt in current_app.cm.cc.hex_at_axial(q, r)]
+        scaled_x = (pt[0] - off_x_base) * scale_x
+        scaled_y = (pt[1] - off_y_base) * scale_y
+        vm_points.append((scaled_x, scaled_y))
 
     return {
         "VirtualMap": vm_points,
@@ -346,27 +746,22 @@ def getCanvasData(viewId):
     objects = {}
     for obj in current_app.cm.memory:
         vm_pts = []
-        if current_app.cm and hasattr(current_app.cm.cc, 'realSpaceBoundingBox'):
-            rsbb = current_app.cm.cc.realSpaceBoundingBox()
-            min_x = rsbb[0]
-            min_y = rsbb[1]
-            # changeSetToAxialCoord gives (q, r). hex_at_axial gives list of points.
-            q, r = current_app.cm.cc.changeSetToAxialCoord(obj)
-            raw_vm_pts = current_app.cm.cc.hex_at_axial(q, r)
-            # Use same scaling logic
-            scale_x, scale_y, _, _ = get_conversion_params("VirtualMap")
-            vm_points = []
-            for raw_pt in raw_vm_pts:
-                pt = safe_point(raw_pt)
-                off_x = pt[0] - min_x
-                off_y = pt[1] - min_y
-                scaled_x = off_x * scale_x
-                scaled_y = off_y * scale_y
-                vm_points.append((scaled_x, scaled_y))
-            vm_pts = vm_points
+        # Prepare VirtualMap points
+
+        
+        # Use centralized conversion logic
+        vm_params = get_conversion_params("VirtualMap")
+        
+        # FIX: Use objectToHull to get the full shape instead of single hex center
+        # This matches what is drawn on the server side map
+        hull = current_app.cm.cc.objectToHull(obj)
+        if hull is not None and len(hull) > 0:
+             # hull is (N, 1, 2) or (N, 2)
+             # We need to flatten it to list of points
+             raw_vm_pts = hull.reshape(-1, 2)
+             vm_pts = [scale_point_new((float(pt[0]), float(pt[1])), vm_params) for pt in raw_vm_pts]
         else:
-            q, r = current_app.cm.cc.changeSetToAxialCoord(obj)
-            vm_pts = [safe_point(pt) for pt in current_app.cm.cc.hex_at_axial(q, r)]
+             vm_pts = []
 
         objects[obj.oid] = {
             "VirtualMap": vm_pts,

@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
     <!-- Required meta tags -->
     <meta charset="utf-8">
@@ -11,43 +12,44 @@
 
     <title>Observer Configurator</title>
 </head>
+
 <body>
-<div class="container">
-    <h1 align="center">Configurator</h1>
-    <div class="row" align="center">
-        <div class="col" align="left">
-            <input type="button" class="btn btn-primary" value="Save State" hx-post="{configuratorURL}" hx-swap="none">
-            <input class="btn btn-secondary" type="button" value="Calibrate Cameras" onclick="window.location.href='{configuratorURL}calibrator'">
+    <div class="container">
+        <h1 align="center">Configurator</h1>
+        <div class="row" align="center">
+            <div class="col" align="left">
+                <input type="button" class="btn btn-primary" value="Save State" hx-post="{configuratorURL}"
+                    hx-swap="none">
+                <input class="btn btn-secondary" type="button" value="Calibrate Cameras"
+                    onclick="window.location.href='{configuratorURL}calibrator'">
+            </div>
         </div>
-        <div class="col" align="right">
-            <input class="btn btn-info" type="button" value="Observer" onclick="window.location.href='/'">
+        {cameraConfigRows}
+        <div class="container" align="right" style="margin-top: 1rem">
+            <input type="button" class="btn btn-primary" value="Add Camera"
+                onclick="window.location.href='{configuratorURL}new_camera'">
         </div>
     </div>
-    {cameraConfigRows}
-    <div class="container" align="right" style="margin-top: 1rem">
-        <input type="button" class="btn btn-primary" value="Add Camera" onclick="window.location.href='{configuratorURL}new_camera'">
-    </div>
-</div>
 </body>
 <script>
     function clearCamAZ(camName, event) {
         const formField = document.getElementById(`cam${camName}_ActiveZone`)
         formField.value = '[]'
     }
-    
+
     function camClickListener(camName, event) {
         const imgElem = document.getElementById(`cam${camName}`)
-        bounds=imgElem.getBoundingClientRect();
-        const left=bounds.left;
-        const top=bounds.top;
+        bounds = imgElem.getBoundingClientRect();
+        const left = bounds.left;
+        const top = bounds.top;
         const x = event.x - left;
         const y = event.y - top;
-        const cw=imgElem.clientWidth
-        const ch=imgElem.clientHeight
-        const iw=imgElem.naturalWidth
-        const ih=imgElem.naturalHeight
-        const px=x/cw*iw
-        const py=y/ch*ih
+        const cw = imgElem.clientWidth
+        const ch = imgElem.clientHeight
+        const iw = imgElem.naturalWidth
+        const ih = imgElem.naturalHeight
+        const px = x / cw * iw
+        const py = y / ch * ih
         //console.log("img element points: ", px, py)
         const x_offset = 0
         const x_scale = 1
@@ -58,14 +60,15 @@
         const formField = document.getElementById(`cam${camName}_ActiveZone`)
         var formValue
         try {
-          formValue = JSON.parse(formField.value)
+            formValue = JSON.parse(formField.value)
         }
-        catch(err) {
-          formValue = []
+        catch (err) {
+            formValue = []
         }
         formValue.push([~~image_x, ~~image_y])
         formField.value = JSON.stringify(formValue)
         formField.dispatchEvent(new Event('change'));
     }
 </script>
+
 </html>

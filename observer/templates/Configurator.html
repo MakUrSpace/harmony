@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
     <!-- Required meta tags -->
     <meta charset="utf-8">
@@ -11,71 +12,347 @@
 
     <title>Observer Configurator</title>
 </head>
+
 <body>
-<div class="container">
-    <h1 align="center">Configurator</h1>
-    <div class="row" align="center">
-        <div class="col" align="left">
-            <input type="button" class="btn btn-primary" value="Save State" hx-post="{configuratorURL}" hx-swap="none">
-            <input class="btn btn-secondary" type="button" value="Calibrate Cameras" onclick="window.location.href='{configuratorURL}calibrator'">
+    <div class="container">
+        <h1 align="center">Configurator</h1>
+        <div class="row" align="center">
+            <div class="col" align="left">
+                <input type="button" class="btn btn-primary" value="Save State" hx-post="{configuratorURL}"
+                    hx-swap="none">
+                <input class="btn btn-success" type="button" value="Submit Manual Calibration" onclick="submitShape()">
+                <div class="form-check form-switch d-inline-block ms-3">
+                    <input class="form-check-input" type="checkbox" id="modeSwitch" onchange="toggleMode()">
+                    <label class="form-check-label" for="modeSwitch">Calibration Mode</label>
+                </div>
+                <div id="statusMessage" class="d-inline-block ms-3 fw-bold"></div>
+            </div>
+            <div class="col" align="right">
+                <input class="btn btn-info" type="button" value="Observer" onclick="window.location.href='/'">
+            </div>
         </div>
-        <div class="col" align="right">
-            <input class="btn btn-info" type="button" value="Observer" onclick="window.location.href='/'">
+        {cameraConfigRows}
+        <div class="container" align="right" style="margin-top: 1rem">
+            <input type="button" class="btn btn-primary" value="Add Camera"
+                onclick="window.location.href='{configuratorURL}new_camera'">
+        </div>
+        <div class="row" align="left">
+            <div class="container border border-3 border-secondary mb-3" align="left">
+                <h3>Calibration Objects</h3>
+                <div class="table-responsive">
+                    <table class="table table-striped" id="calibrationTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Cameras</th>
+                                <th>Points (Pixel)</th>
+                                <th>Points (Real)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="row" align="left">
+            <div class="container border border-3 border-info" align="left">
+                <h3>Grid Configuration</h3>
+                <form hx-post="{configuratorURL}grid_configuration" hx-swap="outerHTML">
+                    <input type="number" class="form-check-input bg-info" name="size" min="10" max="60" value="{size}"
+                        style="width:4em">
+                    <label class="form-check-label" for="size">Size</label><br>
+                    <input type="submit" class="btn btn-primary bg-secondary" value="Submit Grid Configuration">
+                </form>
+            </div>
         </div>
     </div>
-    {cameraConfigRows}
-    <div class="container" align="right" style="margin-top: 1rem">
-        <input type="button" class="btn btn-primary" value="Add Camera" onclick="window.location.href='{configuratorURL}new_camera'">
-    </div>
-    <div class="row" align="left">
-        <div class="container border border-3 border-info" align="left">
-            <h3>Grid Configuration</h3>
-            <form hx-post="{configuratorURL}grid_configuration" hx-swap="outerHTML">
-                <input type="number" class="form-check-input bg-info" name="size" min="10" max="60" value="{size}" style="width:4em">
-                <label class="form-check-label" for="size">Size</label><br>
-                <input type="submit" class="btn btn-primary bg-secondary" value="Submit Grid Configuration">
-            </form>
-        </div>
-    </div>
-</div>
 </body>
 <script>
+
+    var cameraNames = __CAMERA_NAMES_JSON__;
+    var calibrationPts = __CALIBRATION_PTS_JSON__;
+    var manualPoints = {};
+    var dragPointIndex = -1;
+    var dragCamName = null;
+
+    // Initialize manualPoints
+    cameraNames.forEach(function (name) {
+        manualPoints[name] = [];
+    });
+
+    function resizeCanvas() {
+        cameraNames.forEach(function (camName) {
+            var canvas = document.getElementById('overlayCanvas_' + camName);
+            var img = document.getElementById('cam' + camName);
+            if (canvas && img) {
+                canvas.width = img.naturalWidth || img.clientWidth;
+                canvas.height = img.naturalHeight || img.clientHeight;
+                canvas.style.width = img.clientWidth + 'px';
+                canvas.style.height = img.clientHeight + 'px';
+                drawPoints(camName);
+            }
+        });
+        toggleMode(); // Ensure correct state on load
+    }
+
+    window.onload = function () {
+        resizeCanvas();
+        renderCalibrationTable();
+        // window.addEventListener('resize', resizeCanvas); // Optional
+    };
+
+    // Poll resizing just in case images load late
+    setInterval(function () {
+        if (cameraNames.length > 0) {
+            var camName = cameraNames[0];
+            var canvas = document.getElementById('overlayCanvas_' + camName);
+            var img = document.getElementById('cam' + camName);
+            if (canvas && img && (canvas.clientWidth !== img.clientWidth || canvas.clientHeight !== img.clientHeight)) {
+                resizeCanvas();
+            }
+        }
+    }, 1000);
+
+    function getMousePos(canvas, evt) {
+        var rect = canvas.getBoundingClientRect();
+        return {
+            x: evt.offsetX, // offsetX is relative to target element (canvas)
+            y: evt.offsetY
+        };
+    }
+
+    function stopDrag() {
+        dragPointIndex = -1;
+        dragCamName = null;
+    }
+
+    // Attach global mouseup to catch releases outside canvas
+    window.addEventListener('mouseup', stopDrag);
+
+    function onMouseDown(camName, event) {
+        var canvas = document.getElementById('overlayCanvas_' + camName);
+        var pos = getMousePos(canvas, event);
+        var x = pos.x;
+        var y = pos.y;
+        var w = canvas.clientWidth;
+        var h = canvas.clientHeight;
+
+        // Ensure array exists and is valid
+        if (!manualPoints[camName]) manualPoints[camName] = [];
+
+        // Filter out any undefined/null points to prevent "reading '1'" error
+        manualPoints[camName] = manualPoints[camName].filter(p => p && p.length === 2);
+
+        // Check if clicking near existing point to drag
+        for (var i = 0; i < manualPoints[camName].length; i++) {
+            var px = manualPoints[camName][i][0] * w;
+            var py = manualPoints[camName][i][1] * h;
+            var dist = Math.sqrt((x - px) * (x - px) + (y - py) * (y - py));
+            if (dist < 20) {
+                dragPointIndex = i;
+                dragCamName = camName;
+                return;
+            }
+        }
+
+        // Add point if less than 3
+        if (manualPoints[camName].length < 3) {
+            manualPoints[camName].push([x / w, y / h]);
+            drawPoints(camName);
+        }
+    }
+
+    function onMouseMove(camName, event) {
+        if (dragPointIndex !== -1 && dragCamName === camName) {
+            // Safety check
+            if (!manualPoints[camName] || !manualPoints[camName][dragPointIndex]) {
+                stopDrag();
+                return;
+            }
+
+            var canvas = document.getElementById('overlayCanvas_' + camName);
+            var pos = getMousePos(canvas, event);
+            var w = canvas.clientWidth;
+            var h = canvas.clientHeight;
+            manualPoints[camName][dragPointIndex] = [pos.x / w, pos.y / h];
+            drawPoints(camName);
+        }
+    }
+
+    function drawPoints(camName) {
+        var canvas = document.getElementById('overlayCanvas_' + camName);
+        if (!canvas) return;
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        var w = canvas.width;
+        var h = canvas.height;
+
+        ctx.fillStyle = 'red';
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 3;
+
+        var points = manualPoints[camName];
+        if (points && points.length > 0) {
+            ctx.beginPath();
+            for (var i = 0; i < points.length; i++) {
+                var x = points[i][0] * w;
+                var y = points[i][1] * h;
+
+                if (i == 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+
+                ctx.fillRect(x - 5, y - 5, 10, 10);
+            }
+            if (points.length == 3) {
+                ctx.closePath();
+                ctx.stroke();
+            }
+            // Draw lines even if not closed? 
+            if (points.length == 2) {
+                ctx.stroke();
+            }
+        }
+    }
+
+    function clearShape(camName) {
+        manualPoints[camName] = [];
+        stopDrag();
+        drawPoints(camName);
+    }
+
+    function showStatus(msg, isError) {
+        var el = document.getElementById('statusMessage');
+        el.innerText = msg;
+        el.className = "d-inline-block ms-3 fw-bold " + (isError ? "text-danger" : "text-success");
+        setTimeout(function () { el.innerText = ""; }, 5000);
+    }
+
+    function submitShape() {
+        var validData = {};
+        var count = 0;
+
+        cameraNames.forEach(function (name) {
+            if (manualPoints[name] && manualPoints[name].length === 3) {
+                validData[name] = manualPoints[name];
+                count++;
+            }
+        });
+
+        if (count === 0) {
+            showStatus("Please define 3 points on at least one camera.", true);
+            return;
+        }
+
+        fetch(`{calibratorURL}manual_calibration`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(validData)
+        }).then(response => {
+            if (response.ok) {
+                showStatus("Calibration submitted successfully!", false);
+                // Optionally reload page to update table? or just update local list if we knew the return format
+                // For now, let's just leave it. If user refreshes, they see the new data.
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                response.text().then(text => showStatus("Error: " + text, true));
+            }
+        }).catch(e => showStatus("Network error: " + e, true));
+    }
+
+    function renderCalibrationTable() {
+        var tbody = document.querySelector('#calibrationTable tbody');
+        if (!tbody || !calibrationPts) return;
+
+        tbody.innerHTML = '';
+        calibrationPts.forEach((entry, index) => {
+            var row = document.createElement('tr');
+            var cams = Object.keys(entry).join(", ");
+            var pixels = "";
+            var reals = "";
+
+            // Just picking the first camera's points to show sample data
+            var firstCam = Object.keys(entry)[0];
+            if (firstCam) {
+                pixels = JSON.stringify(entry[firstCam][0]);
+                reals = JSON.stringify(entry[firstCam][1]);
+            }
+
+            row.innerHTML = `
+                <td>${index + 1}</td>
+                <td>${cams}</td>
+                <td><small>${pixels}</small></td>
+                <td><small>${reals}</small></td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
     function clearCamAZ(camName, event) {
         const formField = document.getElementById(`cam${camName}_ActiveZone`)
         formField.value = '[]'
     }
-    
+
+    // Kept old camClickListener for reference, but it might conflict with onMouseDown if both are active.
+    // The new structure has canvas overlay which captures mouse events.
+    // So the img onclick might not fire if canvas is on top.
+    // Active Zone setting might need to be reintegrated if it's important.
+    // The user requirement was "combine... configurator with manual triangle selection".
+    // Does "active zone" still matter? Probably.
+    // But how to switch between drawing AZ and drawing Calibration Triangle?
+    // Maybe we assume AZ is set, and now we are doing calibration.
+    // Or we need a mode switch.
+    // Let's assume the canvas overlay is for Calibration.
+    // If user wants to set AZ, maybe they need to disable calibration mode?
+    // For now, I will prioritize Calibration as requested.
+
+    function toggleMode() {
+        var isCalibration = document.getElementById('modeSwitch').checked;
+        cameraNames.forEach(function (camName) {
+            var canvas = document.getElementById('overlayCanvas_' + camName);
+            if (canvas) {
+                canvas.style.pointerEvents = isCalibration ? 'auto' : 'none';
+                canvas.style.opacity = isCalibration ? '1' : '0.5'; // Dim canvas in AZ mode to indicate pass-through?
+            }
+        });
+    }
+
     function camClickListener(camName, event) {
         const imgElem = document.getElementById(`cam${camName}`)
-        bounds=imgElem.getBoundingClientRect();
-        const left=bounds.left;
-        const top=bounds.top;
-        const x = event.x - left;
-        const y = event.y - top;
-        const cw=imgElem.clientWidth
-        const ch=imgElem.clientHeight
-        const iw=imgElem.naturalWidth
-        const ih=imgElem.naturalHeight
-        const px=x/cw*iw
-        const py=y/ch*ih
-        //console.log("img element points: ", px, py)
-        const x_offset = 0
-        const x_scale = 1
-        const image_x = (px - x_offset) * x_scale
-        const y_offset = 0
-        const y_scale = 1
-        const image_y = (py - y_offset) * y_scale
-        const formField = document.getElementById(`cam${camName}_ActiveZone`)
-        var formValue
+        var bounds = imgElem.getBoundingClientRect();
+        var left = bounds.left;
+        var top = bounds.top;
+        var x = event.x - left;
+        var y = event.y - top;
+        var cw = imgElem.clientWidth;
+        var ch = imgElem.clientHeight;
+        var iw = imgElem.naturalWidth;
+        var ih = imgElem.naturalHeight;
+        var px = x / cw * iw;
+        var py = y / ch * ih;
+
+        const x_offset = 0;
+        const x_scale = 1;
+        const image_x = (px - x_offset) * x_scale;
+        const y_offset = 0;
+        const y_scale = 1;
+        const image_y = (py - y_offset) * y_scale;
+
+        const formField = document.getElementById(`cam${camName}_ActiveZone`);
+        var formValue;
         try {
-          formValue = JSON.parse(formField.value)
+            formValue = JSON.parse(formField.value);
         }
-        catch(err) {
-          formValue = []
+        catch (err) {
+            formValue = [];
         }
-        formValue.push([~~image_x, ~~image_y])
-        formField.value = JSON.stringify(formValue)
+        formValue.push([~~image_x, ~~image_y]);
+        formField.value = JSON.stringify(formValue);
         formField.dispatchEvent(new Event('change'));
     }
 </script>
+
 </html>

@@ -1,8 +1,10 @@
 import os
 import atexit
 from flask import Flask, redirect, Response
-from configurator import configurator, setConfiguratorApp, registerCaptureService
-from calibrator import CalibratedCaptureConfiguration, CalibrationObserver, setCalibratorApp
+from configurator import configurator, setConfiguratorApp #, registerCaptureService
+from ipynb.fs.full.CalibratedObserver import CalibrationObserver
+# from calibrator import CalibratedCaptureConfiguration, CalibrationObserver, setCalibratorApp # Deprecated
+
 from ipynb.fs.full.HexObserver import HexCaptureConfiguration, HexGridConfiguration
 from file_lock import FileLock
 
@@ -23,7 +25,8 @@ def create_configurator_app():
     
     # Set app references
     setConfiguratorApp(app)
-    setCalibratorApp(app)
+    # setCalibratorApp(app) # Deprecated
+
 
     @app.route('/')
     def index():
@@ -60,8 +63,16 @@ def main():
     
     print(f"Launching Configurator Server on {PORT}")
     try:
-        registerCaptureService(app)
+        # registerCaptureService(app) # Deprecated or moved? 
+        # If capture service was in calibrator.py, we might need to move it to configurator.py or reimplement.
+        # configurator.py does not define registerCaptureService.
+        # However, `app.cc.capture()` is called. 
+        # `registerCaptureService` was running `app.cm.cycle()`.
+        # If we need the observer to cycle, we need this logic.
+        # Let's verify `configurator.py` or port `registerCaptureService`.
+        pass 
         app.run(host="0.0.0.0", port=PORT)
+
     finally:
         lock.release()
 

@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
     <!-- Required meta tags -->
     <meta charset="utf-8">
@@ -11,60 +12,274 @@
 
     <title>Observer Calibrator</title>
 </head>
-<body><div class="container">
-    <h1 align="center">Calibrator</h1>
-    <div class="container" >
+
+<body>
+    <div class="container">
+        <h1 align="center">Calibrator</h1>
+        <div class="container">
+            <div class="row">
+                <div class="col" align="left">
+                    <input class="btn btn-danger" type="button" value="Reset Calibrator" hx-get="{calibratorURL}reset">
+                </div>
+                <div class="col" align="right">
+                    <input class="btn btn-info" type="button" value="Configurator"
+                        onclick="window.location.href='/configurator'">
+                </div>
+            </div>
+        </div>
         <div class="row">
-            <div class="col" align="left">
-                <input class="btn btn-danger" type="button" value="Reset Calibrator" hx-get="{calibratorURL}reset">
-            </div>
-            <div class="col" align="right">
-                <input class="btn btn-info" type="button" value="Configurator" onclick="window.location.href='/configurator'">
-            </div>
-        </div>
-    </div>
-    <div class="row">
-        <div class="col" style="min-width: 40%">
-            <div class="row justify-content-center">
-                <h3 id="liveCamHeader" class="mt-5">Live Cameras (Selected {defaultCamera})</h3>
-                <img id="liveCam" class="img-responsive border border-primary bg-primary" src="{calibratorURL}camWithChanges/{defaultCamera}" style="transform: rotate(-90deg); border-radius: 40px; max-width: 80%">
-            </div>
-            <div class="row justify-content-center">
-                <script>
-                    function liveCameraClick(camNum){{
-                        var header = document.querySelector("#liveCamHeader")
-                        header.innerText = `Live Cameras (Selected ${camNum})`
-                        var img = document.querySelector("#liveCam")
-                        img.src = `{calibratorURL}camWithChanges/${camNum}`
-                    }}
-                </script>
-                {cameraButtons}
-            </div>
-        </div>
-        <div class="col">
-            <h2 class="mt-5">Capture Control</h2>
-            <div class="container" id="modeController" hx-get="{calibratorURL}get_mode_controller" hx-trigger="every 1.5s">
-            </div>
-            <div class="container">
-                <div class="row">
-                    <img class="img-fluid border border-primary" src="{calibratorURL}observer_console" style="border-radius: 50px;">
+            <div class="col" style="min-width: 40%">
+                <div class="row row-cols-1 row-cols-md-2 g-4 justify-content-center">
+                    {cameraGrid}
                 </div>
-                <div class="row">
-                    <input type="button" class="btn btn-success" name="commitbtn" id="commitbtn" value="Commit Calibration" hx-get="{calibratorURL}commit_calibration">
+                <div class="row justify-content-center mb-3 mt-4">
+                    <h4 class="text-center mb-3">Target: First Triangle (Start)</h4>
+                    <div class="btn-group">
+                        <button class="btn btn-warning" onclick="clearShape()">Clear All</button>
+                        <button class="btn btn-primary" onclick="submitShape()">Submit All Shapes</button>
+                        <button class="btn btn-secondary" onclick="toggleEditMode()">Toggle Edit/Draw</button>
+                    </div>
+                </div>
+                <div class="row justify-content-center">
+                    <script>
+                        var cameraNames = {cameraNamesJson};
+                        var manualPoints = {};
+                        var editMode = false;
+                        var dragPointIndex = -1;
+                        var dragCamName = null;
+
+                        // Initialize manualPoints
+                        cameraNames.forEach(function (name) {
+                            manualPoints[name] = [];
+                        });
+
+                        function resizeCanvas() {
+                            cameraNames.forEach(function (camName) {
+                                var canvas = document.getElementById('overlayCanvas_' + camName);
+                                var img = document.getElementById('liveCam_' + camName);
+                                if (canvas && img) {
+                                    canvas.width = img.naturalWidth || img.clientWidth;
+                                    canvas.height = img.naturalHeight || img.clientHeight;
+                                    canvas.style.width = img.clientWidth + 'px';
+                                    canvas.style.height = img.clientHeight + 'px';
+                                    drawPoints(camName);
+                                }
+                            });
+                        }
+
+                        window.onload = function () {
+                            resizeCanvas();
+                            // Attach listeners
+                            cameraNames.forEach(function (camName) {
+                                var canvas = document.getElementById('overlayCanvas_' + camName);
+                                if (canvas) {
+                                    canvas.addEventListener('mousedown', function (e) { onMouseDown(camName, e); });
+                                    canvas.addEventListener('mousemove', function (e) { onMouseMove(camName, e); });
+                                    canvas.addEventListener('mouseup', function (e) { onMouseUp(camName, e); });
+                                }
+                            });
+                        };
+
+                        window.addEventListener('resize', resizeCanvas);
+                        setInterval(function () {
+                            // Poll resizing
+                            if (cameraNames.length > 0) {
+                                var camName = cameraNames[0];
+                                var canvas = document.getElementById('overlayCanvas_' + camName);
+                                var img = document.getElementById('liveCam_' + camName);
+                                if (canvas && img && (canvas.clientWidth !== img.clientWidth || canvas.clientHeight !== img.clientHeight)) {
+                                    resizeCanvas();
+                                }
+                            }
+                        }, 1000);
+
+                        function getMousePos(canvas, evt) {
+                            var rect = canvas.getBoundingClientRect();
+                            return {
+                                x: evt.offsetX,
+                                y: evt.offsetY
+                            };
+                        }
+
+                        function onMouseDown(camName, event) {
+                            var canvas = document.getElementById('overlayCanvas_' + camName);
+                            var pos = getMousePos(canvas, event);
+                            var x = pos.x;
+                            var y = pos.y;
+                            // Use client dimensions for input normalization and hit-testing
+                            var w = canvas.clientWidth;
+                            var h = canvas.clientHeight;
+
+                            if (editMode) {
+                                for (var i = 0; i < manualPoints[camName].length; i++) {
+                                    var px = manualPoints[camName][i][0] * w;
+                                    var py = manualPoints[camName][i][1] * h;
+                                    var dist = Math.sqrt((x - px) * (x - px) + (y - py) * (y - py));
+                                    if (dist < 20) {
+                                        dragPointIndex = i;
+                                        dragCamName = camName;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                if (manualPoints[camName].length < 3) {
+                                    manualPoints[camName].push([x / w, y / h]);
+                                    drawPoints(camName);
+                                }
+                            }
+                        }
+
+                        function onMouseMove(camName, event) {
+                            if (editMode && dragPointIndex !== -1 && dragCamName === camName) {
+                                var canvas = document.getElementById('overlayCanvas_' + camName);
+                                var pos = getMousePos(canvas, event);
+                                var x = pos.x;
+                                var y = pos.y;
+                                // Use client dimensions for input normalization
+                                var w = canvas.clientWidth;
+                                var h = canvas.clientHeight;
+
+                                manualPoints[camName][dragPointIndex] = [x / w, y / h];
+                                drawPoints(camName);
+                            }
+                        }
+
+                        function onMouseUp(camName, event) {
+                            dragPointIndex = -1;
+                            dragCamName = null;
+                        }
+
+                        function drawPoints(camName) {
+                            var canvas = document.getElementById('overlayCanvas_' + camName);
+                            var img = document.getElementById('liveCam_' + camName);
+                            if (!canvas || !img) return;
+                            var ctx = canvas.getContext('2d');
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            var w = canvas.width;
+                            var h = canvas.height;
+
+                            ctx.fillStyle = 'red';
+                            ctx.strokeStyle = '#00FF00';
+                            ctx.lineWidth = 3;
+
+                            var points = manualPoints[camName];
+                            if (points && points.length > 0) {
+                                ctx.beginPath();
+                                for (var i = 0; i < points.length; i++) {
+                                    var x = points[i][0] * w;
+                                    var y = points[i][1] * h;
+
+                                    if (i == 0) ctx.moveTo(x, y);
+                                    else ctx.lineTo(x, y);
+
+                                    ctx.fillRect(x - 5, y - 5, 10, 10);
+                                }
+                                if (points.length == 3) {
+                                    ctx.closePath();
+                                    // Visual Feedback: Green Border for complete triangle
+                                    img.classList.remove('border-primary');
+                                    img.classList.add('border-success');
+                                    img.classList.add('border-5'); // Make it thicker
+                                } else {
+                                    img.classList.remove('border-success');
+                                    img.classList.remove('border-5');
+                                    img.classList.add('border-primary');
+                                }
+                                ctx.stroke();
+                            } else {
+                                // Reset border if no points
+                                img.classList.remove('border-success');
+                                img.classList.remove('border-5');
+                                img.classList.add('border-primary');
+                            }
+                        }
+
+                        function clearShape(camName) {
+                            if (camName) {
+                                manualPoints[camName] = [];
+                                drawPoints(camName);
+                            } else {
+                                cameraNames.forEach(function (name) {
+                                    manualPoints[name] = [];
+                                    drawPoints(name);
+                                });
+                            }
+                        }
+
+                        function toggleEditMode() {
+                            editMode = !editMode;
+                            var btn = event.target;
+                            btn.innerText = editMode ? "Edit Mode: ON" : "Toggle Edit/Draw";
+                            btn.classList.toggle("btn-danger");
+                            btn.classList.toggle("btn-secondary");
+                        }
+
+                        function submitShape() {
+                            // Filter for cameras with 3 points
+                            var validData = {};
+                            var count = 0;
+
+                            cameraNames.forEach(function (name) {
+                                if (manualPoints[name] && manualPoints[name].length === 3) {
+                                    validData[name] = manualPoints[name];
+                                    count++;
+                                }
+                            });
+
+                            if (count === 0) {
+                                alert("Please define 3 points on at least one camera.");
+                                return;
+                            }
+
+                            fetch(`{calibratorURL}manual_calibration`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify(validData)
+                            }).then(response => {
+                                if (response.ok) {
+                                    var table = document.getElementById("changeTable");
+                                    if (table) {
+                                        htmx.trigger(table, "refresh", {});
+                                    }
+                                    clearShape();
+                                } else {
+                                    response.text().then(text => alert("Error: " + text));
+                                }
+                            }).catch(e => alert("Network error: " + e));
+                        }
+                    </script>
+                </div>
+            </div>
+            <div class="col">
+                <h2 class="mt-5">Capture Control</h2>
+                <div class="container" id="modeController" hx-get="{calibratorURL}get_mode_controller"
+                    hx-trigger="every 1.5s">
+                </div>
+                <div class="container">
+                    <div class="row">
+                        <img class="img-fluid border border-primary" src="{calibratorURL}observer_console"
+                            style="border-radius: 50px;">
+                    </div>
+                    <div class="row">
+                        <input type="button" class="btn btn-success" name="commitbtn" id="commitbtn"
+                            value="Commit Calibration" hx-get="{calibratorURL}commit_calibration">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col" align="center">
+                <div class="row justify-content-center">
+                    <h2 class="mt-5">Calibration Object Table</h2>
+                </div>
+                <div class="row justify-content-center">
+                    <div id="changeTable" hx-get="{calibratorURL}objects" hx-trigger="every 1s"></div>
                 </div>
             </div>
         </div>
     </div>
-    <div class="row">
-        <div class="col" align="center">
-            <div class="row justify-content-center">
-                <h2 class="mt-5">Calibration Object Table</h2>
-            </div>
-            <div class="row justify-content-center">
-                <div id="changeTable" hx-get="{calibratorURL}objects" hx-trigger="every 1s"></div>
-            </div>
-        </div>
-    </div>
-</div>
 </body>
+
 </html>

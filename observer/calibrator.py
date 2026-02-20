@@ -49,7 +49,7 @@ def registerCaptureService(app):
         
         # Dynamic POOL_TIME based on Machine Type
         # Calibrator needs slow cycles (1s), others need fast cycles (0.01s)
-        next_pool_time = 0.01
+        next_pool_time = 0.1
         try:
             if isinstance(app.cm, CalibrationObserver):
                 next_pool_time = 1.0
@@ -265,6 +265,48 @@ def commitCalibration():
     return redirect(url_for('.buildCalibrator'), code=303)
 
 
+@calibrator.route('/manual_calibration', methods=['POST'])
+def manualCalibration():
+    # Expects a dict of {camName: points}
+    data = request.json
+    print(f"Received manual calibration data: {data}")
+    if not data:
+        return "No data received", 400
+        
+    added_count = 0
+    # We will accumulate all points into a single "calibration point" entry
+    # which is a dict of {camName: [pixelPoints, realPoints]}
+    
+    # Structure of calibrationPts entry: {camName: [pixelPoints, realPoints], camName2: ...}
+    new_calib_entry = {}
+    
+    for camName, points in data.items():
+        if len(points) != 3:
+            continue
+            
+        if camName not in app.cc.cameras:
+            continue
+
+        # Get camera resolution
+        cam = app.cc.cameras[camName]
+        h, w = cam.mostRecentFrame.shape[:2]
+        
+        # Convert normalized points to pixel coordinates
+        pixelPoints = [[int(p[0] * w), int(p[1] * h)] for p in points]
+        
+        # Add to entry
+        # Assumes "first" triangle position as the target for manual calibration.
+        new_calib_entry[camName] = [pixelPoints, app.cm.first_triangle]
+        added_count += 1
+        
+    if added_count > 0:
+        # Add to calibration points list
+        app.cm.calibrationPts.append(new_calib_entry)
+        return f"Added manual calibration for {added_count} cameras", 200
+    else:
+        return "No valid calibration points found", 400
+
+
 def resetCalibrationObserver():
     with DATA_LOCK:
         app.cm = CalibrationObserver(app.cc)
@@ -282,15 +324,79 @@ def buildCalibrator():
         resetCalibrationObserver()
     with open(f"{os.path.dirname(__file__)}/templates/Calibrator.html", "r") as f:
         template = f.read()
-    cameraButtons = ' '.join([f'''<input type="button" class="btn btn-primary" value="Camera {camName}" onclick="liveCameraClick('{camName}')">''' for camName in app.cc.cameras.keys()])
-    defaultCam = [camName for camName, cam in app.cc.cameras.items()][0]
+    
+    # Generate Grid Items
+    gridItems = []
+    cameraNames = list(app.cc.cameras.keys())
+    
+    for camName in cameraNames:
+        # Each item is a col in a row-cols-2 grid (or similar)
+        # We need unique IDs for canvas and img
+        item = f'''
+        <div class="col-md-12 col-lg-6 mb-4">
+            <h5 class="text-center">Camera {camName}</h5>
+            <div id="camContainer_{camName}" style="position: relative; display: inline-block; margin: 10px;">
+                <img id="liveCam_{camName}" class="img-responsive border border-primary bg-primary"
+                    src="{url_for('.cameraViewWithChangesResponse', camName=camName)}"
+                    style="border-radius: 40px; max-width: 100%; max-height: 80vh;">
+                <canvas id="overlayCanvas_{camName}"
+                    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 40px; cursor: crosshair;"></canvas>
+            </div>
+            <div class="text-center mt-2">
+                <button class="btn btn-sm btn-warning" onclick="clearShape('{camName}')">Clear</button>
+            </div>
+        </div>
+        '''
+        gridItems.append(item)
+        
+    cameraGrid = "\n".join(gridItems)
+    
+    # Inject cameraNames as JSON for JS
+    import json
+    cameraNamesJson = json.dumps(cameraNames)
+
     return template.replace(
-        "{defaultCamera}", defaultCam).replace(
-        "{cameraButtons}", cameraButtons).replace(
+        "{cameraGrid}", cameraGrid).replace(
+        "{cameraNamesJson}", cameraNamesJson).replace(
         "{calibratorURL}", url_for('.buildCalibrator'))
 
 
-def captureToChangeRow(capture):
+class ManualCalibWrapper:
+    def __init__(self, camName, pts, realPts):
+        self.calibTriPts = {camName: [pts, realPts]}
+        self.changeSet = {camName: None} # Placeholder
+    
+    def visual(self):
+        # Return black image or camera frame? 
+        # Current logic in `captureToChangeRow` calls `app.cm.object_visual(capture)`
+        # `object_visual` uses `changeSet`.
+        # This might be too complex to mock perfectly without refactoring.
+        # Alternatively, simplify `captureToChangeRow` or creating a dedicated row for calibration points.
+        return np.zeros((100, 100, 3), dtype=np.uint8)
+
+def captureToChangeRow(capture, isManual=False):
+    # If it's a manual calibration point, handle differently or wrap
+    if isManual:
+        # manual capture structure: {camName: [pixelPoints, realPoints]}
+        # We want to show it.
+        name = "Manual Calibration"
+        realTriangle = {camName: ctp[-1] for camName, ctp in capture.items()}
+        encodedBA = "" # No image for now, or maybe current frame?
+        
+        changeRow = f"""
+        <div class="row mb-1">
+            <div class="col">
+                <div class="row">
+                    <p>** MANUAL **<br>Realspace Coord:<br>{realTriangle}</p>
+                </div>
+            </div>
+            <div class="col">
+                <!-- No Image for manual yet -->
+            </div>
+        </div>
+        <hr class="mt-2 mb-3"/>"""
+        return changeRow
+
     encodedBA = imageToBase64(app.cm.object_visual(capture))
     name = "None"
     realTriangle = {camName: ctp[-1] for camName, ctp in capture.calibTriPts.items()}
@@ -321,6 +427,17 @@ def buildObjectTable():
     print(f"Aware of {len(app.cm.memory)} objects")
     for capture in app.cm.memory:
         changeRows.append(captureToChangeRow(capture))
+
+    # Add manual calibration points
+    print(f"Aware of {len(app.cm.calibrationPts)} manual calibration points")
+    for calibPt in app.cm.calibrationPts:
+        try:
+            row = captureToChangeRow(calibPt, isManual=True)
+            changeRows.append(row)
+        except Exception as e:
+            print(f"Error building manual row: {e}")
+            print(f"Point data: {calibPt}")
+
     return " ".join(changeRows)
 
 
