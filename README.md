@@ -41,22 +41,26 @@ After submitting the camera settings, select the camera's `Active Zone` by click
 
 If using a SV3C camera, you can use the RTSP camera stream module by clicking the `RTSP` checkbox and providing the RTSP address, which is typically `{Camera IP}:554/11`
 
+##### Active Zone
+
+After adding a camera, you must define its `Active Zone`. Ensure the **Calibration Mode** switch is toggled **Off**. Click on the camera view in the Configurator to draw a polygon defining the tracking area. Harmony will only process activity within this zone.
+
 ##### Grid Configuration
 
-Harmony projects a hexagonal grid across its perspectives. The grid cell size and the starting coordinate of the grid can be adjusted in this section.
+Harmony projects a hexagonal grid across its perspectives. The grid cell size can be adjusted in this section. The global grid offset and dimensions are dynamically calculated based on the union of all active zones across your calibrated cameras.
 
-##### Calibrator
+##### Manual Triangle Calibration
 
-Harmony's Calibrator is a utility for mapping cameras. It's accessed by clicking the `Calibrate Cameras` button on the Configurator page or by navigating to [http://localhost:7000/configurator/calibrator](http://localhost:7000/configurator/calibrator). Use this page to confirm the camera stream, and then click `First (Reset)` in the `Capture Control` section. 
+Harmony maps multiple camera streams into a single unified 3D space by calibrating them against a physical reference object—a 60mm x 80mm x 100mm right triangle.
 
-1. Confirm camera stream
-1. Select `First (Reset)` button in `Capture Control` section
-1. Place calibration triangle (60mmX80mmX100mm triangle) onto the camera
-1. Confirm Harmony recognized the triangle
-1. Click `Commit Calibration`
-1. Navigate to `Configurator`
-1. Click `Save State` button
-  1. This will create an `observerConfiguration.json` in Harmony's working directory
+To calibrate your cameras:
+1. Place the calibration triangle on your playing surface so that it is visible in your camera streams.
+2. On the Configurator page, toggle the **Calibration Mode** switch to **On**.
+3. In each camera view, click to trace the 3 vertices of the calibration triangle. A green border will appear around the camera view once all 3 points are placed.
+4. You can click "Toggle Edit/Draw" to adjust the points if necessary.
+5. Click **Submit Manual Calibration** to send the shapes to the server.
+6. Check the **Calibration Objects** table to confirm your spatial coordinates have been recorded.
+7. Click the **Save State** button at the top of the Configurator to commit your configuration to `observerConfiguration.json`.
 
 ### Host Harmony with [ngrok](https://ngrok.com/)
 
