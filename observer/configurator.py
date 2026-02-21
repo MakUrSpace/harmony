@@ -65,7 +65,8 @@ def buildConfigurator():
     # Fix for Table Population on Load:
     # app.cm.calibrationPts isn't persisted, but app.cc.rsc is.
     # If table is empty but we have calibration, reconstruct it for display.
-    if not app.cm.calibrationPts and hasattr(app.cc, 'rsc') and app.cc.rsc is not None:
+    calibrationPts = getattr(app.cm, 'calibrationPts', [])
+    if not calibrationPts and hasattr(app.cc, 'rsc') and app.cc.rsc is not None:
         reconstructed = []
         try:
             # app.cc.rsc.realCamSpacePairs is [(camName, [camPts, realPts]), ...]
@@ -82,10 +83,11 @@ def buildConfigurator():
                 reconstructed.append(rec_entry)
             
             app.cm.calibrationPts = reconstructed
+            calibrationPts = app.cm.calibrationPts
         except Exception as e:
             print(f"Failed to reconstruct calibration table: {e}")
 
-    calibrationPtsJson = json.dumps(app.cm.calibrationPts)
+    calibrationPtsJson = json.dumps(calibrationPts)
 
     with open(f"{os.path.dirname(__file__)}/templates/Configurator.html") as f:
         template = f.read()
@@ -315,11 +317,12 @@ def manualCalibration():
         
         # Add to entry
         # Assumes "first" triangle position as the target for manual calibration.
-        if app.cm.first_triangle:
-             new_calib_entry[camName] = [pixelPoints, app.cm.first_triangle]
+        first_triangle = getattr(app.cm, 'first_triangle', [[500, 500], [440, 500], [500, 420]])
+        if first_triangle:
+             new_calib_entry[camName] = [pixelPoints, first_triangle]
              added_count += 1
         else:
-             print("app.cm.first_triangle is not defined")
+             print("first_triangle is not defined")
         
     if added_count > 0:
         # Overwrite previous calibration (User Request)
@@ -327,7 +330,14 @@ def manualCalibration():
         
         # Add to calibration points list
         app.cm.calibrationPts.append(new_calib_entry)
-        app.cm.buildRealSpaceConverter()
+        
+        if hasattr(app.cm, 'buildRealSpaceConverter'):
+            app.cm.buildRealSpaceConverter()
+        else:
+            from ipynb.fs.full.CalibratedObserver import RealSpaceConverter
+            app.cc.rsc = RealSpaceConverter([cNCoordPair 
+                                              for cPtGrp in app.cm.calibrationPts
+                                              for cNCoordPair in list(cPtGrp.items())])
         app.cc.saveConfiguration()
         return f"Added manual calibration for {added_count} cameras", 200
     else:

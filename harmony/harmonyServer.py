@@ -25,7 +25,7 @@ from matplotlib.figure import Figure
 from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for, jsonify, current_app, stream_with_context
 
 from observer import HexGridConfiguration, HexCaptureConfiguration
-# from observer.configurator import configurator, setConfiguratorApp # Removed
+from observer.configurator import configurator, setConfiguratorApp
 from observer.observerServer import observer, registerCaptureService, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
 
@@ -1579,8 +1579,8 @@ def start_servers():
             
         # Register blueprints
         # Configurator blueprint should only be registered for the admin app
-        # if register_capture: # Using register_capture as a proxy for admin app
-        #    new_app.register_blueprint(configurator, url_prefix='/configurator')
+        if register_capture: # Using register_capture as a proxy for admin app
+            new_app.register_blueprint(configurator, url_prefix='/configurator')
         new_app.register_blueprint(harmony, url_prefix='/harmony')
         
         # Register other blueprints if needed, but observer/calibrator logic might need app instance
@@ -1655,7 +1655,7 @@ def start_servers():
         print("Could not import RTSPCamera for patching (might not be in use or import failed)")
         pass
 
-    # setConfiguratorApp(admin_app) # Separated
+    setConfiguratorApp(admin_app)
     setObserverApp(admin_app)
     
     # --- Monkey Patch for Calibrator App Sync ---
