@@ -23,8 +23,8 @@ with mock.patch.dict(sys.modules):
     sys.modules['ipynb.fs'] = mock.MagicMock()
     sys.modules['ipynb.fs.full'] = mock.MagicMock()
     sys.modules['ipynb.fs.full.HarmonyMachine'] = mock.MagicMock()
-    sys.modules['ipynb.fs.full.Observer'] = mock.MagicMock()
     sys.modules['observer'] = mock.MagicMock()
+    sys.modules['observer.Observer'] = mock.MagicMock()
     # Mock submodules referenced in harmonyServer imports
     sys.modules['observer.configurator'] = mock.MagicMock()
     sys.modules['observer.observerServer'] = mock.MagicMock()

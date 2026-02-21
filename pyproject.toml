@@ -12,7 +12,7 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 "harmony" = ["**/*.ipynb", "**/*.html", "**/*.css", "**/*.js"]
-"observer" = ["**/*.ipynb", "**/*.html", "**/*.css", "**/*.js"]
+"observer" = ["**/*.html", "**/*.css", "**/*.js"]
 
 [project.scripts]
 harmony = "harmony.harmonyServer:start_servers"

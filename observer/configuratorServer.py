@@ -2,10 +2,10 @@ import os
 import atexit
 from flask import Flask, redirect, Response
 from configurator import configurator, setConfiguratorApp #, registerCaptureService
-from ipynb.fs.full.CalibratedObserver import CalibrationObserver
+from observer.CalibratedObserver import CalibrationObserver
 # from calibrator import CalibratedCaptureConfiguration, CalibrationObserver, setCalibratorApp # Deprecated
 
-from ipynb.fs.full.HexObserver import HexCaptureConfiguration, HexGridConfiguration
+from observer.HexObserver import HexCaptureConfiguration, HexGridConfiguration
 from file_lock import FileLock
 
 PORT = int(os.getenv("OBSERVER_PORT", "7000"))

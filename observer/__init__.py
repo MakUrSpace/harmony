@@ -5,7 +5,7 @@ oldPath = os.getcwd()
 try:
     observerDirectory = os.path.dirname(os.path.realpath(__file__))
     sys.path.insert(0, observerDirectory)
-    from ipynb.fs.full.CalibratedObserver import (
+    from observer.CalibratedObserver import (
         CalibratedCaptureConfiguration,
         CalibrationObserver,
         CalibratedObserver,
@@ -15,7 +15,7 @@ try:
         Transition,
         distanceFormula
     )
-    from ipynb.fs.full.HexObserver import (
+    from observer.HexObserver import (
         HexGridConfiguration,
         HexCaptureConfiguration
     )

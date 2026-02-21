@@ -38,7 +38,7 @@ try:
     observerDirectory = os.path.dirname(os.path.realpath(__file__))
     sys.path.insert(0, observerDirectory)
     from ipynb.fs.full.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
-    from ipynb.fs.full.Observer import hStackImages, clipImage, Camera
+    from observer.Observer import hStackImages, clipImage, Camera
 finally:
     os.chdir(oldPath)
 
@@ -437,9 +437,10 @@ def getConsoleImage():
 BROADCASTERS = {}
 
 class FrameBroadcaster:
-    def __init__(self, key, render_func, fps=15):
+    def __init__(self, key, render_func, app, fps=15):
         self.key = key
         self.render_func = render_func
+        self.app = app
         self.interval = 1.0 / fps
         self.last_frame = None
         self.lock = threading.Lock()
@@ -464,7 +465,8 @@ class FrameBroadcaster:
         while self.running:
             start_time = time.time()
             try:
-                frame_bytes = self.render_func()
+                with self.app.app_context():
+                    frame_bytes = self.render_func()
                 if frame_bytes:
                     with self.lock:
                         self.last_frame = frame_bytes
@@ -508,8 +510,14 @@ def render_minimap(cm):
             return None
             
         camImage = cm.buildMiniMap()
-        
-        x, y, w, h = cm.cc.realSpaceBoundingBox()
+        if camImage is None:
+            return None
+            
+        bounds = cm.cc.realSpaceBoundingBox()
+        if bounds is None:
+            return None
+            
+        x, y, w, h = bounds
         x, y, w, h = int(x), int(y), int(w), int(h)
         
         shift_x = 0
@@ -583,7 +591,7 @@ def render_camera(cc, camName):
 
 def get_broadcaster(key, render_func):
     if key not in BROADCASTERS:
-        BROADCASTERS[key] = FrameBroadcaster(key, render_func)
+        BROADCASTERS[key] = FrameBroadcaster(key, render_func, current_app._get_current_object())
         BROADCASTERS[key].start()
     return BROADCASTERS[key]
 
@@ -1635,7 +1643,7 @@ def start_servers():
     
     # Monkey Patch for RTSPCamera to ensure threads are started
     try:
-        from ipynb.fs.full.Observer import RTSPCamera
+        from observer.Observer import RTSPCamera
         
         original_collectImage = RTSPCamera.collectImage
         

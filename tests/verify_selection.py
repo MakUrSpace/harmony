@@ -32,11 +32,10 @@ sys.modules['ipynb.fs.full'] = mock_ipynb
 
 # Mock specific ipynb modules that are imported
 sys.modules['ipynb.fs.full.HarmonyMachine'] = mock_ipynb
-sys.modules['ipynb.fs.full.Observer'] = mock_ipynb
-sys.modules['ipynb.fs.full.CalibratedObserver'] = mock_ipynb
-sys.modules['ipynb.fs.full.HexObserver'] = mock_ipynb
-sys.modules['ipynb.fs.full.HexGridConfiguration'] = mock_ipynb
-sys.modules['ipynb.fs.full.HexCaptureConfiguration'] = mock_ipynb
+sys.modules['observer'] = mock_ipynb
+sys.modules['observer.Observer'] = mock_ipynb
+sys.modules['observer.CalibratedObserver'] = mock_ipynb
+sys.modules['observer.HexObserver'] = mock_ipynb
 
 # Mock observer.calibrator
 mock_calibrator = mock.MagicMock()

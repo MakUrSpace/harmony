@@ -5,9 +5,9 @@ import numpy as np
 import math
 from flask import Blueprint, render_template, abort, request, Response, url_for
 
-from ipynb.fs.full.Observer import RemoteCamera, RTSPCamera
-from ipynb.fs.full.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver
-from ipynb.fs.full.HexObserver import HexGridConfiguration
+from observer.Observer import RemoteCamera, RTSPCamera
+from observer.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver
+from observer.HexObserver import HexGridConfiguration
 
 # from calibrator import calibrator, registerCaptureService, setCalibratorApp # Deprecated
 
@@ -334,7 +334,7 @@ def manualCalibration():
         if hasattr(app.cm, 'buildRealSpaceConverter'):
             app.cm.buildRealSpaceConverter()
         else:
-            from ipynb.fs.full.CalibratedObserver import RealSpaceConverter
+            from observer.CalibratedObserver import RealSpaceConverter
             app.cc.rsc = RealSpaceConverter([cNCoordPair 
                                               for cPtGrp in app.cm.calibrationPts
                                               for cNCoordPair in list(cPtGrp.items())])

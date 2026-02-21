@@ -9,7 +9,7 @@ import argparse
 import json
 from io import BytesIO
 
-from ipynb.fs.full.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver, CalibratedObserver, Camera, cv2, CameraChange
+from observer.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver, CalibratedObserver, Camera, cv2, CameraChange
 
 import threading
 import atexit
