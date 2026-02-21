@@ -91,6 +91,8 @@
                 canvas.height = img.naturalHeight || img.clientHeight;
                 canvas.style.width = img.clientWidth + 'px';
                 canvas.style.height = img.clientHeight + 'px';
+                canvas.style.left = img.offsetLeft + 'px';
+                canvas.style.top = img.offsetTop + 'px';
                 drawPoints(camName);
             }
         });
@@ -109,7 +111,7 @@
         cameraNames.forEach(function (camName) {
             var canvas = document.getElementById('overlayCanvas_' + camName);
             var img = document.getElementById('cam' + camName);
-            if (canvas && img && (canvas.clientWidth !== img.clientWidth || canvas.clientHeight !== img.clientHeight)) {
+            if (canvas && img && (canvas.clientWidth !== img.clientWidth || canvas.clientHeight !== img.clientHeight || canvas.offsetLeft !== img.offsetLeft || canvas.offsetTop !== img.offsetTop)) {
                 needsResize = true;
             }
         });
