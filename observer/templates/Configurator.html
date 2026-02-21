@@ -105,13 +105,16 @@
 
     // Poll resizing just in case images load late
     setInterval(function () {
-        if (cameraNames.length > 0) {
-            var camName = cameraNames[0];
+        var needsResize = false;
+        cameraNames.forEach(function (camName) {
             var canvas = document.getElementById('overlayCanvas_' + camName);
             var img = document.getElementById('cam' + camName);
             if (canvas && img && (canvas.clientWidth !== img.clientWidth || canvas.clientHeight !== img.clientHeight)) {
-                resizeCanvas();
+                needsResize = true;
             }
+        });
+        if (needsResize) {
+            resizeCanvas();
         }
     }, 1000);
 
