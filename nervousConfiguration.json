@@ -1,0 +1,56 @@
+{
+  "RTSPCamera -- Camera 1 Gate": {
+    "addr": "192.168.2.104:554/11",
+    "rot": false,
+    "az": "[[0.0, 0.0], [1920.0, 0.0], [1920.0, 1080.0], [0.0, 1080.0]]",
+    "auth": [
+      "admin",
+      "n00B!ccam"
+    ],
+    "installImage": "GateCameraInstall.jpg",
+    "networkStatus": "Connected",
+    "networkType": "Wired",
+    "powerGeneration": "15W Solar",
+    "powerLevel": "88% (Battery)",
+    "lat": "38.89510",
+    "lon": "-77.03640",
+    "effectors": [
+      "Sonic Deterrent",
+      "Spotlight"
+    ]
+  },
+  "RTSPCamera -- Camera 2 Road": {
+    "addr": "192.168.2.24:554/11",
+    "rot": false,
+    "az": "[[0.0, 0.0], [1920.0, 0.0], [1920.0, 1080.0], [0.0, 1080.0]]",
+    "auth": [
+      "admin",
+      "n00B!ccam"
+    ],
+    "installImage": "RoadCameraInstall.jpg",
+    "networkStatus": "Connected",
+    "networkType": "Wireless",
+    "powerGeneration": null,
+    "powerLevel": "Mains",
+    "lat": "38.89625",
+    "lon": "-77.03610",
+    "effector": null
+  },
+  "Gateway -- Main Hub": {
+    "type": "Gateway",
+    "addr": "192.168.2.1",
+    "rot": false,
+    "az": "[]",
+    "networkStatus": "Connected",
+    "networkType": "Cellular",
+    "powerGeneration": "150W Solar",
+    "powerLevel": "100% (Battery)",
+    "lat": "38.89550",
+    "lon": "-77.03600",
+    "connectedDevices": [
+      "Camera 1 Gate",
+      "Camera 2 Road"
+    ]
+  },
+  "password": "gtdgdb"
+}

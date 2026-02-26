@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <link rel="stylesheet" href="/style.css">
+    <script src="/bootstrap.min.js"></script>
+    <script src="/htmx.min.js"></script>
+
+    <style>
+        .camera-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .stream-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #000;
+        }
+
+        #main-stream {
+            max-width: 100%;
+            max-height: 80vh;
+        }
+    </style>
+
+    <title>Observer</title>
+</head>
+
+<body>
+    <div class="container-fluid py-4">
+        <h1 align="center" class="mb-4">Observer IP Cameras</h1>
+
+        <div class="row">
+            <!-- Sidebar Configuration -->
+            <div class="col-md-4">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Add Camera</h5>
+                    </div>
+                    <div class="card-body">
+                        <form hx-post="/nervous/camera"
+                            hx-on::after-request="if(event.detail.successful) { this.reset(); loadCameras(); }">
+                            <div class="mb-3">
+                                <label class="form-label">Name</label>
+                                <input type="text" class="form-control" name="name" required
+                                    placeholder="e.g. RTSPCamera0">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">RTSP Address</label>
+                                <input type="text" class="form-control" name="addr" required
+                                    placeholder="192.168.1.1:554/livestream">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Username</label>
+                                <input type="text" class="form-control" name="username">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Password</label>
+                                <input type="password" class="form-control" name="password">
+                            </div>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" name="rot" value="true" id="rotCheck">
+                                <label class="form-check-label" for="rotCheck">Rotate 90° Clockwise</label>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">Add Camera</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Configured Cameras</h5>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadCameras()">Refresh</button>
+                    </div>
+                    <div class="card-body p-0 camera-list">
+                        <ul class="list-group list-group-flush" id="camera-list-ul">
+                            <!-- Loaded dynamically -->
+                            <li class="list-group-item text-muted">Loading cameras...</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Video Stream Area -->
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0" id="stream-title">Select a camera to view</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="stream-container">
+                            <img id="main-stream" src="" alt="Video stream will appear here" style="display: none;">
+                            <p id="stream-placeholder" class="text-muted m-5">No camera selected</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function loadCameras() {
+            const listEl = document.getElementById('camera-list-ul');
+            listEl.innerHTML = '<li class="list-group-item text-muted">Loading...</li>';
+
+            fetch('/nervous/config')
+                .then(res => res.json())
+                .then(data => {
+                    listEl.innerHTML = '';
+                    let hasCameras = false;
+
+                    for (const [name, info] of Object.entries(data)) {
+                        // Skip internal non-camera objects if they sneak into configuration
+                        if (name === 'rsc' || name === 'hex' || name === 'calibrationPlan' || name === 'password') continue;
+
+                        hasCameras = true;
+
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item d-flex justify-content-between align-items-center';
+                        li.innerHTML = `
+                        <div>
+                            <strong>${name}</strong>
+                            <div class="small text-muted">${info.addr || 'No address'}</div>
+                        </div>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-primary" onclick="selectCamera('${name}')">View</button>
+                            <button class="btn btn-outline-danger" onclick="deleteCamera('${name}')">Delete</button>
+                        </div>
+                    `;
+                        listEl.appendChild(li);
+                    }
+
+                    if (!hasCameras) {
+                        listEl.innerHTML = '<li class="list-group-item text-muted">No cameras configured</li>';
+                    }
+                })
+                .catch(err => {
+                    listEl.innerHTML = `<li class="list-group-item text-danger">Error loading cameras: ${err}</li>`;
+                });
+        }
+
+        function selectCamera(name) {
+            document.getElementById('stream-title').innerText = `Viewing: ${name}`;
+            const img = document.getElementById('main-stream');
+            const placeholder = document.getElementById('stream-placeholder');
+
+            img.src = `/nervous/stream/${name}?t=${new Date().getTime()}`;
+            img.style.display = 'block';
+            placeholder.style.display = 'none';
+        }
+
+        function deleteCamera(name) {
+            if (!confirm(`Are you sure you want to delete camera ${name}?`)) return;
+
+            fetch(`/nervous/camera/${name}`, { method: 'DELETE' })
+                .then(res => {
+                    if (res.ok) {
+                        loadCameras();
+                        if (document.getElementById('stream-title').innerText.includes(name)) {
+                            document.getElementById('main-stream').style.display = 'none';
+                            document.getElementById('stream-placeholder').style.display = 'block';
+                            document.getElementById('stream-title').innerText = 'Select a camera to view';
+                            document.getElementById('main-stream').src = '';
+                        }
+                    } else {
+                        alert('Failed to delete camera');
+                    }
+                });
+        }
+
+        // Load initial layout
+        document.addEventListener("DOMContentLoaded", function () {
+            loadCameras();
+        });
+    </script>
+</body>
+
+</html>

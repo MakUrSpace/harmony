@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <link rel="stylesheet" href="/style.css">
+    <script src="/bootstrap.min.js"></script>
+    <script src="/htmx.min.js"></script>
+
+    <style>
+        .camera-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .stream-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #000;
+        }
+
+        #main-stream {
+            max-width: 100%;
+            max-height: 80vh;
+        }
+    </style>
+
+    <title>Observer</title>
+</head>
+
+<body>
+    <div class="container-fluid py-4">
+        <h1 align="center" class="mb-4">Ground Truth Defense Observer</h1>
+
+        <div class="row">
+            <!-- Sidebar Configuration -->
+            <div class="col-lg-5 col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Configured Nodes</h5>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadCameras()">Refresh</button>
+                    </div>
+                    <div class="card-body p-0 camera-list">
+                        <ul class="list-group list-group-flush" id="camera-list-ul">
+                            <!-- Loaded dynamically -->
+                            <li class="list-group-item text-muted">Loading cameras...</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Video Stream Area -->
+            <div class="col-lg-7 col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0" id="stream-title">Select a camera to view</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="stream-container">
+                            <img id="main-stream" src="" alt="Video stream will appear here"
+                                style="display: none; width: 100%;">
+                            <p id="stream-placeholder" class="text-muted m-5">No camera selected</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleArm(btn, effector, camName, engageBtnId) {
+            const isArmed = btn.classList.contains('btn-warning');
+            const engageBtn = document.getElementById(engageBtnId);
+
+            if (isArmed) {
+                // Disarm
+                btn.classList.remove('btn-warning');
+                btn.classList.add('btn-outline-warning');
+                alert(`Disarming ${effector} on ${camName}`);
+
+                // Also disengage if engaged
+                if (engageBtn && engageBtn.classList.contains('btn-danger')) {
+                    toggleEngage(engageBtn, effector, camName);
+                }
+                if (engageBtn) engageBtn.disabled = true;
+            } else {
+                // Arm
+                btn.classList.remove('btn-outline-warning');
+                btn.classList.add('btn-warning');
+                alert(`Arming ${effector} on ${camName}`);
+
+                if (engageBtn) engageBtn.disabled = false;
+            }
+        }
+
+        function toggleEngage(btn, effector, camName) {
+            const isEngaged = btn.classList.contains('btn-danger');
+
+            if (isEngaged) {
+                btn.classList.remove('btn-danger');
+                btn.classList.add('btn-outline-danger');
+                alert(`Disengaging ${effector} on ${camName}`);
+            } else {
+                btn.classList.remove('btn-outline-danger');
+                btn.classList.add('btn-danger');
+                alert(`Engaging ${effector} on ${camName}`);
+            }
+        }
+
+        function loadCameras() {
+            const listEl = document.getElementById('camera-list-ul');
+            listEl.innerHTML = '<li class="list-group-item text-muted">Loading...</li>';
+
+            fetch('/observer/config')
+                .then(res => res.json())
+                .then(data => {
+                    listEl.innerHTML = '';
+                    let hasCameras = false;
+
+                    for (const [name, info] of Object.entries(data)) {
+                        // Skip internal non-camera objects if they sneak into configuration
+                        if (name === 'rsc' || name === 'hex' || name === 'calibrationPlan' || name === 'password') continue;
+
+                        hasCameras = true;
+
+                        const iconStatusConnected = `<svg width="14" height="14" viewBox="0 0 16 16" fill="#198754" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="6"/></svg>`;
+                        const iconStatusDisconnected = `<svg width="14" height="14" viewBox="0 0 16 16" fill="#fd7e14" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="6"/></svg>`;
+                        const iconWifi = `<svg width="14" height="14" viewBox="0 0 16 16" fill="#0d6efd" xmlns="http://www.w3.org/2000/svg"><path d="M15.385 6.115a10.465 10.465 0 0 0-14.77 0l-.615.614v1.737l.615-.615a8.468 8.468 0 0 1 11.97 0l.615.615v-1.737l-.615-.614z"/><path d="M12.87 8.63a6.467 6.467 0 0 0-9.14 0l-.615.614v1.737l.615-.615a4.468 4.468 0 0 1 6.34 0l.615.615v-1.737l-.615-.614z"/><path d="M10.355 11.145A2.467 2.467 0 0 0 7.4 11.14l-.615.614v1.737l.615-.615a.468.468 0 0 1 .59 0l.615.615v-1.737l-.614-.614z"/></svg>`;
+                        const iconEthernet = `<svg width="14" height="14" viewBox="0 0 16 16" fill="#0d6efd" xmlns="http://www.w3.org/2000/svg"><path d="M12 2v3h-1.5V3h-5v2H4V2h8zm-1.5 5h-5v2h5V7zm-6 3v2h7v-2H4.5zM2 12V6h1v5h10V6h1v6H2z"/></svg>`;
+                        const iconGlobe = `<svg width="14" height="14" viewBox="0 0 16 16" fill="#0dcaf0" xmlns="http://www.w3.org/2000/svg"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm7.5-6.923c-.67.204-1.335.82-1.887 1.855A7.97 7.97 0 0 0 5.145 4H7.5V1.077zM4.09 4a9.267 9.267 0 0 1 .64-1.539 6.7 6.7 0 0 1 .597-.933A7.025 7.025 0 0 0 2.251 4h1.84zm-1.21 1H1.205a7.067 7.067 0 0 0 0 6h1.675a10.435 10.435 0 0 1 0-6zm1.21 7H2.251a7.024 7.024 0 0 0 3.076 2.472 6.7 6.7 0 0 1-.597-.933 9.267 9.267 0 0 1-.64-1.539zm2.083 1.539a8.553 8.553 0 0 0 1.325.933A8.556 8.556 0 0 0 7.5 14.923V12H5.145c.196.58.423 1.08.672 1.539zM8.5 14.923c.319-.044.636-.2.94-.467.304-.268.583-.605.823-1.002.261-.437.49-.937.68-1.454H8.5v2.923zM10.855 12c-.196.58-.423 1.08-.672 1.539a6.7 6.7 0 0 1-.597.933A7.024 7.024 0 0 0 13.749 12h-2.894zm2.055-1h1.885a7.067 7.067 0 0 0 0-6h-1.885c.084.974.12 1.986.12 3s-.036 2.026-.12 3zm-1.21-7H13.75A7.025 7.025 0 0 0 10.674 1.528a6.7 6.7 0 0 1 .597.933 9.267 9.267 0 0 1 .64 1.539H11.7zm-2.083-1.539c-.25-.458-.476-.959-.672-1.539A8.553 8.553 0 0 0 8.5 1.077V4h2.355c-.156-.517-.354-1.018-.585-1.464l-.155-.382-.03-.061-.005-.01zM8.5 5v6h2.5c.05-.984.075-1.99.075-3s-.025-2.016-.075-3H8.5zm-1 6V5H5.03c-.048.984-.07 1.99-.07 3s.022 2.016.07 3H7.5z"/></svg>`;
+                        const iconLocation = `<svg class="mb-1" width="14" height="14" viewBox="0 0 16 16" fill="#dc3545" xmlns="http://www.w3.org/2000/svg"><path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></svg>`;
+                        const iconSun = `<svg width="12" height="12" viewBox="0 0 16 16" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M8 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm0 1a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"/></svg>`;
+                        const iconBattery = `<svg width="12" height="12" viewBox="0 0 16 16" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M2 6h10v4H2V6z"/><path d="M2 4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H2zm10 1a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h10zm4 3a1.5 1.5 0 0 1-1.5 1.5v-3A1.5 1.5 0 0 1 16 8z"/></svg>`;
+                        const iconTarget = `<svg class="mb-1" width="14" height="14" viewBox="0 0 16 16" fill="#dc3545" xmlns="http://www.w3.org/2000/svg"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M8 13A5 5 0 1 1 8 3a5 5 0 0 1 0 10zm0 1A6 6 0 1 0 8 2a6 6 0 0 0 0 12z"/><path d="M8 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm0 1a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M9.5 8a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>`;
+                        const iconNoEffector = `<svg class="mb-1" width="14" height="14" viewBox="0 0 16 16" fill="#6c757d" xmlns="http://www.w3.org/2000/svg"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M11.354 4.646a.5.5 0 0 0-.708 0l-6 6a.5.5 0 0 0 .708.708l6-6a.5.5 0 0 0 0-.708z"/></svg>`;
+
+                        let effectorsList = [];
+                        if (info.effectors && Array.isArray(info.effectors)) {
+                            effectorsList = info.effectors;
+                        } else if (info.effector) {
+                            effectorsList = [info.effector];
+                        }
+
+                        let effectorHtml = '';
+                        if (effectorsList.length > 0) {
+                            for (let i = 0; i < effectorsList.length; i++) {
+                                const effector = effectorsList[i];
+                                const safeCamName = name.replace(/[^a-zA-Z0-9]/g, '-');
+                                const armBtnId = `arm-${safeCamName}-${i}`;
+                                const engageBtnId = `engage-${safeCamName}-${i}`;
+                                effectorHtml += `
+                                    <div class="d-flex justify-content-between align-items-center mt-2 p-2 bg-white rounded border border-danger">
+                                        <span class="text-danger fw-bold" style="font-size: 0.85em;">${iconTarget} ${effector}</span>
+                                        <div class="btn-group btn-group-sm">
+                                            <button id="${armBtnId}" class="btn btn-outline-warning py-0 px-2 fw-bold" style="font-size: 0.8em;" onclick="toggleArm(this, '${effector}', '${name}', '${engageBtnId}')">ARM</button>
+                                            <button id="${engageBtnId}" class="btn btn-outline-danger py-0 px-2 fw-bold" style="font-size: 0.8em;" onclick="toggleEngage(this, '${effector}', '${name}')" disabled>ENGAGE</button>
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                        } else {
+                            effectorHtml = `
+                                <div class="mt-2 text-muted" style="font-size: 0.8em;">
+                                    ${iconNoEffector} No effectors
+                                </div>
+                            `;
+                        }
+
+                        let powerGenHtml = info.powerGeneration ? `<span class="badge bg-success me-1 d-inline-flex align-items-center gap-1" title="Power Generation">${iconSun} ${info.powerGeneration}</span>` : '';
+                        let powerLvlHtml = info.powerLevel ? `<span class="badge bg-secondary d-inline-flex align-items-center gap-1" title="Power Level">${iconBattery} ${info.powerLevel}</span>` : '';
+
+                        let statusIcon = info.networkStatus === 'Connected' ? iconStatusConnected : iconStatusDisconnected;
+                        let networkTypeIcon = info.networkType === 'WiFi' ? iconWifi : (info.networkType === 'Ethernet' ? iconEthernet : iconGlobe);
+
+                        let isGateway = info.type === 'Gateway' || name.toLowerCase().includes('gateway');
+                        let connectedDevicesHtml = '';
+                        if (isGateway && info.connectedDevices && info.connectedDevices.length > 0) {
+                            connectedDevicesHtml = `
+                                <div class="mt-2 p-1 bg-white rounded border border-secondary" style="font-size: 0.85em;">
+                                    <strong class="ms-1 text-secondary">Connected Downstream Devices</strong>
+                                    <ul class="mb-0 mt-1 ps-4 text-muted" style="font-size: 0.9em;">
+                                        ${info.connectedDevices.map(d => `<li>${d}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item border-bottom border-secondary mb-2 pb-3';
+                        li.innerHTML = `
+                        <div class="d-flex w-100 justify-content-between align-items-center mb-2">
+                            <div class="text-truncate flex-grow-1 pe-2">
+                                <strong class="mb-0 d-block text-truncate">${name}</strong>
+                                <div class="text-muted text-truncate" style="font-size: 0.8em;">${info.addr || 'No address'}</div>
+                            </div>
+                            ${isGateway
+                                ? `<span class="badge bg-secondary flex-shrink-0 px-2 py-1">Gateway Node</span>`
+                                : `<button class="btn btn-sm btn-outline-primary flex-shrink-0" onclick="selectCamera('${name}')">View Stream</button>`
+                            }
+                        </div>
+                        <div class="d-flex w-100 align-items-stretch">
+                            <div class="p-2 bg-light rounded border flex-grow-1" style="font-size: 0.85em; min-width: 0;">
+                                <div class="d-flex flex-wrap align-items-center mb-1">
+                                    <span class="me-3 d-inline-flex align-items-center gap-1" title="Status: ${info.networkStatus}">${statusIcon} <span class="text-muted">${info.networkStatus || 'Unknown'}</span></span>
+                                    <span class="me-3 d-inline-flex align-items-center gap-1" title="Network: ${info.networkType}">${networkTypeIcon} <span class="text-muted">${info.networkType || 'Unknown'}</span></span>
+                                    <span title="Location" class="text-nowrap d-inline-flex align-items-center gap-1 text-muted">${iconLocation} ${info.lat || 'N/A'}, ${info.lon || 'N/A'}</span>
+                                </div>
+                                <div class="mb-1">
+                                    ${powerGenHtml}${powerLvlHtml}
+                                </div>
+                                ${effectorHtml}
+                                ${connectedDevicesHtml}
+                            </div>
+                            <!-- Image wrapper -->
+                            ${info.installImage ? `
+                            <div class="ms-2 flex-shrink-0 d-flex align-items-stretch" style="width: 140px;">
+                                <div class="w-100 bg-light rounded border d-flex justify-content-center align-items-center p-1">
+                                    <img src="/observer/static/${info.installImage}" alt="Installation Location" class="rounded w-100" style="object-fit: cover; max-height: 120px; height: 100%;">
+                                </div>
+                            </div>
+                            ` : ''}
+                        </div>
+                    `;
+                        listEl.appendChild(li);
+                    }
+
+                    if (!hasCameras) {
+                        listEl.innerHTML = '<li class="list-group-item text-muted">No cameras configured</li>';
+                    }
+                })
+                .catch(err => {
+                    listEl.innerHTML = `<li class="list-group-item text-danger">Error loading cameras: ${err}</li>`;
+                });
+        }
+
+        let currentStreamName = null;
+
+        function selectCamera(name) {
+            const img = document.getElementById('main-stream');
+            const placeholder = document.getElementById('stream-placeholder');
+
+            if (currentStreamName === name) {
+                // Toggle off
+                currentStreamName = null;
+                document.getElementById('stream-title').innerText = `Select a camera to view`;
+                img.src = '';
+                img.style.display = 'none';
+                placeholder.style.display = 'block';
+            } else {
+                // Toggle on
+                currentStreamName = name;
+                document.getElementById('stream-title').innerText = `Viewing: ${name}`;
+                img.src = `/observer/stream/${name}?t=${new Date().getTime()}`;
+                img.style.display = 'block';
+                placeholder.style.display = 'none';
+            }
+        }
+
+        // Load initial layout
+        document.addEventListener("DOMContentLoaded", function () {
+            loadCameras();
+        });
+    </script>
+    <div class="container">
+        <div class="ms-2 flex-shrink-0 d-flex align-items-stretch">
+            <div class="w-100 bg-light rounded border d-flex justify-content-center align-items-center p-1">
+                <img src="/observer/static/Diagram.png" alt="Installation Diagram" class="rounded w-100"
+                    style="object-fit: cover; width: 100%;">
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

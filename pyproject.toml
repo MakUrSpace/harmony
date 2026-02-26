@@ -1,5 +1,5 @@
 [project]
-name = "harmony"
+name = "nervous"
 version = "0.0.1"
 requires-python = ">3.10"
 
@@ -7,14 +7,13 @@ requires-python = ">3.10"
 requires = ["setuptools", "setuptools-scm"]
 
 [tool.setuptools]
-packages = ["harmony", "observer"]
+packages = ["nervous", "observer"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-"harmony" = ["**/*.ipynb", "**/*.html", "**/*.css", "**/*.js"]
-"observer" = ["**/*.html", "**/*.css", "**/*.js"]
+"nervous" = ["**/*.html", "**/*.css", "**/*.js", "**/*.jpg", "**/*.png"]
+"observer" = ["**/*.html", "**/*.css", "**/*.js", "**/*.jpg", "**/*.png"]
 
 [project.scripts]
-harmony = "harmony.harmonyServer:start_servers"
-observer = "observer.observerServer:main"
-configurator = "observer.configuratorServer:main"
+nervous = "nervous.server:main"
+observer = "observer.server:main"
