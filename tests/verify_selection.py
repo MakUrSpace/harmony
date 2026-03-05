@@ -20,18 +20,12 @@ sys.modules['cv2'] = mock_cv2
 mock_mpl = mock.MagicMock()
 sys.modules['matplotlib'] = mock_mpl
 sys.modules['matplotlib.backends'] = mock_mpl
-sys.modules['matplotlib.backends.backend_agg'] = mock_mpl
-sys.modules['matplotlib.figure'] = mock_mpl
-
-# Mock ipynb module structure
+# Mock ipynb module structure (legacy, but keep harmony mock)
 mock_ipynb = mock.MagicMock()
-sys.modules['ipynb'] = mock_ipynb
-sys.modules['ipynb.fs'] = mock_ipynb
-sys.modules['ipynb.fs.full'] = mock_ipynb
 
 
 # Mock specific ipynb modules that are imported
-sys.modules['ipynb.fs.full.HarmonyMachine'] = mock_ipynb
+sys.modules['HarmonyMachine'] = mock_ipynb
 sys.modules['observer'] = mock_ipynb
 sys.modules['observer.Observer'] = mock_ipynb
 sys.modules['observer.CalibratedObserver'] = mock_ipynb

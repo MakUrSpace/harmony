@@ -564,11 +564,14 @@ class RTSPCamera(RemoteCamera):
     def collectImage(self, timeout_s: float = 5) -> np.ndarray:
         """
         Blocking API: waits until a *new* frame arrives (or returns latest if already available).
-        Requires the capture thread to be started.
+        Requires the capture thread to be started. Auto-starts if not running.
         """
-        # If thread isn't running, fall back to old behavior (single-shot open/read/close)
+        # Ensure thread is started
         if self._cap_thread is None or not self._cap_thread.is_alive():
-            return self._collectImage_oneshot(timeout_s=timeout_s)
+            print(f"Auto-starting capture thread for {self.camName}")
+            self.start_capture()
+            # Give it a moment to start
+            time.sleep(0.1)
 
         start = time()
         start_seq = self._latest_seq

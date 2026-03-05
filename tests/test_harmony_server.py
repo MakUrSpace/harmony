@@ -16,13 +16,7 @@ with mock.patch.dict(sys.modules):
     sys.modules['matplotlib'] = mock.MagicMock()
     sys.modules['matplotlib.backends'] = mock.MagicMock()
     sys.modules['matplotlib.backends.backend_agg'] = mock.MagicMock()
-    sys.modules['matplotlib.figure'] = mock.MagicMock()
-
-    # Mock ipynb and observer
-    sys.modules['ipynb'] = mock.MagicMock()
-    sys.modules['ipynb.fs'] = mock.MagicMock()
-    sys.modules['ipynb.fs.full'] = mock.MagicMock()
-    sys.modules['ipynb.fs.full.HarmonyMachine'] = mock.MagicMock()
+    sys.modules['HarmonyMachine'] = mock.MagicMock()
     sys.modules['observer'] = mock.MagicMock()
     sys.modules['observer.Observer'] = mock.MagicMock()
     # Mock submodules referenced in harmonyServer imports
