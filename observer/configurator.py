@@ -317,12 +317,16 @@ def manualCalibration():
         
         # Add to entry
         # Assumes "first" triangle position as the target for manual calibration.
-        first_triangle = getattr(app.cm, 'first_triangle', [[500, 500], [440, 500], [500, 420]])
-        if first_triangle:
-             new_calib_entry[camName] = [pixelPoints, first_triangle]
-             added_count += 1
+        first_triangle_axial = getattr(app.cm, 'first_triangle', [[200, 200], [202, 200], [198, 204]])
+        
+        # Convert triangle axial coordinates to gridspace coordinates
+        if hasattr(app.cc, 'axial_to_pixel'):
+            first_triangle = [app.cc.axial_to_pixel(p[0], p[1]).tolist() for p in first_triangle_axial]
         else:
-             print("first_triangle is not defined")
+            first_triangle = first_triangle_axial
+            
+        new_calib_entry[camName] = [pixelPoints, first_triangle]
+        added_count += 1
         
     if added_count > 0:
         # Overwrite previous calibration (User Request)

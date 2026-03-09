@@ -32,9 +32,6 @@ class HexGridConfiguration:
         self.anchor_xy = (-int((self.size / 2.86) + 0.25), -int(self.size / 2))
 
 
-# In[4]:
-
-
 class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def loadConfiguration(self, path="observerConfiguration.json"):
         super().loadConfiguration()
@@ -792,7 +789,6 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         return TrackedObject(oid=oid, changeSet=changeSet)
 
 
-# In[5]:
 
 
 if __name__ == "__main__":

@@ -319,16 +319,9 @@ class CalibrationObserver(Observer):
 
     def reset(self):
         super().reset()
-        self.dowel_position = None
         self.calibrated = False
-        self.dowel_length = 150
-        self.triangle_index = 0
         self.next_triangle = [[0, 0], [0, 0], [0, 0]]
-        self.first_triangle = [[500, 500], [440, 500], [500, 420]]
-        self.top_transition = [[0, 165], [0, 165], [0, 165]]
-        self.hypos_transition = [[160, 0], [160, 0], [160, 0]]
-        self.longs_transition = [[-160, 0], [-160, 0], [-160, 0]]
-        self.shorts_transition = [[0, -165], [0, -165], [0, -165]]
+        self.first_triangle = [[500, 500], [460, 500], [500, 430]]
         self.calibrationPts = []
 
     def calibrateToObject(self, calibObj, dowel_position):
@@ -336,18 +329,7 @@ class CalibrationObserver(Observer):
         calibPtLoc = self.next_triangle[0]
         expectedCams = list(self.cc.cameras.keys())
 
-        if dowel_position == "first":
-            transition = self.first_triangle
-        elif dowel_position == "top":
-            transition = self.top_transition
-        elif dowel_position == "hypos":
-            transition = self.hypos_transition
-        elif dowel_position == "longs":
-            transition = self.longs_transition
-        elif dowel_position == "shorts":
-            transition = self.shorts_transition
-        else:
-            raise Exception(f"Unrecognized dowel position: {dowel_position}")
+        transition = self.first_triangle
         self.next_triangle = [[d0 + d1 for d0, d1 in zip(tri, trans)] for tri, trans in zip(self.next_triangle, transition)]
         realTriPts = self.next_triangle
 
@@ -368,100 +350,11 @@ class CalibrationObserver(Observer):
                                           for cPtGrp in self.calibrationPts
                                           for cNCoordPair in list(cPtGrp.items())])
 
-    def cycle(self):
-        numTransitions = len(self.transitions)
-        super().cycle()
-        if numTransitions < len(self.transitions):
-            print("Calibrating to New Memory")
-            startingRealspaceTriangle = self.next_triangle
-            try:
-                self.calibrateToObject(self.lastMemory, self.dowel_position)
-                self.passiveMode()
-                return "Stored Calibration Object"
-            except AssertionError as ae:
-                raise Exception(f"Failed Calibration: {ae}")
-                self.memory.remove(self.lastMemory)
-                self.transitions.pop(-1)
-                self.next_triangle = startingRealspaceTriangle
-                self.passiveMode()
-                return "Failed Calibration"
-
-    def passiveMode(self):
-        self.mode = "passive"
-        self.dowel_position = None
-
-    def trackMode(self, dowel_position: str):
-        assert dowel_position in ['first', 'top', 'hypos', 'longs', 'shorts'], f"Unrecognized dowel position: {dowel_position}"
-        self.dowel_position = dowel_position
-        self.mode = "track"
-        if dowel_position == "first":
-            self.memory = []
-            self.lastMemory = None
-
-    def cycleForChange(self, dowel_position: str = "top"):
-        self.trackMode(dowel_position)
-        startLen = len(self.transitions)
-        while len(self.transitions) == startLen:
-            sleep(1)
-            r = self.cycle()
-            if r == "Failed Calibration":
-                raise Exception(r)
-        self.passiveMode()
-        return self.lastMemory
-
-    def __repr__(self):
-        return f"CalibMac -- {self.mode}{'' if self.mode == 'passive' else '-'+self.dowel_position} - {self.state} (#T:{len(self.transitions)})"
-
-
-# In[8]:
-
-
-if __name__ == "__main__" and False:
-    cc = CaptureConfiguration()
-    cc.capture()
-    cm = CalibrationObserver(cc)
-    try:
-        cm.cycleForChange()
-    except:
-        pass
-    plt.imshow(cm.getCameraImagesWithChanges()['0'])
-
-
-# In[9]:
-
-
-if __name__ == "__main__" and False:
-    for i in range(2):
-        cm.cycle()
-        sleep(1)
-    plt.imshow(cc.cameras['0'].cropToActiveZone(cc.cameras['0'].mostRecentFrame))
-    plt.show()
-    plt.imshow(cc.cameras['1'].cropToActiveZone(cc.cameras['1'].mostRecentFrame))
-
-
-# In[10]:
-
-
-if __name__ == "__main__" and False:
-    try:
-        c = cm.cycleForChange("first")
-    except Exception as e:
-        print(f"Change failed: {e}")
-        plt.imshow(cc.cameras['0'].cropToActiveZone(cc.cameras['0'].mostRecentFrame))
-        plt.show()
-        plt.imshow(cc.cameras['1'].cropToActiveZone(cc.cameras['1'].mostRecentFrame))
-
-
-# In[11]:
-
 
 @dataclass
 class MiniMapObject:
     object: TrackedObject
     color: tuple[int, int, int]
-
-
-# In[12]:
 
 
 class CalibratedCaptureConfiguration(CaptureConfiguration):
@@ -590,9 +483,6 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
         return len(contours) == 1
 
 
-# In[13]:
-
-
 class CalibratedObserver(Observer):
     def __init__(self, config: CalibratedCaptureConfiguration):
         super().__init__(config)
@@ -691,22 +581,4 @@ class CalibratedObserver(Observer):
         ] for theta in angles], dtype=np.int32)
 
         return contour
-
-if __name__ == "__main__":
-    cc = CalibratedCaptureConfiguration()
-    cm = CalibratedObserver(cc)
-    cm.cycle()
-    plt.imshow(cc.buildMiniMap(objectsAndColors=[MiniMapObject(mem, (255, 0, 0)) for mem in cm.memory]))
-    plt.show()
-    # for i in range(2):
-    #     cm.cycleForChange()
-    # plt.imshow(cm.getCameraImagesWithChanges()['0'])
-    # plt.show()
-    # plt.imshow(cc.buildMiniMap(objectsAndColors=[MiniMapObject(mem, (255, 0, 0)) for mem in cm.memory]))
-
-
-# In[ ]:
-
-
-
 
