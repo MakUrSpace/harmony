@@ -317,7 +317,8 @@ def manualCalibration():
         
         # Add to entry
         # Assumes "first" triangle position as the target for manual calibration.
-        first_triangle_axial = getattr(app.cm, 'first_triangle', [[200, 200], [202, 200], [198, 204]])
+        #first_triangle_axial = [[200, 200], [202, 200], [198, 204]]
+        first_triangle_axial = [[200, 200], [218, 200], [193, 214]]
         
         # Convert triangle axial coordinates to gridspace coordinates
         if hasattr(app.cc, 'axial_to_pixel'):
