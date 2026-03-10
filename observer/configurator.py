@@ -45,6 +45,17 @@ def buildConfigurator():
                     <button class="btn btn-sm btn-warning" onclick="clearShape('{cam.camName}')">Clear Manual Points</button>
                     <!-- AZ controls below -->
                 </div>
+                
+                <div class="mt-3" id="activeCalibTableContainer_{cam.camName}" style="display:none; max-width: 600px; margin: auto;">
+                    <h5>Calibration Points (Editable)</h5>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered text-center" id="activeCalibTable_{cam.camName}">
+                            <thead><tr><th>Point</th><th>Pixel X</th><th>Pixel Y</th><th>Axial Q</th><th>Axial R</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <label for="az">Active Zone</label><br>
                 <div class="container">
                     <div class="row">
@@ -297,8 +308,14 @@ def manualCalibration():
     # Structure of calibrationPts entry: {camName: [pixelPoints, realPoints], camName2: ...}
     new_calib_entry = {}
     
-    for camName, points in data.items():
-        if len(points) != 3:
+    for camName, payload in data.items():
+        if not isinstance(payload, dict) or 'pixel' not in payload or 'axial' not in payload:
+            continue
+            
+        pixel_data = payload['pixel']
+        axial_data = payload['axial']
+        
+        if len(pixel_data) != 3 or len(axial_data) != 3:
             continue
             
         if camName not in app.cc.cameras:
@@ -313,17 +330,17 @@ def manualCalibration():
              continue
         
         # Convert normalized points to pixel coordinates
-        pixelPoints = [[int(p[0] * w), int(p[1] * h)] for p in points]
+        pixelPoints = [[int(p[0] * w), int(p[1] * h)] for p in pixel_data]
         
-        # Add to entry
-        # Assumes "first" triangle position as the target for manual calibration.
-        first_triangle_axial = [[200, 200], [208, 200], [198, 204]]
-        
-        # Convert triangle axial coordinates to gridspace coordinates
+        # Convert user-provided axial coordinates to gridspace coordinates
         if hasattr(app.cc, 'axial_to_pixel'):
-            first_triangle = [app.cc.axial_to_pixel(p[0], p[1]).tolist() for p in first_triangle_axial]
+            try:
+                first_triangle = [app.cc.axial_to_pixel(p[0], p[1]).tolist() for p in axial_data]
+            except Exception as e:
+                print(f"Error converting axial to pixel: {e}")
+                first_triangle = axial_data
         else:
-            first_triangle = first_triangle_axial
+            first_triangle = axial_data
             
         new_calib_entry[camName] = [pixelPoints, first_triangle]
         added_count += 1
