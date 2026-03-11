@@ -305,7 +305,8 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
     def cam_hex_at_axial(self, cam, q: int, r: int):
         w, h = self.cameras[cam].mostRecentFrame.shape[:2]
-        cam_space_converter = self.rsc.converters[cam][0]
+        center_real = self.axial_to_pixel(q, r)
+        cam_space_converter = self.rsc.closestConverterToRealCoord(cam, center_real)
         M = cam_space_converter.M
         Minv = np.linalg.inv(M)
         grid_poly = self.hex_at_axial(q, r)
@@ -319,18 +320,17 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         """
         all_points_real = []
         
+        rsc = self.rsc
         try:
             # Iterate over camera views for this object
             for cam_name, change in obj.changeSet.items():
-                if self.rsc is None:
+                if rsc is None:
                     continue
                     
                 # Skip cameras not in RSC
-                if cam_name not in self.rsc.converters:
+                if cam_name not in rsc.converters:
                     continue
                     
-                converter = self.rsc.converters[cam_name][0]
-                
                 for contour in change.changeContours:
                     # contour is (N, 1, 2) or (N, 2)
                     for pt in contour:
@@ -342,6 +342,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                             
                         # Convert Camera -> Real Space
                         try:
+                            converter = rsc.closestConverterToCamCoord(cam_name, (float(x), float(y)))
                             real_pt = converter.convertCameraToRealSpace((float(x), float(y)))
                             all_points_real.append(real_pt)
                         except Exception:
@@ -414,11 +415,10 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                     
                     if az is not None and len(az) > 0:
                         # These are in Camera Coordinates. Transform to Real Space.
-                        if hasattr(self, 'rsc') and cam_name in self.rsc.converters:
-                            converter = self.rsc.converters[cam_name][0]
-                            
+                        if hasattr(self, 'rsc') and self.rsc is not None and cam_name in self.rsc.converters:
                             # Convert polygon points
                             real_pts = []
+                            rsc = self.rsc
                             for pt in az:
                                 # Robustly handle (N, 2) and (N, 1, 2) shapes
                                 x, y = 0, 0
@@ -440,6 +440,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                                     print(f"MiniMap: Error processing point {pt}: {e}")
                                     continue
 
+                                converter = rsc.closestConverterToCamCoord(cam_name, (x, y))
                                 r_pt = converter.convertCameraToRealSpace((x, y))
                                 real_pts.append(r_pt)
                             
@@ -562,7 +563,8 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         Prevents clipping issues caused by fixed-size minimaps.
         Monkey-patched into HexCaptureConfiguration.
         """
-        if self.rsc is None:
+        rsc = self.rsc
+        if rsc is None:
              print(f"DynamicGrid: RSC is None for {cam}")
              return None
 
@@ -576,11 +578,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         overlay = np.zeros((height, width, 3), dtype=np.uint8)
         
         # Get converter for this camera
-        if str(cam) not in self.rsc.converters:
+        if str(cam) not in rsc.converters:
             return None
             
-        converter = self.rsc.converters[str(cam)][0]
-        
         # Define 4 corners of the camera frame
         corners_cam = [(0, 0), (width, 0), (width, height), (0, height)]
         
@@ -588,6 +588,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         corners_real = []
         for p in corners_cam:
             try:
+                converter = rsc.closestConverterToCamCoord(str(cam), p)
                 rp = converter.convertCameraToRealSpace(p)
                 corners_real.append(rp)
             except Exception:
@@ -657,18 +658,24 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         
         # Legacy/Object path (clipped to 1200x1200mm usually)
         # This path is still used if objects need to be drawn
+        rsc = self.rsc
         try:
-            M = self.rsc.converters[cam][0].M
-            Minv = np.linalg.inv(M)
-
-            warped = cv2.warpPerspective(
-                self.buildMiniMap(objectsAndColors=objectsAndColors),
-                Minv,
-                (width, height),
-                flags=cv2.INTER_NEAREST,
-                borderMode=cv2.BORDER_CONSTANT,
-                borderValue=(0, 0, 0),
-            )
+            warped = np.zeros((height, width, 3), dtype="uint8")
+            minimap = self.buildMiniMap(objectsAndColors=objectsAndColors)
+            if rsc is not None and cam in rsc.converters:
+                for converter in rsc.converters[cam]:
+                    M = converter.M
+                    Minv = np.linalg.inv(M)
+    
+                    w_part = cv2.warpPerspective(
+                        minimap,
+                        Minv,
+                        (width, height),
+                        flags=cv2.INTER_NEAREST,
+                        borderMode=cv2.BORDER_CONSTANT,
+                        borderValue=(0, 0, 0),
+                    )
+                    warped = np.maximum(warped, w_part)
             return warped[:height, :width]
         except Exception as e:
             print(f"Error in legacy cameraGriddle: {e}")
@@ -684,18 +691,21 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         for cam in self.cameras.keys():
             cameraChanges = self.cameras[cam].cropToActiveZone(self.cameras[cam].mostRecentFrame.copy())
             w, h = cameraChanges.shape[:2]
-            M = self.rsc.converters[cam][0].M
-            Minv = np.linalg.inv(M)
+            warped = np.zeros((h, w, 3), dtype="uint8")
+            for converter in self.rsc.converters[cam]:
+                M = converter.M
+                Minv = np.linalg.inv(M)
 
-            # Use nearest for crisp overlays; use linear for smoother images
-            warped = cv2.warpPerspective(
-                img,
-                Minv,
-                (h, w),
-                flags=cv2.INTER_NEAREST,
-                borderMode=cv2.BORDER_CONSTANT,
-                borderValue=(0, 0, 0),
-            )
+                # Use nearest for crisp overlays; use linear for smoother images
+                w_part = cv2.warpPerspective(
+                    img,
+                    Minv,
+                    (h, w),
+                    flags=cv2.INTER_NEAREST,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=(0, 0, 0),
+                )
+                warped = np.maximum(warped, w_part)
             blended[cam] = self.cameras[cam].cropToActiveZone(cv2.addWeighted(warped[:w, :h], alpha, cameraChanges, 1.0 - alpha, 0.0))
         return blended
 
@@ -710,11 +720,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         if self.rsc is None:
             raise Exception("Cannot define an object without a RealSpace Configuration")
 
+        rsc = self.rsc
         realSpacePoly = self.hex_at_axial(q, r)
 
         changeSet = {}
         for cam in self.cameras.keys():
-            cam_poly = np.array([[int(d) for d in self.rsc.converters[cam][0].convertRealToCameraSpace(p[0])] for p in realSpacePoly], dtype="int32")
+            center_real = self.axial_to_pixel(q, r)
+            converter = rsc.closestConverterToRealCoord(cam, center_real)
+            cam_poly = np.array([[int(d) for d in converter.convertRealToCameraSpace(p[0])] for p in realSpacePoly], dtype="int32")
             changeSet[cam] = CameraChange(
                 camName=cam,
                 changeContours=[cam_poly.reshape((-1, 1, 2))],
@@ -732,11 +745,10 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         if not axials:
             raise ValueError("axials must be non-empty")
 
+        rsc = self.rsc
         changeSet = {}
 
         for cam in self.cameras.keys():
-            conv = self.rsc.converters[cam][0]
-
             # Use current frame size for the mask
             frame = self.cameras[cam].mostRecentFrame
             if frame is None:
@@ -748,6 +760,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             # 1) Project each axial hex to camera space and fill it into the mask
             for (q, r) in axials:
                 real_hex = self.hex_at_axial(q, r)  # iterable of points, often (6,1,2) or (6,2)
+                
+                center_real = self.axial_to_pixel(q, r)
+                conv = rsc.closestConverterToRealCoord(cam, center_real)
 
                 cam_pts = []
                 for p in real_hex:

@@ -128,23 +128,22 @@ def updateConfig():
 
 def draw_dynamic_grid(camName):
     try:
-        if not hasattr(app.cc, 'rsc') or app.cc.rsc is None:
-            return None
-        if not hasattr(app.cc, 'hex') or app.cc.hex is None:
+        rsc = getattr(app.cc, 'rsc', None)
+        hex_grid = getattr(app.cc, 'hex', None)
+        if rsc is None or hex_grid is None:
             return None
             
         cam = app.cc.cameras[str(camName)]
         h, w = cam.mostRecentFrame.shape[:2]
         overlay = np.zeros((h, w, 3), dtype=np.uint8)
         
-        converter = app.cc.rsc.converters[str(camName)][0]
-        
         # Define 4 corners of the camera frame
         corners_cam = [(0, 0), (w, 0), (w, h), (0, h)]
         
-        # Project to Real Space
+        # Project to Real Space using the converter closest to each corner
         corners_real = []
         for p in corners_cam:
+            converter = rsc.closestConverterToCamCoord(str(camName), p)
             rp = converter.convertCameraToRealSpace(p)
             corners_real.append(rp)
             
@@ -180,6 +179,7 @@ def draw_dynamic_grid(camName):
                 for pt in real_poly:
                     # pt is [x, y]
                     x, y = pt[0]
+                    converter = rsc.closestConverterToRealCoord(str(camName), (x, y))
                     cx, cy = converter.convertRealToCameraSpace((x, y))
                     cam_pts.append([int(round(cx)), int(round(cy))])
                 
