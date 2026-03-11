@@ -360,8 +360,7 @@ def manualCalibration():
         
     if added_count > 0:
         # Overwrite previous calibration (User Request)
-        #app.cm.calibrationPts = []
-        
+        app.cm.calibrationPts = getattr(app.cm, 'calibrationPts', [])
         # Add to calibration points list
         app.cm.calibrationPts.append(new_calib_entry)
         

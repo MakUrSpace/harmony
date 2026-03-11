@@ -134,13 +134,13 @@ class FrameBroadcaster:
                 self.clients -= 1
 
 
-def render_minimap(cm):
+def render_minimap(cm, encode=True):
     try:
         if not cm:
             print("render_minimap: cm is None")
             return None
             
-        camImage = cm.buildMiniMap()
+        camImage = cm.buildMiniMap(objectsAndColors=cm.objectsAndColors)
         if camImage is None:
             return None
             
@@ -171,9 +171,13 @@ def render_minimap(cm):
             img_h, img_w = camImage.shape[:2]
             end_x = min(img_w, crop_x + crop_w)
             end_y = min(img_h, crop_y + crop_h)
+            print(f"Cropping Minimap to: `Y:[{crop_y}:{end_y}], X:[{crop_x}:{end_x}]`")
             camImage = camImage[crop_y:end_y, crop_x:end_x]
         
         camImage = cv2.resize(camImage, virtual_map_res, interpolation=cv2.INTER_AREA)
+        if not encode:
+            return cv2.cvtColor(camImage, cv2.COLOR_BGR2RGB)
+            
         ret, encoded = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
         return encoded.tobytes()
     except Exception as e:

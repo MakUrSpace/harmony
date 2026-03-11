@@ -50,6 +50,50 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             config['hex'] = asdict(self.hex)
         return config
 
+    def realSpaceBoundingBox(self):
+        true_real_contours = []
+        try:
+            for cam_name, cam in self.cameras.items():
+                az = getattr(cam, 'activeZone', None)
+                if az is None:
+                    az = getattr(cam, 'activeZonePolygon', None)
+                if az is not None and len(az) > 0:
+                    if hasattr(self, 'rsc') and self.rsc is not None and cam_name in self.rsc.converters:
+                        real_pts = []
+                        rsc = self.rsc
+                        for pt in az:
+                            x, y = 0, 0
+                            is_nested = False
+                            if hasattr(pt, 'shape'):
+                                 if len(pt.shape) > 1:
+                                     is_nested = True
+                            elif hasattr(pt, '__len__') and len(pt) == 1 and hasattr(pt[0], '__len__'):
+                                 is_nested = True
+                            if is_nested:
+                                x = float(pt[0][0])
+                                y = float(pt[0][1])
+                            else:
+                                x = float(pt[0])
+                                y = float(pt[1])
+                            converter = rsc.closestConverterToCamCoord(cam_name, (x, y))
+                            r_pt = converter.convertCameraToRealSpace((x, y))
+                            real_pts.append(r_pt)
+                        true_real_contours.append(np.array(real_pts, dtype=np.float32))
+
+            if true_real_contours:
+                all_pts = np.vstack(true_real_contours)
+                if hasattr(self, 'apply_affine_pts'):
+                    all_pts = self.apply_affine_pts(all_pts)
+                min_x = np.min(all_pts[:, 0])
+                max_x = np.max(all_pts[:, 0])
+                min_y = np.min(all_pts[:, 1])
+                max_y = np.max(all_pts[:, 1])
+                return min_x, min_y, max_x - min_x, max_y - min_y
+        except Exception as e:
+            print(f"Error in realSpaceBoundingBox: {e}")
+
+        return 0, 0, 1600, 1600
+
     def axial_to_pixel(self, q: float, r: float) -> np.ndarray:
         """
         Axial (q, r) → grid-space pixel (x, y), pointy-top hexes
@@ -214,7 +258,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     ):
         params = (self.hex.width, self.hex.height, self.hex.size, self.hex.offset_xy, self.hex.anchor_xy, self.hex.rotation_deg, color, thickness)
         if hasattr(self, '_cached_grid_params') and self._cached_grid_params == params:
-            return self._cached_grid_overlay
+            return self._cached_grid_overlay.copy()
 
         self._cached_grid_params = params
 
@@ -273,7 +317,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             cy_g += dy
             row += 1
 
-        self._cached_grid_overlay = overlay
+        self._cached_grid_overlay = overlay.copy()
         return overlay
 
     def hex_at_axial(
@@ -658,16 +702,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         """
         if objectsAndColors is None:
             objectsAndColors = []
-            
-        height, width = self.cameras[cam].mostRecentFrame.shape[:2]
 
         if self.rsc is None:
-             return np.zeros((height, width, 3), dtype="uint8")
+            height, width = self.cameras[cam].mostRecentFrame.shape[:2]
+            return np.zeros((height, width, 3), dtype="uint8")
 
         # If no objects, use the dynamic grid for better quality/coverage
         if not objectsAndColors:
-            if cam in self.dynamicGrid:
-                return self.dynamicGrid[cam]
+            return self.dynamicGrid[cam]
         
         # Legacy/Object path (clipped to 1200x1200mm usually)
         # This path is still used if objects need to be drawn

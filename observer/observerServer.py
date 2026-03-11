@@ -336,12 +336,45 @@ def getObjectDistances(objectId):
 
 
 def minimapGenerator():
+    import time
     while True:
         camImage = app.cm.buildMiniMap(
             objectsAndColors=app.cm.objectsAndColors)
-        ret, camImage = cv2.imencode('.jpg', camImage)
+            
+        if camImage is not None:
+            bounds = app.cm.cc.realSpaceBoundingBox()
+            if bounds is not None:
+                x, y, w, h = bounds
+                x, y, w, h = int(x), int(y), int(w), int(h)
+                
+                shift_x = 0
+                shift_y = 0
+                if x < 0: shift_x = -x
+                if y < 0: shift_y = -y
+                
+                map_x = x + shift_x
+                map_y = y + shift_y
+                
+                margin = 150
+                
+                crop_x = max(0, map_x - margin)
+                crop_y = max(0, map_y - margin)
+                
+                crop_w = w + margin * 2
+                crop_h = h + margin * 2
+                
+                if crop_w > 0 and crop_h > 0:
+                    img_h, img_w = camImage.shape[:2]
+                    end_x = min(img_w, crop_x + crop_w)
+                    end_y = min(img_h, crop_y + crop_h)
+                    camImage = camImage[crop_y:end_y, crop_x:end_x]
+                    
+                camImage = cv2.resize(camImage, (1200, 1200), interpolation=cv2.INTER_AREA)
+
+        ret, encodedImage = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+        time.sleep(0.05)
         yield (b'--frame\r\n'
-               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+               b'Content-Type: image/jpg\r\n\r\n' + encodedImage.tobytes() + b'\r\n')
     
 
 @observer.route('/minimap')
