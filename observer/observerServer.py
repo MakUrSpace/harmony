@@ -337,9 +337,8 @@ def getObjectDistances(objectId):
 
 def minimapGenerator():
     while True:
-        camImage = app.cm.cc.buildMiniMap(
-            blueObjects=app.cm.memory,
-            greenObjects=[app.cm.lastClassification] if app.cm.lastClassification is not None else None)
+        camImage = app.cm.buildMiniMap(
+            objectsAndColors=app.cm.objectsAndColors)
         ret, camImage = cv2.imencode('.jpg', camImage)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')

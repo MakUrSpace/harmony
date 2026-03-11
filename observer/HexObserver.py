@@ -42,6 +42,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         self.hex = config.get("hex", None)
         if self.hex is not None:
             self.hex = HexGridConfiguration(**self.hex)
+        self.grid_overlays = None
 
     def buildConfiguration(self):
         config = super().buildConfiguration()
@@ -211,6 +212,12 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         color: tuple[int, int, int] = (80, 80, 80),
         thickness: int = 3
     ):
+        params = (self.hex.width, self.hex.height, self.hex.size, self.hex.offset_xy, self.hex.anchor_xy, self.hex.rotation_deg, color, thickness)
+        if hasattr(self, '_cached_grid_params') and self._cached_grid_params == params:
+            return self._cached_grid_overlay
+
+        self._cached_grid_params = params
+
         # FIX: OpenCV expects (height, width, 3)
         overlay = np.zeros((self.hex.height, self.hex.width, 3), dtype=np.uint8)
 
@@ -266,6 +273,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             cy_g += dy
             row += 1
 
+        self._cached_grid_overlay = overlay
         return overlay
 
     def hex_at_axial(
@@ -557,7 +565,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def changeSetToAxial(self, changeSet):
         return self.pixel_to_axial(*self.rsc.changeSetToRealCenter(changeSet))
 
-    def draw_dynamic_grid_overlay(self, cam):
+    def build_camera_grid_overlay(self, cam):
         """
         Draws the hex grid dynamically based on the camera's FOV in real space.
         Prevents clipping issues caused by fixed-size minimaps.
@@ -635,6 +643,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
         return overlay
 
+    @property
+    def dynamicGrid(self):
+        overlays = getattr(self, "grid_overlays", {})
+        if overlays:
+            return overlays
+        self.grid_overlays = {cam: self.build_camera_grid_overlay(cam) for cam in self.cameras.keys()}
+        return self.grid_overlays
+
     def cameraGriddle(self, cam, objectsAndColors=None):
         """
         Monkey-patched replacement for cameraGriddle.
@@ -650,11 +666,8 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
         # If no objects, use the dynamic grid for better quality/coverage
         if not objectsAndColors:
-             dynamic_grid = self.draw_dynamic_grid_overlay(cam)
-                 
-             if dynamic_grid is not None:
-                 return dynamic_grid
-            # Fallback to legacy if dynamic failed
+            if cam in self.dynamicGrid:
+                return self.dynamicGrid[cam]
         
         # Legacy/Object path (clipped to 1200x1200mm usually)
         # This path is still used if objects need to be drawn
