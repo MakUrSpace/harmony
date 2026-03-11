@@ -80,8 +80,8 @@ def buildConfigurator():
     if not calibrationPts and hasattr(app.cc, 'rsc') and app.cc.rsc is not None:
         reconstructed = []
         try:
-            # app.cc.rsc.realCamSpacePairs is [(camName, [camPts, realPts]), ...]
-            for cN, (camPts, realPts) in app.cc.rsc.realCamSpacePairs:
+            # app.cc.rsc.realCamSpacePairs is [(camName, coordList), ...]
+            for cN, coordList in app.cc.rsc.realCamSpacePairs:
                 # helper to sanitize numpy arrays to lists
                 def to_list_recursive(obj):
                     if isinstance(obj, np.ndarray):
@@ -90,7 +90,10 @@ def buildConfigurator():
                         return [to_list_recursive(x) for x in obj]
                     return obj
 
-                rec_entry = {cN: [to_list_recursive(camPts), to_list_recursive(realPts)]}
+                rec_entry_coords = [to_list_recursive(coordList[0]), to_list_recursive(coordList[1])]
+                if len(coordList) > 2:
+                    rec_entry_coords.append(to_list_recursive(coordList[2]))
+                rec_entry = {cN: rec_entry_coords}
                 reconstructed.append(rec_entry)
             
             app.cm.calibrationPts = reconstructed
@@ -355,7 +358,7 @@ def manualCalibration():
         else:
             first_triangle = axial_data
             
-        new_calib_entry[camName] = [pixelPoints, first_triangle]
+        new_calib_entry[camName] = [pixelPoints, first_triangle, axial_data]
         added_count += 1
         
     if added_count > 0:

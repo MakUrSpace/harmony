@@ -51,6 +51,7 @@
                                 <th>Cameras</th>
                                 <th>Points (Pixel)</th>
                                 <th>Points (Real)</th>
+                                <th>Points (Axial)</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
@@ -319,12 +320,16 @@
             var cams = Object.keys(entry).join(", ");
             var pixels = "";
             var reals = "";
+            var axials = "";
 
             // Just picking the first camera's points to show sample data
             var firstCam = Object.keys(entry)[0];
             if (firstCam) {
                 pixels = JSON.stringify(entry[firstCam][0]);
                 reals = JSON.stringify(entry[firstCam][1]);
+                if (entry[firstCam].length > 2) {
+                    axials = JSON.stringify(entry[firstCam][2]);
+                }
             }
 
             row.innerHTML = `
@@ -332,6 +337,7 @@
                 <td>${cams}</td>
                 <td><small>${pixels}</small></td>
                 <td><small>${reals}</small></td>
+                <td><small>${axials}</small></td>
                 <td><button class="btn btn-sm btn-danger" onclick="deleteCalibration(${index})">Delete</button></td>
             `;
             tbody.appendChild(row);

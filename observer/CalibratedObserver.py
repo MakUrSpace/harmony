@@ -157,7 +157,7 @@ class RealSpaceConverter:
         #  {camName: [[camSpaceTriPts, realSpaceTriPts], ...], ...}
         self.converters = defaultdict(list)
         for camName, coordPairs in self.realCamSpacePairs:
-            camSpaceTriPts, realSpaceTriPts = coordPairs
+            camSpaceTriPts, realSpaceTriPts = coordPairs[:2]
             converter = CameraRealSpaceConverter(camName, camSpaceTriPts, realSpaceTriPts)
             self.converters[camName].append(converter)
 
@@ -361,10 +361,13 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
     def buildConfiguration(self):
         config = super().buildConfiguration()
         if self.rsc is not None:
-            config['rsc'] = [[cN, 
-                             [[a.tolist() if type(a) != list else a for a in coordList[0]],
-                              [a.tolist() if type(a) != list else a for a in coordList[1]]]]
-                            for cN, coordList in self.rsc.realCamSpacePairs]
+            config['rsc'] = []
+            for cN, coordList in self.rsc.realCamSpacePairs:
+                entry = [[a.tolist() if type(a) != list else a for a in coordList[0]],
+                         [a.tolist() if type(a) != list else a for a in coordList[1]]]
+                if len(coordList) > 2:
+                    entry.append([a.tolist() if type(a) != list else a for a in coordList[2]])
+                config['rsc'].append([cN, entry])
         return config
 
     def loadConfiguration(self, path="observerConfiguration.json"):
