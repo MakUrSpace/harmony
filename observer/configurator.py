@@ -220,6 +220,19 @@ def genCameraFullViewWithActiveZone(camName):
                     print(f"Grid overlay error: {e}")
                     # import traceback
                     # traceback.print_exc()
+
+            # Overlay Calibration Objects
+            if hasattr(app.cm, 'calibrationPts') and app.cm.calibrationPts:
+                for idx, calibObj in enumerate(app.cm.calibrationPts):
+                    if camName in calibObj:
+                        pts = calibObj[camName][0]  # pixelPoints
+                        if pts and len(pts) > 0:
+                            poly_cam = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
+                            cv2.polylines(img, [poly_cam], True, (0, 255, 0), 2, cv2.LINE_AA)
+                            # Put text for ID
+                            centroid_x = int(sum([p[0] for p in pts]) / len(pts))
+                            centroid_y = int(sum([p[1] for p in pts]) / len(pts))
+                            cv2.putText(img, f"ID: {idx+1}", (centroid_x - 20, centroid_y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             
             ret, img = cv2.imencode('.jpg', img)
             yield (b'--frame\r\n'
@@ -347,7 +360,7 @@ def manualCalibration():
         
     if added_count > 0:
         # Overwrite previous calibration (User Request)
-        app.cm.calibrationPts = []
+        #app.cm.calibrationPts = []
         
         # Add to calibration points list
         app.cm.calibrationPts.append(new_calib_entry)
@@ -364,6 +377,32 @@ def manualCalibration():
     else:
         return "No valid calibration points found", 400
 
+
+
+@configurator.route('/delete_calibration/<int:index>', methods=['POST'])
+def deleteCalibrationEndpoint(index):
+    global CONSOLE_OUTPUT
+    try:
+        if 0 <= index < len(app.cm.calibrationPts):
+            app.cm.calibrationPts.pop(index)
+            if len(app.cm.calibrationPts) > 0:
+                if hasattr(app.cm, 'buildRealSpaceConverter'):
+                    app.cm.buildRealSpaceConverter()
+                else:
+                    from observer.CalibratedObserver import RealSpaceConverter
+                    app.cc.rsc = RealSpaceConverter([cNCoordPair 
+                                                      for cPtGrp in app.cm.calibrationPts
+                                                      for cNCoordPair in list(cPtGrp.items())])
+            else:
+                app.cc.rsc = None
+            app.cc.saveConfiguration()
+            CONSOLE_OUTPUT = f"Deleted Calibration Object {index+1}"
+            return "Success", 200
+        else:
+            return "Invalid index", 400
+    except Exception as e:
+        print(f"Error deleting calibration object: {e}")
+        return str(e), 500
 
 
 @configurator.route('/delete_cam/<camName>', methods=['POST'])

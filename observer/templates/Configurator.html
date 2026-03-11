@@ -51,6 +51,7 @@
                                 <th>Cameras</th>
                                 <th>Points (Pixel)</th>
                                 <th>Points (Real)</th>
+                                <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -331,9 +332,25 @@
                 <td>${cams}</td>
                 <td><small>${pixels}</small></td>
                 <td><small>${reals}</small></td>
+                <td><button class="btn btn-sm btn-danger" onclick="deleteCalibration(${index})">Delete</button></td>
             `;
             tbody.appendChild(row);
         });
+    }
+
+    function deleteCalibration(index) {
+        if (confirm("Are you sure you want to delete this calibration object?")) {
+            fetch(`{configuratorURL}delete_calibration/${index}`, {
+                method: 'POST'
+            }).then(response => {
+                if (response.ok) {
+                    showStatus("Calibration object deleted successfully!", false);
+                    setTimeout(() => location.reload(), 500);
+                } else {
+                    response.text().then(text => showStatus("Error: " + text, true));
+                }
+            }).catch(e => showStatus("Network error: " + e, true));
+        }
     }
 
     function renderActiveCalibrationTable(camName) {
