@@ -45,6 +45,17 @@ def buildConfigurator():
                     <button class="btn btn-sm btn-warning" onclick="clearShape('{cam.camName}')">Clear Manual Points</button>
                     <!-- AZ controls below -->
                 </div>
+                
+                <div class="mt-3" id="activeCalibTableContainer_{cam.camName}" style="display:none; max-width: 600px; margin: auto;">
+                    <h5>Calibration Points (Editable)</h5>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered text-center" id="activeCalibTable_{cam.camName}">
+                            <thead><tr><th>Point</th><th>Pixel X</th><th>Pixel Y</th><th>Axial Q</th><th>Axial R</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <label for="az">Active Zone</label><br>
                 <div class="container">
                     <div class="row">
@@ -69,8 +80,8 @@ def buildConfigurator():
     if not calibrationPts and hasattr(app.cc, 'rsc') and app.cc.rsc is not None:
         reconstructed = []
         try:
-            # app.cc.rsc.realCamSpacePairs is [(camName, [camPts, realPts]), ...]
-            for cN, (camPts, realPts) in app.cc.rsc.realCamSpacePairs:
+            # app.cc.rsc.realCamSpacePairs is [(camName, coordList), ...]
+            for cN, coordList in app.cc.rsc.realCamSpacePairs:
                 # helper to sanitize numpy arrays to lists
                 def to_list_recursive(obj):
                     if isinstance(obj, np.ndarray):
@@ -79,7 +90,10 @@ def buildConfigurator():
                         return [to_list_recursive(x) for x in obj]
                     return obj
 
-                rec_entry = {cN: [to_list_recursive(camPts), to_list_recursive(realPts)]}
+                rec_entry_coords = [to_list_recursive(coordList[0]), to_list_recursive(coordList[1])]
+                if len(coordList) > 2:
+                    rec_entry_coords.append(to_list_recursive(coordList[2]))
+                rec_entry = {cN: rec_entry_coords}
                 reconstructed.append(rec_entry)
             
             app.cm.calibrationPts = reconstructed
@@ -117,23 +131,22 @@ def updateConfig():
 
 def draw_dynamic_grid(camName):
     try:
-        if not hasattr(app.cc, 'rsc') or app.cc.rsc is None:
-            return None
-        if not hasattr(app.cc, 'hex') or app.cc.hex is None:
+        rsc = getattr(app.cc, 'rsc', None)
+        hex_grid = getattr(app.cc, 'hex', None)
+        if rsc is None or hex_grid is None:
             return None
             
         cam = app.cc.cameras[str(camName)]
         h, w = cam.mostRecentFrame.shape[:2]
         overlay = np.zeros((h, w, 3), dtype=np.uint8)
         
-        converter = app.cc.rsc.converters[str(camName)][0]
-        
         # Define 4 corners of the camera frame
         corners_cam = [(0, 0), (w, 0), (w, h), (0, h)]
         
-        # Project to Real Space
+        # Project to Real Space using the converter closest to each corner
         corners_real = []
         for p in corners_cam:
+            converter = rsc.closestConverterToCamCoord(str(camName), p)
             rp = converter.convertCameraToRealSpace(p)
             corners_real.append(rp)
             
@@ -169,6 +182,7 @@ def draw_dynamic_grid(camName):
                 for pt in real_poly:
                     # pt is [x, y]
                     x, y = pt[0]
+                    converter = rsc.closestConverterToRealCoord(str(camName), (x, y))
                     cx, cy = converter.convertRealToCameraSpace((x, y))
                     cam_pts.append([int(round(cx)), int(round(cy))])
                 
@@ -209,6 +223,19 @@ def genCameraFullViewWithActiveZone(camName):
                     print(f"Grid overlay error: {e}")
                     # import traceback
                     # traceback.print_exc()
+
+            # Overlay Calibration Objects
+            if hasattr(app.cm, 'calibrationPts') and app.cm.calibrationPts:
+                for idx, calibObj in enumerate(app.cm.calibrationPts):
+                    if camName in calibObj:
+                        pts = calibObj[camName][0]  # pixelPoints
+                        if pts and len(pts) > 0:
+                            poly_cam = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
+                            cv2.polylines(img, [poly_cam], True, (0, 255, 0), 2, cv2.LINE_AA)
+                            # Put text for ID
+                            centroid_x = int(sum([p[0] for p in pts]) / len(pts))
+                            centroid_y = int(sum([p[1] for p in pts]) / len(pts))
+                            cv2.putText(img, f"ID: {idx+1}", (centroid_x - 20, centroid_y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             
             ret, img = cv2.imencode('.jpg', img)
             yield (b'--frame\r\n'
@@ -297,8 +324,14 @@ def manualCalibration():
     # Structure of calibrationPts entry: {camName: [pixelPoints, realPoints], camName2: ...}
     new_calib_entry = {}
     
-    for camName, points in data.items():
-        if len(points) != 3:
+    for camName, payload in data.items():
+        if not isinstance(payload, dict) or 'pixel' not in payload or 'axial' not in payload:
+            continue
+            
+        pixel_data = payload['pixel']
+        axial_data = payload['axial']
+        
+        if len(pixel_data) != 3 or len(axial_data) != 3:
             continue
             
         if camName not in app.cc.cameras:
@@ -313,21 +346,24 @@ def manualCalibration():
              continue
         
         # Convert normalized points to pixel coordinates
-        pixelPoints = [[int(p[0] * w), int(p[1] * h)] for p in points]
+        pixelPoints = [[int(p[0] * w), int(p[1] * h)] for p in pixel_data]
         
-        # Add to entry
-        # Assumes "first" triangle position as the target for manual calibration.
-        first_triangle = getattr(app.cm, 'first_triangle', [[500, 500], [440, 500], [500, 420]])
-        if first_triangle:
-             new_calib_entry[camName] = [pixelPoints, first_triangle]
-             added_count += 1
+        # Convert user-provided axial coordinates to gridspace coordinates
+        if hasattr(app.cc, 'axial_to_pixel'):
+            try:
+                first_triangle = [app.cc.axial_to_pixel(p[0], p[1]).tolist() for p in axial_data]
+            except Exception as e:
+                print(f"Error converting axial to pixel: {e}")
+                first_triangle = axial_data
         else:
-             print("first_triangle is not defined")
+            first_triangle = axial_data
+            
+        new_calib_entry[camName] = [pixelPoints, first_triangle, axial_data]
+        added_count += 1
         
     if added_count > 0:
         # Overwrite previous calibration (User Request)
-        app.cm.calibrationPts = []
-        
+        app.cm.calibrationPts = getattr(app.cm, 'calibrationPts', [])
         # Add to calibration points list
         app.cm.calibrationPts.append(new_calib_entry)
         
@@ -343,6 +379,32 @@ def manualCalibration():
     else:
         return "No valid calibration points found", 400
 
+
+
+@configurator.route('/delete_calibration/<int:index>', methods=['POST'])
+def deleteCalibrationEndpoint(index):
+    global CONSOLE_OUTPUT
+    try:
+        if 0 <= index < len(app.cm.calibrationPts):
+            app.cm.calibrationPts.pop(index)
+            if len(app.cm.calibrationPts) > 0:
+                if hasattr(app.cm, 'buildRealSpaceConverter'):
+                    app.cm.buildRealSpaceConverter()
+                else:
+                    from observer.CalibratedObserver import RealSpaceConverter
+                    app.cc.rsc = RealSpaceConverter([cNCoordPair 
+                                                      for cPtGrp in app.cm.calibrationPts
+                                                      for cNCoordPair in list(cPtGrp.items())])
+            else:
+                app.cc.rsc = None
+            app.cc.saveConfiguration()
+            CONSOLE_OUTPUT = f"Deleted Calibration Object {index+1}"
+            return "Success", 200
+        else:
+            return "Invalid index", 400
+    except Exception as e:
+        print(f"Error deleting calibration object: {e}")
+        return str(e), 500
 
 
 @configurator.route('/delete_cam/<camName>', methods=['POST'])

@@ -51,6 +51,8 @@
                                 <th>Cameras</th>
                                 <th>Points (Pixel)</th>
                                 <th>Points (Real)</th>
+                                <th>Points (Axial)</th>
+                                <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -78,13 +80,16 @@
     var cameraNames = __CAMERA_NAMES_JSON__;
     var calibrationPts = __CALIBRATION_PTS_JSON__;
     var manualPoints = {};
+    var axialPoints = {};
     var editMode = false;
     var dragPointIndex = -1;
     var dragCamName = null;
+    const DEFAULT_AXIAL_POINTS = [[200, 200], [208, 200], [198, 204]];
 
     // Initialize manualPoints
     cameraNames.forEach(function (name) {
         manualPoints[name] = [];
+        axialPoints[name] = [];
     });
 
     function resizeCanvas() {
@@ -170,8 +175,11 @@
         } else {
             // Add point if less than 3
             if (manualPoints[camName].length < 3) {
+                var newIndex = manualPoints[camName].length;
                 manualPoints[camName].push([x / w, y / h]);
+                axialPoints[camName].push([...DEFAULT_AXIAL_POINTS[newIndex]]);
                 drawPoints(camName);
+                renderActiveCalibrationTable(camName);
             }
         }
     }
@@ -190,6 +198,7 @@
             var h = canvas.clientHeight;
             manualPoints[camName][dragPointIndex] = [pos.x / w, pos.y / h];
             drawPoints(camName);
+            renderActiveCalibrationTable(camName);
         }
     }
 
@@ -231,12 +240,16 @@
     function clearShape(camName) {
         if (camName) {
             manualPoints[camName] = [];
+            axialPoints[camName] = [];
             stopDrag();
             drawPoints(camName);
+            renderActiveCalibrationTable(camName);
         } else {
             cameraNames.forEach(function (name) {
                 manualPoints[name] = [];
+                axialPoints[name] = [];
                 drawPoints(name);
+                renderActiveCalibrationTable(name);
             });
             stopDrag();
         }
@@ -266,7 +279,10 @@
 
         cameraNames.forEach(function (name) {
             if (manualPoints[name] && manualPoints[name].length === 3) {
-                validData[name] = manualPoints[name];
+                validData[name] = {
+                    pixel: manualPoints[name],
+                    axial: axialPoints[name]
+                };
                 count++;
             }
         });
@@ -304,12 +320,16 @@
             var cams = Object.keys(entry).join(", ");
             var pixels = "";
             var reals = "";
+            var axials = "";
 
             // Just picking the first camera's points to show sample data
             var firstCam = Object.keys(entry)[0];
             if (firstCam) {
                 pixels = JSON.stringify(entry[firstCam][0]);
                 reals = JSON.stringify(entry[firstCam][1]);
+                if (entry[firstCam].length > 2) {
+                    axials = JSON.stringify(entry[firstCam][2]);
+                }
             }
 
             row.innerHTML = `
@@ -317,9 +337,79 @@
                 <td>${cams}</td>
                 <td><small>${pixels}</small></td>
                 <td><small>${reals}</small></td>
+                <td><small>${axials}</small></td>
+                <td><button class="btn btn-sm btn-danger" onclick="deleteCalibration(${index})">Delete</button></td>
             `;
             tbody.appendChild(row);
         });
+    }
+
+    function deleteCalibration(index) {
+        if (confirm("Are you sure you want to delete this calibration object?")) {
+            fetch(`{configuratorURL}delete_calibration/${index}`, {
+                method: 'POST'
+            }).then(response => {
+                if (response.ok) {
+                    showStatus("Calibration object deleted successfully!", false);
+                    setTimeout(() => location.reload(), 500);
+                } else {
+                    response.text().then(text => showStatus("Error: " + text, true));
+                }
+            }).catch(e => showStatus("Network error: " + e, true));
+        }
+    }
+
+    function renderActiveCalibrationTable(camName) {
+        var container = document.getElementById('activeCalibTableContainer_' + camName);
+        var tbody = document.querySelector('#activeCalibTable_' + camName + ' tbody');
+        if (!container || !tbody) return;
+
+        var points = manualPoints[camName];
+        var axials = axialPoints[camName];
+        
+        if (!points || points.length === 0) {
+            container.style.display = 'none';
+            tbody.innerHTML = '';
+            return;
+        }
+
+        container.style.display = 'block';
+        tbody.innerHTML = '';
+
+        points.forEach((pt, i) => {
+            var row = document.createElement('tr');
+            
+            var px = pt[0].toFixed(4);
+            var py = pt[1].toFixed(4);
+            var q = axials[i] ? axials[i][0] : 0;
+            var r = axials[i] ? axials[i][1] : 0;
+
+            row.innerHTML = `
+                <td>P${i+1}</td>
+                <td><input type="number" step="0.0001" class="form-control form-control-sm text-center" value="${px}" onchange="updateManualPoint('${camName}', ${i}, 'x', this.value)"></td>
+                <td><input type="number" step="0.0001" class="form-control form-control-sm text-center" value="${py}" onchange="updateManualPoint('${camName}', ${i}, 'y', this.value)"></td>
+                <td><input type="number" class="form-control form-control-sm text-center" value="${q}" onchange="updateAxialPoint('${camName}', ${i}, 'q', this.value)"></td>
+                <td><input type="number" class="form-control form-control-sm text-center" value="${r}" onchange="updateAxialPoint('${camName}', ${i}, 'r', this.value)"></td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function updateManualPoint(camName, index, axis, value) {
+        var val = parseFloat(value);
+        if (!isNaN(val)) {
+            if (axis === 'x') manualPoints[camName][index][0] = val;
+            if (axis === 'y') manualPoints[camName][index][1] = val;
+            drawPoints(camName);
+        }
+    }
+
+    function updateAxialPoint(camName, index, axis, value) {
+        var val = parseInt(value, 10);
+        if (!isNaN(val)) {
+            if (axis === 'q') axialPoints[camName][index][0] = val;
+            if (axis === 'r') axialPoints[camName][index][1] = val;
+        }
     }
 
     function clearCamAZ(camName, event) {
