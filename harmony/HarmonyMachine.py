@@ -157,16 +157,6 @@ class HarmonyMachine(CalibratedObserver):
                     trans_c_pts = [transform_pt(pt) for pt in c_pts]
                     lastClassContour = np.array([trans_c_pts], dtype=np.int32)
                     camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
-
-            # Finally resize to thumbnail for checking?
-            # The original code resized to [480, 640] at the very end.
-            # But looking at genCombinedCameraWithChangesView in server, it assumes it gets images and then stacks them.
-            # If we return HD images here, the server will stack HD images.
-            # Let's keep it returning HD images as requested, and let the server handle resizing for thumbnail view.
-            # Wait, the ORIGINAL code returned 480x640 images.
-            # If I change it to return 1920x1080, I am changing the contract.
-            # BUT the task says "resize to 1920x1080".
-            # So I will return 1920x1080.
             
             images[camName] = camImage
         return images
@@ -235,6 +225,3 @@ if __name__ == "__main__":
         hm.cycleForChange()
     for i in range(3):
         hm.cycle()
-
-
-
