@@ -1,9 +1,10 @@
 import os
 import atexit
-from flask import Flask, redirect, Response
-from configurator import configurator, setConfiguratorApp #, registerCaptureService
-from observer.CalibratedObserver import CalibrationObserver
-# from calibrator import CalibratedCaptureConfiguration, CalibrationObserver, setCalibratorApp # Deprecated
+import uvicorn
+from fastapi import FastAPI, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
+from configurator import configurator
+from observer.CalibratedObserver import CalibrationObserver, CalibratedCaptureConfiguration
 
 from observer.HexObserver import HexCaptureConfiguration, HexGridConfiguration
 from file_lock import FileLock
@@ -11,44 +12,38 @@ from file_lock import FileLock
 PORT = int(os.getenv("OBSERVER_PORT", "7000"))
 
 def create_configurator_app():
-    app = Flask(__name__)
-    app.cc = HexCaptureConfiguration()
-    if app.cc.hex is None:
-        app.cc.hex = HexGridConfiguration()
-    app.cc.capture()
-    
-    # Register blueprints
-    app.register_blueprint(configurator, url_prefix='/configurator')
+    app = FastAPI()
+    app.state.cc = CalibratedCaptureConfiguration()
+    app.state.cc.capture()
     
     # Initialize calibration observer
-    app.cm = CalibrationObserver(app.cc)
+    app.state.cm = CalibrationObserver(app.state.cc)
     
-    # Set app references
-    setConfiguratorApp(app)
-    # setCalibratorApp(app) # Deprecated
+    # Include new FastAPI configurator router
+    app.include_router(configurator)
 
 
-    @app.route('/')
-    def index():
-        return redirect('/configurator', code=303)
+    @app.get('/')
+    async def index():
+        return RedirectResponse('/configurator/', status_code=303)
 
-    @app.route('/bootstrap.min.css', methods=['GET'])
-    def getBSCSS():
+    @app.get('/bootstrap.min.css')
+    async def getBSCSS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.css", "r") as f:
             bscss = f.read()
-        return Response(bscss, mimetype="text/css")
+        return Response(bscss, media_type="text/css")
     
-    @app.route('/bootstrap.min.js', methods=['GET'])
-    def getBSJS():
+    @app.get('/bootstrap.min.js')
+    async def getBSJS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.js", "r") as f:
             bsjs = f.read()
-        return Response(bsjs, mimetype="application/javascript")
+        return Response(bsjs, media_type="application/javascript")
     
-    @app.route('/htmx.min.js', methods=['GET'])
-    def getHTMX():
+    @app.get('/htmx.min.js')
+    async def getHTMX():
         with open(f"{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
             htmx = f.read()
-        return Response(htmx, mimetype="application/javascript")
+        return Response(htmx, media_type="application/javascript")
         
     return app
 
@@ -63,15 +58,7 @@ def main():
     
     print(f"Launching Configurator Server on {PORT}")
     try:
-        # registerCaptureService(app) # Deprecated or moved? 
-        # If capture service was in calibrator.py, we might need to move it to configurator.py or reimplement.
-        # configurator.py does not define registerCaptureService.
-        # However, `app.cc.capture()` is called. 
-        # `registerCaptureService` was running `app.cm.cycle()`.
-        # If we need the observer to cycle, we need this logic.
-        # Let's verify `configurator.py` or port `registerCaptureService`.
-        pass 
-        app.run(host="0.0.0.0", port=PORT)
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
 
     finally:
         lock.release()

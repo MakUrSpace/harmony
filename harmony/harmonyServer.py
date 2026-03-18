@@ -8,6 +8,8 @@ from typing import Callable, Optional, AsyncGenerator
 from functools import wraps
 import threading
 import atexit
+import signal
+from contextlib import asynccontextmanager
 from traceback import format_exc
 import time
 from uuid import uuid4
@@ -26,13 +28,10 @@ from matplotlib.figure import Figure
 
 from fastapi import FastAPI, APIRouter, Request, Form, Query
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
-from starlette.middleware.wsgi import WSGIMiddleware
 
 from observer import HexGridConfiguration, HexCaptureConfiguration
 from observer.Observer import hStackImages, clipImage, Camera
-from observer.configurator import configurator, setConfiguratorApp
-from observer.observerServer import observer, registerCaptureService, setObserverApp
-from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
+from observer.configurator import configurator
 
 from harmony.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
 
@@ -44,6 +43,9 @@ from harmony.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
 _cc = None   # CaptureConfiguration
 _cm = None   # HarmonyMachine
 _config: dict = {}
+
+DATA_LOCK = threading.Lock()
+SHUTDOWN_EVENT = threading.Event()
 
 
 def _get_cc():
@@ -98,14 +100,14 @@ class FrameBroadcaster:
                 self.running = True
                 self.thread = threading.Thread(target=self._run, daemon=True)
                 self.thread.start()
-                print(f"Broadcaster started for {self.key}")
+                # print(f"Broadcaster started for {self.key}")
 
     def stop(self):
         with self.lock:
             self.running = False
 
     def _run(self):
-        while self.running:
+        while self.running and not SHUTDOWN_EVENT.is_set():
             start_time = time.time()
             try:
                 # No app context needed in FastAPI
@@ -132,8 +134,8 @@ class FrameBroadcaster:
         try:
             while True:
                 with self.condition:
-                    self.condition.wait()
-                    if not self.running:
+                    self.condition.wait(timeout=1.0) # check shutdown every second
+                    if not self.running or SHUTDOWN_EVENT.is_set():
                         break
                     frame = self.last_frame
 
@@ -182,7 +184,7 @@ def render_minimap(cm, encode=True):
             img_h, img_w = camImage.shape[:2]
             end_x = min(img_w, crop_x + crop_w)
             end_y = min(img_h, crop_y + crop_h)
-            print(f"Cropping Minimap to: `Y:[{crop_y}:{end_y}], X:[{crop_x}:{end_x}]`")
+            # print(f"Cropping Minimap to: Y:[{crop_y}:{end_y}], X:[{crop_x}:{end_x}]")
             camImage = camImage[crop_y:end_y, crop_x:end_x]
 
         camImage = cv2.resize(camImage, virtual_map_res, interpolation=cv2.INTER_AREA)
@@ -246,7 +248,7 @@ def get_broadcaster(key, render_func):
 # ---------------------------------------------------------------------------
 
 def renderConsole():
-    while True:
+    while not SHUTDOWN_EVENT.is_set():
         cm = _get_cm()
         shape = (170, 400)
         zeros = np.zeros(shape, dtype="uint8")
@@ -271,7 +273,7 @@ def getConsoleImage():
 # ---------------------------------------------------------------------------
 
 def genCombinedCamerasView():
-    while True:
+    while not SHUTDOWN_EVENT.is_set():
         cc = _get_cc()
         camImages = []
         for camName in cc.cameras.keys():
@@ -504,7 +506,7 @@ def getCanvasData(viewId: str):
 # ---------------------------------------------------------------------------
 
 def genCombinedCameraWithChangesView():
-    while True:
+    while not SHUTDOWN_EVENT.is_set():
         cm = _get_cm()
         with DATA_LOCK:
             if cm.lastChanges is not None and not cm.lastChanges.empty:
@@ -536,10 +538,6 @@ def resetHarmony():
         new_cm = HarmonyMachine(_get_cc())
         new_cm.reset()
         _cm = new_cm
-        # Keep all Flask app references in sync if any
-        for app_instance in APPS:
-            if hasattr(app_instance, 'cm'):
-                app_instance.cm = new_cm
     return 'success'
 
 
@@ -1364,12 +1362,35 @@ def start_servers():
     _cc = cc
     _cm = cm
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        print("Shutting down broadcasters...")
+        SHUTDOWN_EVENT.set()
+        for broadcaster in BROADCASTERS.values():
+            broadcaster.stop()
+        # wake up all condition variables
+        for broadcaster in BROADCASTERS.values():
+            with broadcaster.condition:
+                broadcaster.condition.notify_all()
+
     # --- Admin App (port 7000) ---
     _config['HARMONY_TEMPLATE'] = 'Harmony.html'
 
-    admin_app = FastAPI()
+    from observer.CalibratedObserver import CalibrationObserver as _CalObs
+    admin_app = FastAPI(lifespan=lifespan) # Shared State
     admin_app.state.cc = cc
-    admin_app.state.cm = cm
+    # This cm is HarmonyMachine, configurator expects CalibrationObserver for some parts?
+    # Actually configurator.py line 22-23:
+    # cc = request.app.state.cc
+    # cm = request.app.state.cm
+    # And buildConfigurator uses cm.calibrationPts.
+    # In harmonyServer.py line 45-46:
+    # _cc = None
+    # _cm = None
+    # We should ensure the admin_app.state.cm is what's expected.
+    # The old flask_sub.cm was _CalObs(cc).
+    admin_app.state.cm = _CalObs(cc) # For configurator
     admin_app.state.config = _config
     APPS.append(admin_app)
 
@@ -1397,42 +1418,16 @@ def start_servers():
 
         admin_app.add_api_route(route_name, make_static(), methods=["GET"])
 
-    # Mount Flask configurator under admin app
-    from flask import Flask as _Flask
-    flask_sub = _Flask(__name__ + "_flask_sub")
+    # Include new FastAPI configurator router
+    admin_app.include_router(configurator)
 
-    from observer.configurator import configurator as _cfg_bp, setConfiguratorApp
-    from observer.calibrator import calibrator as _cal_bp
-
-    flask_sub.register_blueprint(_cfg_bp, url_prefix='/configurator')
-    flask_sub.register_blueprint(_cal_bp, url_prefix='/calibrator')
-
-    # Give the Flask sub-app the cc/cm it needs (configurator.py reads app.cc / app.cm)
-    # We use CalibrationObserver as the cm since that's what the configurator expects.
-    from observer.CalibratedObserver import CalibrationObserver as _CalObs
-    flask_sub.cc = cc
-    flask_sub.cm = _CalObs(cc)
-
-    @flask_sub.route('/')
-    def _flask_root():
-        from flask import redirect as _redirect
-        return _redirect('/configurator/', code=303)
-
-    # Mount Flask as a CATCH-ALL at '/' — must come AFTER all FastAPI routes.
-    # Starlette evaluates routes in order; FastAPI routes match first (/harmony/*, static
-    # files, etc.). Anything unmatched falls through to Flask, which then sees the full
-    # path (/configurator/..., /calibrator/...) and routes it correctly.
-    # IMPORTANT: mounting at '/configurator' strips the prefix, causing a redirect loop.
-    admin_app.mount('/', WSGIMiddleware(flask_sub))
-
-    setConfiguratorApp(flask_sub)
-    setObserverApp(admin_app)
-    registerCaptureService(_CaptureServiceProxy())
+    # Note: calibrator and observerServer Flask blueprints are abandoned.
+    # registerCaptureService(_CaptureServiceProxy())
 
     # --- User App (port 7001) ---
     user_config = {'HARMONY_TEMPLATE': 'HarmonyUser.html'}
 
-    user_app = FastAPI()
+    user_app = FastAPI(lifespan=lifespan)
     user_app.state.cc = cc
     user_app.state.cm = cm
     user_app.state.config = user_config
@@ -1485,15 +1480,33 @@ def start_servers():
         print("Launching Harmony User Server on 7001")
         cfg = uvicorn.Config(user_app, host="0.0.0.0", port=7001, log_level="warning")
         server = uvicorn.Server(cfg)
-        server.install_signal_handlers = lambda: None  # Don't fight with main thread
         asyncio.run(server.serve())
 
     t = threading.Thread(target=run_user, daemon=True)
     t.start()
 
     # Launch admin server (blocking)
-    print("Launching Harmony Server on 7000")
-    uvicorn.run(admin_app, host="0.0.0.0", port=7000, log_level="info")
+    import uvicorn
+    print(f"Launching Harmony Admin Server on 7000 (PID: {os.getpid()})")
+    
+    cfg = uvicorn.Config(admin_app, host="0.0.0.0", port=7000, log_level="info", timeout_graceful_shutdown=1)
+    server = uvicorn.Server(cfg)
+
+    # Monkey-patch uvicorn's handle_exit to set our shutdown event immediately
+    original_handle_exit = server.handle_exit
+    def patched_handle_exit(*args, **kwargs):
+        print(f"Server exit triggered, setting shutdown event.")
+        SHUTDOWN_EVENT.set()
+        # Trigger cleanup for broadcasters immediately
+        for broadcaster in BROADCASTERS.values():
+            broadcaster.stop()
+            with broadcaster.condition:
+                broadcaster.condition.notify_all()
+        return original_handle_exit(*args, **kwargs)
+    
+    server.handle_exit = patched_handle_exit
+
+    server.run()
 
 
 if __name__ == "__main__":
