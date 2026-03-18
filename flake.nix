@@ -49,6 +49,8 @@
           imutils
           matplotlib
           uvicorn
+          fastapi
+          python-multipart
           graphviz
           pyzbar
           aiohttp 
@@ -67,13 +69,6 @@
       in {
         packages.default = harmony;
         packages.harmony = harmony;
-        packages.configurator = writeShellApplication {
-          name = "configurator";
-          runtimeInputs = [ harmony-dev-env ];
-          text = ''
-            python observer/configuratorServer.py
-          '';
-        };
         packages.jupyter = writeShellApplication {
           name = "jupyter";
           runtimeInputs = [ harmony-dev-env ];
