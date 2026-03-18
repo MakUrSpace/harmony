@@ -3,6 +3,7 @@ import json
 import cv2
 import numpy as np
 import math
+import time
 from typing import Optional
 from fastapi import APIRouter, Request, Response, Form, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
@@ -138,7 +139,18 @@ def draw_dynamic_grid(cc, camName):
             return None
             
         cam = cc.cameras[str(camName)]
+        if cam.mostRecentFrame is None:
+            return None
         h, w = cam.mostRecentFrame.shape[:2]
+        
+        # Caching logic
+        if not hasattr(cc, '_grid_cache'):
+            cc._grid_cache = {}
+        
+        cache_key = (camName, id(rsc), hex_grid.size, w, h)
+        if cache_key in cc._grid_cache:
+            return cc._grid_cache[cache_key]
+
         overlay = np.zeros((h, w, 3), dtype=np.uint8)
         
         # Define 4 corners of the camera frame
@@ -159,12 +171,17 @@ def draw_dynamic_grid(cc, camName):
             qs.append(q)
             rs.append(r)
             
-        min_q, max_q = min(qs), max(qs)
-        min_r, max_r = min(rs), max(rs)
+        min_q, max_q = int(min(qs)), int(max(qs))
+        min_r, max_r = int(min(rs)), int(max(rs))
         
         # Add padding to ensure coverage
         pad = 2
         
+        # Safety bounds to prevent infinite loops or extreme memory usage
+        if (max_q - min_q) > 200 or (max_r - min_r) > 200:
+            print(f"Grid range too large: {max_q-min_q}x{max_r-min_r}. Check calibration.")
+            return None
+
         # Iterate and draw
         # Use white color for grid lines, typical for overlay
         grid_color = (255, 255, 255)
@@ -172,11 +189,6 @@ def draw_dynamic_grid(cc, camName):
         for q in range(min_q - pad, max_q + pad + 1):
             for r in range(min_r - pad, max_r + pad + 1):
                 # Calculate Hex in Real Space
-                # hex_at_axial returns shape (N, 1, 2) roughly, lets verify usage
-                # It returns poly_i which is rounded int array. 
-                # We need exact float coords preferably for smooth projection but hex_at_axial does round.
-                # However, convertRealToCameraSpace expects tuple (x, y).
-                
                 real_poly = cc.hex_at_axial(q, r) # numpy array (6, 1, 2)
                 
                 cam_pts = []
@@ -191,7 +203,9 @@ def draw_dynamic_grid(cc, camName):
                 
                 # Draw
                 cv2.polylines(overlay, [poly_cam], True, grid_color, 1, cv2.LINE_AA)
-                
+        
+        # Cache the result
+        cc._grid_cache[cache_key] = overlay
         return overlay
         
     except Exception as e:
@@ -234,9 +248,13 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
             ret, img = cv2.imencode('.jpg', img)
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpg\r\n\r\n' + img.tobytes() + b'\r\n')
+            
+            # Rate limiting: ~10 FPS is plenty for configurator preview
+            time.sleep(0.1)
         except Exception as e:
             print(f"Failed genCameraFullViewWithActiveZone for {camName} -- {e}")
             yield (b'--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n')
+            time.sleep(1.0) # Back off on error
     
     
 @configurator.get('/camera/{camName}')
