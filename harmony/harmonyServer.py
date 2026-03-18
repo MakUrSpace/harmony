@@ -13,6 +13,7 @@ import time
 from uuid import uuid4
 import copy
 import os
+import sys
 import shutil
 import pickle
 import random
@@ -25,22 +26,13 @@ from matplotlib.figure import Figure
 from flask import Flask, Blueprint, render_template, Response, request, make_response, redirect, url_for, jsonify, current_app, stream_with_context
 
 from observer import HexGridConfiguration, HexCaptureConfiguration
+from observer.Observer import hStackImages, clipImage, Camera
 from observer.configurator import configurator, setConfiguratorApp
 from observer.observerServer import observer, registerCaptureService, setObserverApp
 from observer.calibrator import calibrator, CalibratedCaptureConfiguration, registerCaptureService, DATA_LOCK, CONSOLE_OUTPUT
 
 
-import sys
-import os
-
-oldPath = os.getcwd()
-try:
-    observerDirectory = os.path.dirname(os.path.realpath(__file__))
-    sys.path.insert(0, observerDirectory)
-    from HarmonyMachine import HarmonyMachine, INCHES_TO_MM
-    from observer.Observer import hStackImages, clipImage, Camera
-finally:
-    os.chdir(oldPath)
+from harmony.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
 
 
 
@@ -1159,7 +1151,6 @@ def create_harmony_app(template_name="Harmony.html"):
     if app.cc.hex is None:
         app.cc.hex = HexGridConfiguration()
     app.cc.capture()
-    app.cm = HarmonyMachine(app.cc)
     app.cm = HarmonyMachine(app.cc)
     # app.register_blueprint(configurator, url_prefix='/configurator') # Separated
     app.register_blueprint(harmony, url_prefix='/harmony')

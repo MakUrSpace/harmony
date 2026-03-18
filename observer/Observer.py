@@ -812,6 +812,8 @@ class CaptureConfiguration:
                 cameras[camName] = RemoteCamera(address=addr, activeZone=az, camName=camName, auth=auth)
         self.cameras = cameras
 
+        self.capture()
+
     def capture(self):
         return asyncio.run(self._capture_async())
 

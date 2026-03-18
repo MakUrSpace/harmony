@@ -264,7 +264,16 @@ class RealSpaceConverter:
         warps = []
         for camName, camConverters in self.converters.items():
             cam = cameras[camName]
-            h, w = cam.mostRecentFrame.shape[:2]
+            if cam.mostRecentFrame is not None:
+                h, w = cam.mostRecentFrame.shape[:2]
+            else:
+                # Use activeZone bounding box if frame is not available
+                pts = np.int32(cam.activeZone)
+                x, y, w, h = cv2.boundingRect(pts)
+                # Ensure we have at least some dimensions, 1920x1080 is common
+                w = max(w + x, 1920)
+                h = max(h + y, 1080)
+
             frame = np.zeros((h, w), dtype=np.uint8)
             pts = np.int32(cam.activeZone)
             cv2.fillPoly(frame, [pts], 255)
@@ -382,13 +391,25 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
                 [cN, [[np.array(pt, dtype="int32") for pt in cL] for cL in coordList]]
                 for cN, coordList in self.rsc]
             self.rsc = RealSpaceConverter(self.rsc)
-
-    @property
-    def realSpaceContours(self):
-        try:
-            return self.rsc.cameraRealSpaceOverlap(self.cameras)
-        except Exception:
-            return None
+            self.realSpaceContours = self.rsc.cameraRealSpaceOverlap(self.cameras)
+            
+            # Calculate _realSpaceBoundingBox once
+            x, y, w, h = 1200, 1200, 1, 1
+            if not self.realSpaceContours:
+                 self._realSpaceBoundingBox = (0, 0, 1200, 1200)
+            else:
+                for contour in self.realSpaceContours:
+                    cbX, cbY, cbW, cbH = cv2.boundingRect(contour)
+                    cb_maxX = cbX + cbW
+                    cb_maxY = cbY + cbH
+                    x = min(x, cbX)
+                    y = min(y, cbY)
+                    w = max(w, cb_maxX - x)
+                    h = max(h, cb_maxY - y)
+                self._realSpaceBoundingBox = (x, y, w, h)
+        else:
+            self.realSpaceContours = None
+            self._realSpaceBoundingBox = (0, 0, 1200, 1200)
 
     def objectToHull(self, obj: TrackedObject, color=(255, 255, 255)):
         assert self.rsc is not None, "Calibration information needed"
@@ -420,19 +441,7 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
         return contours[-1]
 
     def realSpaceBoundingBox(self):
-        x, y, w, h = 1200, 1200, 1, 1
-        contours = self.realSpaceContours
-        if not contours:
-            return 0, 0, 1200, 1200
-        for contour in contours:
-            cbX, cbY, cbW, cbH = cv2.boundingRect(contour)
-            cb_maxX = cbX + cbW
-            cb_maxY = cbY + cbH
-            x = min(x, cbX)
-            y = min(y, cbY)
-            w = max(w, cb_maxX - x)
-            h = max(h, cb_maxY - y)
-        return x, y, w, h
+        return getattr(self, "_realSpaceBoundingBox", (0, 0, 1200, 1200))
 
     def buildMiniMap(self, objectsAndColors: list[MiniMapObject]):
         image = np.zeros([1200, 1200, 3], dtype="uint8")
@@ -440,12 +449,13 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
             return image
 
         x, y, w, h = self.realSpaceBoundingBox()
-        cv2.drawContours(image, cc.realSpaceContours, -1, (125, 125, 125), 2)
+        cv2.drawContours(image, self.realSpaceContours, -1, (125, 125, 125), 2)
 
         print(f"Minimap has {len(objectsAndColors)} objects")
         if len(objectsAndColors) == 0:
             return image[y:y+h, x:x+w]
         drawnObjs = []
+        
         for objAndColor in objectsAndColors[::-1]:
             obj = objAndColor.object
             color = objAndColor.color

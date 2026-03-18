@@ -43,6 +43,8 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         if self.hex is not None:
             self.hex = HexGridConfiguration(**self.hex)
         self.grid_overlays = None
+        self.camera_realspace_contours = self.buildCameraRealspaceContours()
+        self.camera_realspace_union_contours = self.buildCameraRealspaceUnionContours()
 
     def buildConfiguration(self):
         config = super().buildConfiguration()
@@ -422,19 +424,140 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             print(f"Error in patched_objectToHull: {e}")
             return np.array([], dtype=np.int32)
 
-    def buildMiniMap(self, objectsAndColors: list["MiniMapObject"] = None, hex_cfg = None):
-        """
-        Monkey-patched replacement for buildMiniMap.
-        Uses dynamic canvas size from HexGridConfiguration instead of hardcoded 1200.
-        """
-        if objectsAndColors is None:
-            objectsAndColors = []
-            
+    def realspaceDimensions(self):
         width = 1600
         height = 1600
         if hasattr(self, 'hex') and self.hex:
             width = self.hex.width
             height = self.hex.height
+        return width, height
+    
+    def buildCameraRealspaceContours(self):
+        cameras = self.cameras
+        true_real_contours = []
+        transformed_contours = []
+        width, height = self.realspaceDimensions()
+        for cam_name, cam in cameras.items():
+            az = cam.activeZone
+            
+            if az is not None and len(az) > 0:
+                # These are in Camera Coordinates. Transform to Real Space.
+                if hasattr(self, 'rsc') and self.rsc is not None and cam_name in self.rsc.converters:
+                    # Convert polygon points
+                    real_pts = []
+                    rsc = self.rsc
+                    for pt in az:
+                        # Robustly handle (N, 2) and (N, 1, 2) shapes
+                        x, y = 0, 0
+                        try:
+                            is_nested = False
+                            if hasattr(pt, 'shape'):
+                                 if len(pt.shape) > 1:
+                                     is_nested = True
+                            elif hasattr(pt, '__len__') and len(pt) == 1 and hasattr(pt[0], '__len__'):
+                                 is_nested = True
+                            
+                            if is_nested:
+                                x = float(pt[0][0])
+                                y = float(pt[0][1])
+                            else:
+                                x = float(pt[0])
+                                y = float(pt[1])
+                        except Exception as e:
+                            print(f"MiniMap: Error processing point {pt}: {e}")
+                            continue
+
+                        converter = rsc.closestConverterToCamCoord(cam_name, (x, y))
+                        r_pt = converter.convertCameraToRealSpace((x, y))
+                        real_pts.append(r_pt)
+                    
+                    true_real_contours.append(np.array(real_pts, dtype=np.float32))
+
+        # Calculate Global Bounding Box from these TRUE contours
+        if true_real_contours:
+            all_pts = np.vstack(true_real_contours)
+            min_x = np.min(all_pts[:, 0])
+            max_x = np.max(all_pts[:, 0])
+            min_y = np.min(all_pts[:, 1])
+            max_y = np.max(all_pts[:, 1])
+            
+            # Recalculate Shift & Dimensions based on TRUE bounds
+            shift_x = 0
+            shift_y = 0
+            if min_x < 0: shift_x = -min_x
+            if min_y < 0: shift_y = -min_y
+            
+            req_w = int(max_x - min_x) if min_x < 0 else int(max_x)
+            req_h = int(max_y - min_y) if min_y < 0 else int(max_y)
+
+            # Expand canvas if needed
+            width = max(width, req_w)
+            height = max(height, req_h)
+            
+            # Update hex config (Critical for grid alignment)
+            if hasattr(self, 'hex') and self.hex:
+                self.hex.width = width
+                self.hex.height = height
+                self.hex.offset_xy = (shift_x, shift_y)
+
+            # Re-initialize image with new dimensions if they changed
+            image = self.draw_hex_grid_overlay(
+                np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
+            )
+
+            # Draw the Unclipped Contours
+            transformed_contours = []
+            for pts_real in true_real_contours:
+                if hasattr(self, 'apply_affine_pts'):
+                    pts_map = self.apply_affine_pts(pts_real)
+                else:
+                    pts_map = pts_real
+                    print("ERROR: apply_affine_pts not found!")
+
+                # Apply the shift
+                pts_map[:, 0] += shift_x
+                pts_map[:, 1] += shift_y
+                    
+                cnt_map = np.round(pts_map).astype(np.int32).reshape(-1, 1, 2)
+                transformed_contours.append(cnt_map)
+
+        return transformed_contours
+
+    def buildCameraRealspaceUnionContours(self):
+        transformed_contours = self.camera_realspace_contours
+        union_cnts = []
+        # Draw Unified Boundary
+
+        width, height = self.realspaceDimensions()
+        
+        if len(transformed_contours) > 0:
+            # Create a mask for the union of all active zones
+            union_mask = np.zeros((height, width), dtype=np.uint8)
+            
+            # Fill all contours on the mask
+            cv2.drawContours(union_mask, transformed_contours, -1, 255, -1)
+            
+            # Find the outer contour of the union
+            # OpenCV 4.x returns (contours, hierarchy)
+            # OpenCV 3.x returns (image, contours, hierarchy)
+            cnts_res = cv2.findContours(union_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if len(cnts_res) == 2:
+                union_cnts = cnts_res[0]
+            else:
+                union_cnts = cnts_res[1]
+    
+        return union_cnts
+        
+    
+    def buildMiniMap(self, objectsAndColors: list["MiniMapObject"] = None, hex_cfg = None):
+        """
+        Uses dynamic canvas size from HexGridConfiguration instead of hardcoded 1200.
+        """
+        if objectsAndColors is None:
+            objectsAndColors = []
+            
+        width, height = self.realspaceDimensions()
 
         # Transform and Draw RealSpaceContours (Active Zones)
         # Ensure they align with the affine-transformed grid
@@ -447,135 +570,8 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
         )
         
-        try:
-            true_real_contours = []
-            cameras = None
-            
-            # Determine where cameras are stored
-            if hasattr(self, 'cameras') and self.cameras:
-                cameras = self.cameras
-            elif hasattr(self, 'cc') and hasattr(self.cc, 'cameras'):
-                cameras = self.cc.cameras
-                
-            if cameras:
-                for cam_name, cam in cameras.items():
-                    # Correct Property is 'activeZone' not 'activeZonePolygon'
-                    # Check both for compatibility/safety
-                    az = getattr(cam, 'activeZone', None)
-                    if az is None:
-                        az = getattr(cam, 'activeZonePolygon', None)
-                    
-                    if az is not None and len(az) > 0:
-                        # These are in Camera Coordinates. Transform to Real Space.
-                        if hasattr(self, 'rsc') and self.rsc is not None and cam_name in self.rsc.converters:
-                            # Convert polygon points
-                            real_pts = []
-                            rsc = self.rsc
-                            for pt in az:
-                                # Robustly handle (N, 2) and (N, 1, 2) shapes
-                                x, y = 0, 0
-                                try:
-                                    is_nested = False
-                                    if hasattr(pt, 'shape'):
-                                         if len(pt.shape) > 1:
-                                             is_nested = True
-                                    elif hasattr(pt, '__len__') and len(pt) == 1 and hasattr(pt[0], '__len__'):
-                                         is_nested = True
-                                    
-                                    if is_nested:
-                                        x = float(pt[0][0])
-                                        y = float(pt[0][1])
-                                    else:
-                                        x = float(pt[0])
-                                        y = float(pt[1])
-                                except Exception as e:
-                                    print(f"MiniMap: Error processing point {pt}: {e}")
-                                    continue
-
-                                converter = rsc.closestConverterToCamCoord(cam_name, (x, y))
-                                r_pt = converter.convertCameraToRealSpace((x, y))
-                                real_pts.append(r_pt)
-                            
-                            true_real_contours.append(np.array(real_pts, dtype=np.float32))
-
-            # Calculate Global Bounding Box from these TRUE contours
-            if true_real_contours:
-                all_pts = np.vstack(true_real_contours)
-                min_x = np.min(all_pts[:, 0])
-                max_x = np.max(all_pts[:, 0])
-                min_y = np.min(all_pts[:, 1])
-                max_y = np.max(all_pts[:, 1])
-                
-                # Recalculate Shift & Dimensions based on TRUE bounds
-                shift_x = 0
-                shift_y = 0
-                if min_x < 0: shift_x = -min_x
-                if min_y < 0: shift_y = -min_y
-                
-                req_w = int(max_x - min_x) if min_x < 0 else int(max_x)
-                req_h = int(max_y - min_y) if min_y < 0 else int(max_y)
-
-                # Expand canvas if needed
-                width = max(width, req_w)
-                height = max(height, req_h)
-                
-                # Update hex config (Critical for grid alignment)
-                if hasattr(self, 'hex') and self.hex:
-                    self.hex.width = width
-                    self.hex.height = height
-                    self.hex.offset_xy = (shift_x, shift_y)
-
-                # Re-initialize image with new dimensions if they changed
-                image = self.draw_hex_grid_overlay(
-                    np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
-                )
-
-                # Draw the Unclipped Contours
-                transformed_contours = []
-                for pts_real in true_real_contours:
-                    if hasattr(self, 'apply_affine_pts'):
-                        pts_map = self.apply_affine_pts(pts_real)
-                    else:
-                        pts_map = pts_real
-                        print("ERROR: apply_affine_pts not found!")
-
-                    # Apply the shift
-                    pts_map[:, 0] += shift_x
-                    pts_map[:, 1] += shift_y
-                        
-                    cnt_map = np.round(pts_map).astype(np.int32).reshape(-1, 1, 2)
-                    transformed_contours.append(cnt_map)
-                
-                cv2.drawContours(image, transformed_contours, -1, (125, 125, 125), 6)
-
-                # Draw Unified Boundary
-                if len(transformed_contours) > 0:
-                    try:
-                        # Create a mask for the union of all active zones
-                        union_mask = np.zeros((height, width), dtype=np.uint8)
-                        
-                        # Fill all contours on the mask
-                        cv2.drawContours(union_mask, transformed_contours, -1, 255, -1)
-                        
-                        # Find the outer contour of the union
-                        # OpenCV 4.x returns (contours, hierarchy)
-                        # OpenCV 3.x returns (image, contours, hierarchy)
-                        cnts_res = cv2.findContours(union_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                        
-                        if len(cnts_res) == 2:
-                            union_cnts = cnts_res[0]
-                        else:
-                            union_cnts = cnts_res[1]
-                        
-                        if len(union_cnts) > 0:
-                            # Draw the unified boundary (White, Thicker)
-                            cv2.drawContours(image, union_cnts, -1, (255, 255, 255), 4)
-
-                    except Exception as e:
-                        print(f"Error drawing unified boundary: {e}")
-                
-        except Exception as e:
-            print(f"Error drawing true active zones: {e}")
+        cv2.drawContours(image, self.camera_realspace_contours, -1, (125, 125, 125), 6)
+        cv2.drawContours(image, self.camera_realspace_union_contours, -1, (255, 255, 255), 4)
 
         drawnObjs = []
         print(f"MiniMap: Rendering {len(objectsAndColors)} objects")
@@ -859,8 +855,6 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         return TrackedObject(oid=oid, changeSet=changeSet)
 
 
-
-
 if __name__ == "__main__":
     import matplotlib.pyplot as plt 
     hc = HexCaptureConfiguration()
@@ -869,13 +863,6 @@ if __name__ == "__main__":
     co.cycle()
     plt.imshow(co.buildMiniMap(objectsAndColors=[MiniMapObject(mem, (255, 0, 0)) for mem in co.memory]))
     plt.show()
-    # for i in range(2):
-    #     co.cycleForChange()
-    #     plt.imshow(co.buildMiniMap(objectsAndColors=[MiniMapObject(mem, (255, 0, 0)) for mem in co.memory]))
-    #     plt.show()
-    # a = hc.changeSetToAxial(co.memory[0])
-    # b = hc.changeSetToAxial(co.memory[1])
-    # print(f"Axial Distance between objects: {hc.axial_distance(a, b)}")
     img = hc.griddleCameras(objectsAndColors=[MiniMapObject(mem, (255, 0, 0)) for mem in co.memory])['0']
     plt.imshow(img)
 

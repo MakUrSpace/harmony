@@ -33,6 +33,7 @@ class HarmonyMachine(CalibratedObserver):
 
     def reset(self, database_file=None):
         CalibratedObserver.reset(self)
+        self.buildMiniMap()
 
     def __repr__(self):
         return f"HarmonyMachine -- Cycle: {self.cycleCounter:5} -- Objects: {len(self.memory):5} -- {self.mode}|{self.state}"
