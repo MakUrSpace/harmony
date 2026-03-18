@@ -49,6 +49,8 @@
           imutils
           matplotlib
           uvicorn
+          fastapi
+          python-multipart
           graphviz
           pyzbar
           aiohttp 

@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import numpy as np
-from flask import Flask
+import json
 
 import sys
 import os
@@ -12,6 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../harm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../observer')))
 
 from harmonyServer import harmony, create_harmony_app, perspective_res
+import harmonyServer
 
 @pytest.fixture
 def app():
@@ -22,8 +23,6 @@ def app():
          patch('harmonyServer.registerCaptureService'):
         
         app = create_harmony_app()
-        app.secret_key = 'test_secret'
-        app.config['TESTING'] = True
         
         # Setup mock cameras
         mock_cam = MagicMock()
@@ -34,7 +33,8 @@ def app():
         mock_cam.mostRecentFrame = mock_frame
         mock_cam.activeZoneBoundingBox = (0, 0, 100, 200) # x, y, w, h
         
-        app.cc.cameras = {'Camera 1': mock_cam}
+        # Wire cameras into module-level state
+        harmonyServer._cc.cameras = {'Camera 1': mock_cam}
         
         # Setup mock memory object
         mock_obj = MagicMock()
@@ -47,41 +47,34 @@ def app():
         mock_obj.changeSet = {'Camera 1': mock_change_set}
         
         # Mock changeSetToAxialCoord for VirtualMap
-        app.cm.cc.changeSetToAxialCoord.return_value = (0, 0)
+        harmonyServer._cm.cc.changeSetToAxialCoord.return_value = (0, 0)
         
         # Mock realSpaceBoundingBox
-        app.cm.cc.realSpaceBoundingBox.return_value = (0, 0, 800, 800)
-        app.cm.cc.hex.width = 1600
-        app.cm.cc.hex.height = 1600
+        harmonyServer._cm.cc.realSpaceBoundingBox.return_value = (0, 0, 800, 800)
+        harmonyServer._cm.cc.hex.width = 1600
+        harmonyServer._cm.cc.hex.height = 1600
         
-        app.cm.memory = [mock_obj]
+        harmonyServer._cm.memory = [mock_obj]
         
         yield app
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    from fastapi.testclient import TestClient
+    return TestClient(app)
 
 def test_get_canvas_data_scaling(client, app):
     """
     Test that getCanvasData scales coordinates from raw camera resolution 
     to perspective_res (1920x1080).
     """
-    # Create a session
-    with client.session_transaction() as sess:
-        # We might need to initialize session in the server manually or via endpoint
-        pass
-
-    # Call the endpoint
-    # We need a valid game/view ID. harmonyServer uses SESSIONS global.
-    # We can inject a session directly into the global SESSIONS for testing.
     from harmonyServer import SESSIONS, SessionConfig
     SESSIONS['test_view'] = SessionConfig()
     
     response = client.get('/harmony/canvas_data/test_view')
     assert response.status_code == 200
     
-    data = response.get_json()
+    data = response.json()
     assert 'objects' in data
     assert 'TestObject' in data['objects']
     assert 'Camera 1' in data['objects']['TestObject']
@@ -102,9 +95,6 @@ def test_get_canvas_data_scaling(client, app):
     expected_y = 10 * (1080 / 200)
     
     # Check if scaled (allowing for small float errors)
-    # NOTE: This test is EXPECTED TO FAIL until the fix is implemented.
-    # Currently it returns raw coordinates (10, 10)
-    
     print(f"Received: ({x}, {y}), Expected: ({expected_x}, {expected_y})")
     
     assert abs(x - expected_x) < 0.1
@@ -118,15 +108,15 @@ def test_virtualmap_crop_scaling(client, app):
     from harmonyServer import SESSIONS, SessionConfig
     SESSIONS['test_view'] = SessionConfig()
     
-    app.cm.cc.realSpaceBoundingBox.return_value = (500, 500, 800, 800)
+    harmonyServer._cm.cc.realSpaceBoundingBox.return_value = (500, 500, 800, 800)
     
     # We mock objectToHull to return a point at (500, 500)
-    app.cm.cc.objectToHull.return_value = np.array([[[500, 500]]], dtype=np.float32)
+    harmonyServer._cm.cc.objectToHull.return_value = np.array([[[500, 500]]], dtype=np.float32)
     
     response = client.get('/harmony/canvas_data/test_view')
     assert response.status_code == 200
     
-    data = response.get_json()
+    data = response.json()
     assert 'TestObject' in data['objects']
     assert 'VirtualMap' in data['objects']['TestObject']
     

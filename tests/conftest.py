@@ -124,10 +124,11 @@ def harmony_app(mock_cv2):
 
         from harmony.harmonyServer import create_harmony_app
         app = create_harmony_app()
-        app.cc = mock_cc
-        # Ensure app.cm uses the same mock cc
-        if hasattr(app, 'cm'):
-            app.cm.cc = mock_cc
+        # Expose mock_cc via module globals for test access
+        import harmony.harmonyServer as hs
+        hs._cc = mock_cc
+        if hs._cm is not None:
+            hs._cm.cc = mock_cc
         yield app
 
 @pytest.fixture
@@ -136,4 +137,5 @@ def client(observer_app):
 
 @pytest.fixture
 def harmony_client(harmony_app):
-    return harmony_app.test_client()
+    from fastapi.testclient import TestClient
+    return TestClient(harmony_app)
