@@ -62,6 +62,14 @@ def scale_contour(contour, scale_factor):
     return scaled_contour.astype(np.int32)  # Convert back to integer
 
 
+def order_points_clockwise(camPts, realPts):
+    camPts = np.array(camPts)
+    realPts = np.array(realPts)
+    centroid = np.mean(camPts, axis=0)
+    angles = np.arctan2(camPts[:, 1] - centroid[1], camPts[:, 0] - centroid[0])
+    order = np.argsort(angles)
+    return camPts[order], realPts[order]
+
 # In[5]:
 
 
@@ -73,21 +81,35 @@ class CameraRealSpaceConverter:
     M: np.array = None
 
     def __post_init__(self):
-        self.camRect = self.triangleToSquare(self.camTriPts)
-        self.realRect = self.triangleToSquare(self.realTriPts)
-        # Rectangles are in the order of Pt-A-90*; Pt-B-60*; Pt-C-Projected; Pt-D-30*
-        self.tuneToCalibrationBox(self.camRect, self.realRect)
+        self.camTriPts = np.array(self.camTriPts)
+        self.realTriPts = np.array(self.realTriPts)
+        
+        if len(self.camTriPts) == 3:
+            self.camRect = self.triangleToSquare(self.camTriPts)
+            self.realRect = self.triangleToSquare(self.realTriPts)
+            # Rectangles are in the order of Pt-A-90*; Pt-B-60*; Pt-C-Projected; Pt-D-30*
+            self.tuneToCalibrationBox(self.camRect, self.realRect)
+        elif len(self.camTriPts) == 4:
+            camPts, realPts = order_points_clockwise(self.camTriPts, self.realTriPts)
+            self.camRect = np.float32(camPts)
+            self.realRect = np.float32(realPts)
+            self.tuneToCalibrationBox(self.camRect, self.realRect)
+        else: # >= 5 points
+            camPts, realPts = order_points_clockwise(self.camTriPts, self.realTriPts)
+            self.camRect = np.float32(camPts)
+            self.realRect = np.float32(realPts)
+            self.M, _ = cv2.findHomography(self.camRect, self.realRect)
 
     @property
     def camSpaceCentroid(self):
-        xA = int(sum([pt[0] for pt in self.camRect]) / 4)
-        yA = int(sum([pt[1] for pt in self.camRect]) / 4)
+        xA = int(sum([pt[0] for pt in self.camRect]) / len(self.camRect))
+        yA = int(sum([pt[1] for pt in self.camRect]) / len(self.camRect))
         return np.array([xA, yA], dtype="int32")
 
     @property
     def realSpaceCentroid(self):
-        xA = int(sum([pt[0] for pt in self.realRect]) / 4)
-        yA = int(sum([pt[1] for pt in self.realRect]) / 4)
+        xA = int(sum([pt[0] for pt in self.realRect]) / len(self.realRect))
+        yA = int(sum([pt[1] for pt in self.realRect]) / len(self.realRect))
         return np.array([xA, yA], dtype="int32")
 
     @staticmethod

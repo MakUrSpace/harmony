@@ -44,6 +44,7 @@ def buildConfigurator(request: Request):
                 </div>
                 <div class="text-center mt-2">
                     <button class="btn btn-sm btn-warning" onclick="clearShape('{cam.camName}')">Clear Manual Points</button>
+                    <button class="btn btn-sm btn-info" onclick="advanceColumn('{cam.camName}')">Next Column</button>
                     <!-- AZ controls below -->
                 </div>
                 
@@ -164,15 +165,37 @@ def draw_dynamic_grid(cc, camName):
             corners_real.append(rp)
             
         # Convert to Axial to find range
+        
+        # Collect base bounding box from calibrated coordinates to prevent mapping
+        # the camera corners across a perspective vanishing line which inflates hex ranges
+        cm = getattr(cc, 'cm', None) # We might not have cm directly in cc, but wait it's passed? No, cc has no cm.
+        # draw_dynamic_grid doesn't get cm. It gets cc and camName.
+        # However, cm is available if imported or we can look inside cc.rsc
         qs = []
         rs = []
-        for cr in corners_real:
-            q, r = cc.pixel_to_axial(cr[0], cr[1])
-            qs.append(q)
-            rs.append(r)
-            
-        min_q, max_q = int(min(qs)), int(max(qs))
-        min_r, max_r = int(min(rs)), int(max(rs))
+        
+        # Read the RealSpaceConverter configuration to gather mapped axial coordinates
+        if hasattr(cc, 'rsc') and cc.rsc and hasattr(cc.rsc, 'realCamSpacePairs'):
+            for cName, coordPairs in cc.rsc.realCamSpacePairs:
+                if cName == camName:
+                    if len(coordPairs) > 2:
+                        axials = coordPairs[2]
+                        for pt in axials:
+                            if hasattr(pt, '__iter__') and len(pt) >= 2:
+                                qs.append(int(pt[0]))
+                                rs.append(int(pt[1]))
+        
+        if qs and rs:
+            min_q, max_q = int(min(qs)) - 15, int(max(qs)) + 15
+            min_r, max_r = int(min(rs)) - 10, int(max(rs)) + 10
+        else:
+            # Fallback to corner projection
+            for cr in corners_real:
+                q, r = cc.pixel_to_axial(cr[0], cr[1])
+                qs.append(q)
+                rs.append(r)
+            min_q, max_q = int(min(qs)), int(max(qs))
+            min_r, max_r = int(min(rs)), int(max(rs))
         
         # Add padding to ensure coverage
         pad = 2
@@ -240,10 +263,10 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
                         if pts and len(pts) > 0:
                             poly_cam = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
                             cv2.polylines(img, [poly_cam], True, (0, 255, 0), 2, cv2.LINE_AA)
-                            # Put text for ID
-                            centroid_x = int(sum([p[0] for p in pts]) / len(pts))
-                            centroid_y = int(sum([p[1] for p in pts]) / len(pts))
-                            cv2.putText(img, f"ID: {idx+1}", (centroid_x - 20, centroid_y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                            for i, p in enumerate(pts):
+                                x, y = int(p[0]), int(p[1])
+                                cv2.circle(img, (x, y), 5, (0, 255, 0), -1)
+                                cv2.putText(img, str(i + 1), (x + 8, y + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
             ret, img = cv2.imencode('.jpg', img)
             yield (b'--frame\r\n'
@@ -339,6 +362,7 @@ async def manualCalibration(request: Request):
     added_count = 0
     new_calib_entry = {}
     
+    cm.calibrationPts = getattr(cm, 'calibrationPts', [])
     for camName, payload in data.items():
         if not isinstance(payload, dict) or 'pixel' not in payload or 'axial' not in payload:
             continue
@@ -346,7 +370,7 @@ async def manualCalibration(request: Request):
         pixel_data = payload['pixel']
         axial_data = payload['axial']
         
-        if len(pixel_data) != 3 or len(axial_data) != 3:
+        if len(pixel_data) < 3 or len(axial_data) < 3:
             continue
             
         if camName not in cc.cameras:
@@ -361,25 +385,88 @@ async def manualCalibration(request: Request):
              continue
         
         # Convert normalized points to pixel coordinates
-        pixelPoints = [[int(p[0] * w), int(p[1] * h)] for p in pixel_data]
+        pixelPointsFull = [[int(p[0] * w), int(p[1] * h)] for p in pixel_data]
         
-        # Convert user-provided axial coordinates to gridspace coordinates
-        if hasattr(cc, 'axial_to_pixel'):
-            try:
-                first_triangle = [cc.axial_to_pixel(p[0], p[1]).tolist() for p in axial_data]
-            except Exception as e:
-                print(f"Error converting axial to pixel: {e}")
-                first_triangle = axial_data
-        else:
-            first_triangle = axial_data
+        # Override existing calibration blocks for this camera to ensure updates replace old data
+        cm.calibrationPts = [entry for entry in getattr(cm, 'calibrationPts', []) if camName not in entry]
+        
+        point_map = {}
+        for pixel_pt, axial_pt in zip(pixelPointsFull, axial_data):
+            t_axial = (round(float(axial_pt[0]), 3), round(float(axial_pt[1]), 3))
+            point_map[t_axial] = pixel_pt
+
+        # Generic block identification: find all minimal parallelograms
+        pts = list(point_map.keys())
+        edges = {}
+        for i in range(len(pts)):
+            for j in range(len(pts)):
+                if i == j: continue
+                p1, p2 = pts[i], pts[j]
+                v = (round(p2[0] - p1[0], 3), round(p2[1] - p1[1], 3))
+                if v not in edges:
+                    edges[v] = []
+                edges[v].append((p1, p2))
+
+        parallelograms = {}
+        for v, pairs in edges.items():
+            if len(pairs) < 2: continue
+            for i in range(len(pairs)):
+                for j in range(i + 1, len(pairs)):
+                    A, B = pairs[i]
+                    C, D = pairs[j]
+                    # Since B-A == D-C == v --> A+D == B+C
+                    # Area of parallelogram formed by (B-A) and (C-A)
+                    area = abs((B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]))
+                    if area > 1e-5:
+                        len1 = ((B[0] - A[0])**2 + (B[1] - A[1])**2)**0.5
+                        len2 = ((C[0] - A[0])**2 + (C[1] - A[1])**2)**0.5
+                        perimeter = 2 * (len1 + len2)
+                        key = frozenset([A, B, C, D])
+                        parallelograms[key] = (area, perimeter)
+
+        valid_blocks = []
+        if parallelograms:
+            # Find minimal area, then minimal perimeter
+            min_area = min([metric[0] for metric in parallelograms.values()])
+            min_area_blocks = {k: v for k, v in parallelograms.items() if v[0] <= min_area + 1e-5}
+            min_perimeter = min([metric[1] for metric in min_area_blocks.values()])
+            valid_blocks = [list(k) for k, v in min_area_blocks.items() if v[1] <= min_perimeter + 1e-5]
+        elif len(pts) == 3:
+            # Legacy fallback if exactly 3 points are clicked for a simple triangle
+            valid_blocks = [pts]
+
+        for block in valid_blocks:
+            pixel_chunk = [point_map[p] for p in block]
+            axial_chunk = [list(p) for p in block]
             
-        new_calib_entry[camName] = [pixelPoints, first_triangle, axial_data]
-        added_count += 1
+            if hasattr(cc, 'axial_to_pixel'):
+                try:
+                    real_chunk = [cc.axial_to_pixel(p[0], p[1]).tolist() for p in axial_chunk]
+                except Exception as e:
+                    print(f"Error converting axial to pixel: {e}")
+                    real_chunk = axial_chunk
+            else:
+                real_chunk = axial_chunk
+                
+            def sanitize_native(obj):
+                if isinstance(obj, (list, tuple)):
+                    return [sanitize_native(x) for x in obj]
+                if hasattr(obj, 'item'): 
+                    return obj.item()
+                if isinstance(obj, float):
+                    return float(obj)
+                if isinstance(obj, int):
+                    return int(obj)
+                return obj
+            
+            p_chunk = sanitize_native(pixel_chunk)
+            r_chunk = sanitize_native(real_chunk)
+            a_chunk = sanitize_native(axial_chunk)
+                
+            cm.calibrationPts.append({camName: [p_chunk, r_chunk, a_chunk]})
+            added_count += 1
         
     if added_count > 0:
-        cm.calibrationPts = getattr(cm, 'calibrationPts', [])
-        cm.calibrationPts.append(new_calib_entry)
-        
         if hasattr(cm, 'buildRealSpaceConverter'):
             cm.buildRealSpaceConverter()
         else:
