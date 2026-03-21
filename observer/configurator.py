@@ -11,13 +11,11 @@ from fastapi import APIRouter, Request, Response, Form, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
 
 from observer.Observer import RemoteCamera, RTSPCamera
-from observer.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver
+from observer.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver, distanceFormula
 from observer.HexObserver import HexGridConfiguration
 
 
-
 configurator = APIRouter(prefix='/configurator', tags=['configurator'])
-
 
 
 def buildConfigurator(request: Request):
@@ -413,8 +411,37 @@ async def manualCalibration(request: Request):
         valid_blocks = []
         seen_blocks = set()
         for calib_pt in calib_pts:
-            distances = sorted([(other_calib, cc.axial_distance(calib_pt.axial, other_calib.axial)) for other_calib in calib_pts if other_calib.axial != calib_pt.axial], key=lambda x: x[1])
-            block = [calib_pt, *[pt[0] for pt in distances[:3]]]
+            cq, cr = calib_pt.axial
+            
+            same_r_pts = [p for p in calib_pts if p is not calib_pt and abs(p.axial[1] - cr) < 0.01]
+            if not same_r_pts:
+                continue
+            next_same_r = min(same_r_pts, key=lambda p: distanceFormula(calib_pt.pixel, p.pixel))
+            
+            # Find the row 'up'. Identify adjacent rows based on available data.
+            unique_rs = []
+            for p in calib_pts:
+                if not any(abs(u - p.axial[1]) < 0.01 for u in unique_rs):
+                    unique_rs.append(p.axial[1])
+            unique_rs.sort()
+            
+            idx = next((i for i, r in enumerate(unique_rs) if abs(r - cr) < 0.01), -1)
+            adj_rows = []
+            if idx > 0: adj_rows.append(unique_rs[idx - 1])
+            if idx < len(unique_rs) - 1: adj_rows.append(unique_rs[idx + 1])
+            
+            nearest_up = []
+            for adj_r in adj_rows:
+                up_row_pts = [p for p in calib_pts if abs(p.axial[1] - adj_r) < 0.01]
+                if len(up_row_pts) >= 2:
+                    distances_up = sorted([(p, distanceFormula(calib_pt.pixel, p.pixel)) for p in up_row_pts], key=lambda x: x[1])
+                    nearest_up = [x[0] for x in distances_up[:2]]
+                    break
+                    
+            if len(nearest_up) < 2:
+                continue
+                
+            block = [calib_pt, next_same_r, *nearest_up]
             block = order_points_clockwise(block)
             
             block_sig = tuple(sorted([tuple(p.axial) for p in block]))
