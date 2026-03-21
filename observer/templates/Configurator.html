@@ -85,7 +85,7 @@
                 canvas.style.height = img.clientHeight + 'px';
                 canvas.style.left = img.offsetLeft + 'px';
                 canvas.style.top = img.offsetTop + 'px';
-                
+
                 if (!loadedCams[camName] && canvas.width > 0 && calibrationPts.length > 0) {
                     calibrationPts.forEach(entry => {
                         if (entry[camName]) {
@@ -97,13 +97,13 @@
                             }
                         }
                     });
-                    
+
                     if (manualPoints[camName].length > 0) {
                         renderActiveCalibrationTable(camName);
                     }
                     loadedCams[camName] = true;
                 }
-                
+
                 drawPoints(camName);
             }
         });
@@ -174,16 +174,16 @@
         } else {
             var col = currentCol[camName] || 0;
             var row = currentRow[camName] || 0;
-            
+
             var predictedQ = col * -2 + row * 8;
             var predictedR = col * 4;
-            
+
             manualPoints[camName].push([x / w, y / h]);
             axialPoints[camName].push([predictedQ, predictedR]);
-            
+
             // Advance for next click
             currentRow[camName] = row + 1;
-            
+
             drawPoints(camName);
             renderActiveCalibrationTable(camName);
         }
@@ -331,7 +331,7 @@
 
         var points = manualPoints[camName];
         var axials = axialPoints[camName];
-        
+
         if (!points || points.length === 0) {
             container.style.display = 'none';
             tbody.innerHTML = '';
@@ -343,14 +343,14 @@
 
         points.forEach((pt, i) => {
             var row = document.createElement('tr');
-            
+
             var px = pt[0].toFixed(4);
             var py = pt[1].toFixed(4);
             var q = axials[i] ? axials[i][0] : 0;
             var r = axials[i] ? axials[i][1] : 0;
 
             row.innerHTML = `
-                <td>P${i+1}</td>
+                <td>P${i + 1}</td>
                 <td><input type="number" step="0.0001" class="form-control form-control-sm text-center" value="${px}" onchange="updateManualPoint('${camName}', ${i}, 'x', this.value)"></td>
                 <td><input type="number" step="0.0001" class="form-control form-control-sm text-center" value="${py}" onchange="updateManualPoint('${camName}', ${i}, 'y', this.value)"></td>
                 <td><input type="number" class="form-control form-control-sm text-center" value="${q}" onchange="updateAxialPoint('${camName}', ${i}, 'q', this.value)"></td>

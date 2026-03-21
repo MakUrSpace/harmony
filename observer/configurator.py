@@ -5,6 +5,8 @@ import numpy as np
 import math
 import time
 from typing import Optional
+from dataclasses import dataclass
+
 from fastapi import APIRouter, Request, Response, Form, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
 
@@ -87,9 +89,11 @@ def buildConfigurator(request: Request):
                 # helper to sanitize numpy arrays to lists
                 def to_list_recursive(obj):
                     if isinstance(obj, np.ndarray):
-                        return obj.tolist()
-                    if isinstance(obj, list):
+                        return to_list_recursive(obj.tolist())
+                    if isinstance(obj, (list, tuple)):
                         return [to_list_recursive(x) for x in obj]
+                    if hasattr(obj, 'item'):
+                        return obj.item()
                     return obj
 
                 rec_entry_coords = [to_list_recursive(coordList[0]), to_list_recursive(coordList[1])]
@@ -349,6 +353,21 @@ async def addNewCamera(
               <input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/configurator/'">""")
 
 
+@dataclass
+class CalibrationPoint:
+    axial: list
+    pixel: list
+    real: list
+
+
+def order_points_clockwise(calibPts: list[CalibrationPoint]):
+    camPts = np.array([pt.pixel for pt in calibPts])
+    centroid = np.mean(camPts, axis=0)
+    angles = np.arctan2(camPts[:, 1] - centroid[1], camPts[:, 0] - centroid[0])
+    order = np.argsort(angles)
+    return [calibPts[i] for i in order]
+
+
 @configurator.post('/manual_calibration')
 async def manualCalibration(request: Request):
     cc = request.app.state.cc
@@ -361,8 +380,8 @@ async def manualCalibration(request: Request):
         
     added_count = 0
     new_calib_entry = {}
-    
-    cm.calibrationPts = getattr(cm, 'calibrationPts', [])
+
+    cm.calibrationPts = []
     for camName, payload in data.items():
         if not isinstance(payload, dict) or 'pixel' not in payload or 'axial' not in payload:
             continue
@@ -383,75 +402,37 @@ async def manualCalibration(request: Request):
         except AttributeError:
              print(f"Camera {camName} has no frame.")
              continue
-        
-        # Convert normalized points to pixel coordinates
-        pixelPointsFull = [[int(p[0] * w), int(p[1] * h)] for p in pixel_data]
-        
-        # Override existing calibration blocks for this camera to ensure updates replace old data
-        cm.calibrationPts = [entry for entry in getattr(cm, 'calibrationPts', []) if camName not in entry]
-        
-        point_map = {}
-        for pixel_pt, axial_pt in zip(pixelPointsFull, axial_data):
-            t_axial = (round(float(axial_pt[0]), 3), round(float(axial_pt[1]), 3))
-            point_map[t_axial] = pixel_pt
 
-        # Generic block identification: find all minimal parallelograms
-        pts = list(point_map.keys())
-        edges = {}
-        for i in range(len(pts)):
-            for j in range(len(pts)):
-                if i == j: continue
-                p1, p2 = pts[i], pts[j]
-                v = (round(p2[0] - p1[0], 3), round(p2[1] - p1[1], 3))
-                if v not in edges:
-                    edges[v] = []
-                edges[v].append((p1, p2))
-
-        parallelograms = {}
-        for v, pairs in edges.items():
-            if len(pairs) < 2: continue
-            for i in range(len(pairs)):
-                for j in range(i + 1, len(pairs)):
-                    A, B = pairs[i]
-                    C, D = pairs[j]
-                    # Since B-A == D-C == v --> A+D == B+C
-                    # Area of parallelogram formed by (B-A) and (C-A)
-                    area = abs((B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]))
-                    if area > 1e-5:
-                        len1 = ((B[0] - A[0])**2 + (B[1] - A[1])**2)**0.5
-                        len2 = ((C[0] - A[0])**2 + (C[1] - A[1])**2)**0.5
-                        perimeter = 2 * (len1 + len2)
-                        key = frozenset([A, B, C, D])
-                        parallelograms[key] = (area, perimeter)
-
+        calib_pts = []
+        for pixel, axial in zip(pixel_data, axial_data):
+            pixel_full = [int(pixel[0] * w), int(pixel[1] * h)]
+            real = cc.axial_to_pixel(*axial)
+            calib_pt = CalibrationPoint(pixel=pixel_full, axial=axial, real=real)
+            calib_pts.append(calib_pt)
+            
         valid_blocks = []
-        if parallelograms:
-            # Find minimal area, then minimal perimeter
-            min_area = min([metric[0] for metric in parallelograms.values()])
-            min_area_blocks = {k: v for k, v in parallelograms.items() if v[0] <= min_area + 1e-5}
-            min_perimeter = min([metric[1] for metric in min_area_blocks.values()])
-            valid_blocks = [list(k) for k, v in min_area_blocks.items() if v[1] <= min_perimeter + 1e-5]
-        elif len(pts) == 3:
-            # Legacy fallback if exactly 3 points are clicked for a simple triangle
-            valid_blocks = [pts]
+        seen_blocks = set()
+        for calib_pt in calib_pts:
+            distances = sorted([(other_calib, cc.axial_distance(calib_pt.axial, other_calib.axial)) for other_calib in calib_pts if other_calib.axial != calib_pt.axial], key=lambda x: x[1])
+            block = [calib_pt, *[pt[0] for pt in distances[:3]]]
+            block = order_points_clockwise(block)
+            
+            block_sig = tuple(sorted([tuple(p.axial) for p in block]))
+            if block_sig not in seen_blocks:
+                seen_blocks.add(block_sig)
+                valid_blocks.append(block)
 
         for block in valid_blocks:
-            pixel_chunk = [point_map[p] for p in block]
-            axial_chunk = [list(p) for p in block]
-            
-            if hasattr(cc, 'axial_to_pixel'):
-                try:
-                    real_chunk = [cc.axial_to_pixel(p[0], p[1]).tolist() for p in axial_chunk]
-                except Exception as e:
-                    print(f"Error converting axial to pixel: {e}")
-                    real_chunk = axial_chunk
-            else:
-                real_chunk = axial_chunk
+            pixel_chunk = [p.pixel for p in block]
+            axial_chunk = [p.axial for p in block]
+            real_chunk = [p.real for p in block]
                 
             def sanitize_native(obj):
+                if isinstance(obj, np.ndarray):
+                    return sanitize_native(obj.tolist())
                 if isinstance(obj, (list, tuple)):
                     return [sanitize_native(x) for x in obj]
-                if hasattr(obj, 'item'): 
+                if hasattr(obj, 'item'):
                     return obj.item()
                 if isinstance(obj, float):
                     return float(obj)

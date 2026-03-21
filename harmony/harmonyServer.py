@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 from observer import HexGridConfiguration, HexCaptureConfiguration
 from observer.Observer import hStackImages, clipImage, Camera
-from observer.configurator import configurator
+from observer.configurator import configurator, draw_dynamic_grid
 
 from harmony.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
 
@@ -212,17 +212,14 @@ def render_camera(cc, camName):
 
         masked = frame.copy()
 
-        grid = cc.cameraGriddle(camName)
-        if grid is not None:
+        if hasattr(cc, 'rsc') and cc.rsc is not None:
             try:
-                if np.sum(grid) > 0:
-                    masked = cv2.addWeighted(grid, 0.3, masked, 0.7, 0.0)
-                else:
-                    print(f"Grid for {camName} is empty (all zeros)")
+                grid_overlay = draw_dynamic_grid(cc, camName)
+                if grid_overlay is not None:
+                    if grid_overlay.shape[:2] == masked.shape[:2]:
+                        cv2.addWeighted(grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked)
             except Exception as e:
                 print(f"Grid blend error: {e}")
-        else:
-            print(f"Grid for {camName} returned None")
 
         masked = cam.cropToActiveZone(masked)
 
