@@ -402,52 +402,32 @@ async def manualCalibration(request: Request):
              continue
 
         calib_pts = []
+        calib_pt_columns = {}
         for pixel, axial in zip(pixel_data, axial_data):
             pixel_full = [int(pixel[0] * w), int(pixel[1] * h)]
             real = cc.axial_to_pixel(*axial)
             calib_pt = CalibrationPoint(pixel=pixel_full, axial=axial, real=real)
             calib_pts.append(calib_pt)
-            
+            if calib_pt.axial[1] not in calib_pt_columns:
+                calib_pt_columns[calib_pt.axial[1]] = []
+            calib_pt_columns[calib_pt.axial[1]].append(calib_pt)
+        
+        col_values = sorted(list(calib_pt_columns.keys()))
         valid_blocks = []
         seen_blocks = set()
-        for calib_pt in calib_pts:
-            cq, cr = calib_pt.axial
-            
-            same_r_pts = [p for p in calib_pts if p is not calib_pt and abs(p.axial[1] - cr) < 0.01]
-            if not same_r_pts:
-                continue
-            next_same_r = min(same_r_pts, key=lambda p: distanceFormula(calib_pt.pixel, p.pixel))
-            
-            # Find the row 'up'. Identify adjacent rows based on available data.
-            unique_rs = []
-            for p in calib_pts:
-                if not any(abs(u - p.axial[1]) < 0.01 for u in unique_rs):
-                    unique_rs.append(p.axial[1])
-            unique_rs.sort()
-            
-            idx = next((i for i, r in enumerate(unique_rs) if abs(r - cr) < 0.01), -1)
-            adj_rows = []
-            if idx > 0: adj_rows.append(unique_rs[idx - 1])
-            if idx < len(unique_rs) - 1: adj_rows.append(unique_rs[idx + 1])
-            
-            nearest_up = []
-            for adj_r in adj_rows:
-                up_row_pts = [p for p in calib_pts if abs(p.axial[1] - adj_r) < 0.01]
-                if len(up_row_pts) >= 2:
-                    distances_up = sorted([(p, distanceFormula(calib_pt.pixel, p.pixel)) for p in up_row_pts], key=lambda x: x[1])
-                    nearest_up = [x[0] for x in distances_up[:2]]
-                    break
-                    
-            if len(nearest_up) < 2:
-                continue
+        for col_idx, col in enumerate(col_values[:-1]):
+            next_col = col_values[col_idx + 1]
+            for idx, calib_pt in enumerate(calib_pt_columns[col][:-1]):
+                next_same_r = calib_pt_columns[col][idx + 1]
+                next_q = calib_pt_columns[next_col][idx:idx+2]
+
+                block = [calib_pt, next_same_r, *next_q]
+                block = order_points_clockwise(block)
                 
-            block = [calib_pt, next_same_r, *nearest_up]
-            block = order_points_clockwise(block)
-            
-            block_sig = tuple(sorted([tuple(p.axial) for p in block]))
-            if block_sig not in seen_blocks:
-                seen_blocks.add(block_sig)
-                valid_blocks.append(block)
+                block_sig = tuple(sorted([tuple(p.axial) for p in block]))
+                if block_sig not in seen_blocks:
+                    seen_blocks.add(block_sig)
+                    valid_blocks.append(block)
 
         for block in valid_blocks:
             pixel_chunk = [p.pixel for p in block]
