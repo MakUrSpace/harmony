@@ -86,10 +86,10 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                 all_pts = np.vstack(true_real_contours)
                 if hasattr(self, 'apply_affine_pts'):
                     all_pts = self.apply_affine_pts(all_pts)
-                min_x = np.min(all_pts[:, 0])
-                max_x = np.max(all_pts[:, 0])
-                min_y = np.min(all_pts[:, 1])
-                max_y = np.max(all_pts[:, 1])
+                min_x = float(np.min(all_pts[:, 0]))
+                max_x = float(np.max(all_pts[:, 0]))
+                min_y = float(np.min(all_pts[:, 1]))
+                max_y = float(np.max(all_pts[:, 1]))
                 return min_x, min_y, max_x - min_x, max_y - min_y
         except Exception as e:
             print(f"Error in realSpaceBoundingBox: {e}")
@@ -476,14 +476,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         # Calculate Global Bounding Box from these TRUE contours
         if true_real_contours:
             all_pts = np.vstack(true_real_contours)
-            min_x = np.min(all_pts[:, 0])
-            max_x = np.max(all_pts[:, 0])
-            min_y = np.min(all_pts[:, 1])
-            max_y = np.max(all_pts[:, 1])
+            min_x = float(np.min(all_pts[:, 0]))
+            max_x = float(np.max(all_pts[:, 0]))
+            min_y = float(np.min(all_pts[:, 1]))
+            max_y = float(np.max(all_pts[:, 1]))
             
             # Recalculate Shift & Dimensions based on TRUE bounds
-            shift_x = 0
-            shift_y = 0
+            shift_x = 0.0
+            shift_y = 0.0
             if min_x < 0: shift_x = -min_x
             if min_y < 0: shift_y = -min_y
             

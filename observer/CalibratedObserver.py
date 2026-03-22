@@ -392,12 +392,20 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
     def buildConfiguration(self):
         config = super().buildConfiguration()
         if self.rsc is not None:
+            def sanitize_recursive(obj):
+                if isinstance(obj, np.ndarray):
+                    return sanitize_recursive(obj.tolist())
+                if isinstance(obj, (list, tuple)):
+                    return [sanitize_recursive(x) for x in obj]
+                if hasattr(obj, 'item'):
+                    return obj.item()
+                return obj
+
             config['rsc'] = []
             for cN, coordList in self.rsc.realCamSpacePairs:
-                entry = [[a.tolist() if type(a) != list else a for a in coordList[0]],
-                         [a.tolist() if type(a) != list else a for a in coordList[1]]]
+                entry = [sanitize_recursive(coordList[0]), sanitize_recursive(coordList[1])]
                 if len(coordList) > 2:
-                    entry.append([a.tolist() if type(a) != list else a for a in coordList[2]])
+                    entry.append(sanitize_recursive(coordList[2]))
                 config['rsc'].append([cN, entry])
         return config
 

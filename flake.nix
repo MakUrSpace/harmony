@@ -50,6 +50,7 @@
           matplotlib
           uvicorn
           fastapi
+          jinja2
           python-multipart
           graphviz
           pyzbar

@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 from observer import HexGridConfiguration, HexCaptureConfiguration
 from observer.Observer import hStackImages, clipImage, Camera
-from observer.configurator import configurator
+from observer.configurator import configurator, draw_dynamic_grid
 
 from harmony.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
 
@@ -61,6 +61,9 @@ def _get_cm():
 # ---------------------------------------------------------------------------
 
 harmony = APIRouter(prefix='/harmony', tags=['harmony'])
+from fastapi.templating import Jinja2Templates
+templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "harmony_templates"))
+
 
 
 # ---------------------------------------------------------------------------
@@ -212,17 +215,14 @@ def render_camera(cc, camName):
 
         masked = frame.copy()
 
-        grid = cc.cameraGriddle(camName)
-        if grid is not None:
+        if hasattr(cc, 'rsc') and cc.rsc is not None:
             try:
-                if np.sum(grid) > 0:
-                    masked = cv2.addWeighted(grid, 0.3, masked, 0.7, 0.0)
-                else:
-                    print(f"Grid for {camName} is empty (all zeros)")
+                grid_overlay = draw_dynamic_grid(cc, camName)
+                if grid_overlay is not None:
+                    if grid_overlay.shape[:2] == masked.shape[:2]:
+                        cv2.addWeighted(grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked)
             except Exception as e:
                 print(f"Grid blend error: {e}")
-        else:
-            print(f"Grid for {camName} returned None")
 
         masked = cam.cropToActiveZone(masked)
 
@@ -1129,23 +1129,25 @@ def minimapResponse(viewId: str):
 @harmony.get('/control')
 def session_control_list(request: Request):
     cm = _get_cm()
-    # Read the template
-    with open(f"{os.path.dirname(__file__)}/harmony_templates/SessionList.html") as f:
-        template = f.read()
-    session_rows = ""
-    for sid, cfg in SESSIONS.items():
-        session_rows += f"<tr><td>{sid}</td><td><a href='/harmony/control/{sid}'>Manage</a></td></tr>"
-    return HTMLResponse(template.replace("{session_rows}", session_rows))
+    return templates.TemplateResponse("SessionList.html", {
+        "request": request,
+        "sessions": SESSIONS.keys()
+    })
 
 
 @harmony.get('/control/{viewId}')
-def session_control_panel(viewId: str):
+def session_control_panel(request: Request, viewId: str):
     if viewId not in SESSIONS:
         return Response(f"Session {viewId} not found", status_code=404)
     cm = _get_cm()
-    with open(f"{os.path.dirname(__file__)}/harmony_templates/ControlPanel.html") as f:
-        template = f.read()
-    return HTMLResponse(template.replace("{viewId}", viewId))
+    config = SESSIONS.get(viewId)
+    objects = cm.memory if cm else []
+    return templates.TemplateResponse("ControlPanel.html", {
+        "request": request,
+        "viewId": viewId,
+        "config": config,
+        "objects": objects
+    })
 
 
 @harmony.post('/control/{viewId}/update')
