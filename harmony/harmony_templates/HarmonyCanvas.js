@@ -1,9 +1,14 @@
 /**
  * Initialize the Canvas Editor.
  */
-function initCanvasEditor(canvasId, data, onUpdate, onClick) {
+function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     const canvas = document.getElementById(canvasId);
-    const imgElem = document.getElementById('GameWorld');
+    let imgElem = null;
+    if (camName) {
+        imgElem = document.getElementById('GameWorld_' + camName);
+    } else {
+        imgElem = document.getElementById('GameWorld');
+    }
 
     if (!canvas || !imgElem) {
         console.error("Canvas or Image not found");
@@ -41,7 +46,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick) {
     setInterval(resizeCanvas, 1000);
 
     function getNaturalDims() {
-        const currentCam = document.getElementById('selectedCamera').value;
+        const currentCam = camName || document.getElementById('selectedCamera').value;
         if (currentCam === "VirtualMap") {
             return { w: 1200, h: 1200 };
         }
@@ -76,7 +81,8 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick) {
     function getPoly(objOrMap) {
         if (!objOrMap) return null;
         if (Array.isArray(objOrMap)) return objOrMap;
-        return objOrMap[document.getElementById(`selectedCamera`).value];
+        const currentCam = camName || document.getElementById('selectedCamera').value;
+        return objOrMap[currentCam];
     }
 
 
@@ -87,7 +93,8 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick) {
             ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 1)`;
             ctx.lineWidth = 2;
             var transparency = 0.3;
-            if (document.getElementById(`selectedCamera`).value == 'VirtualMap') {
+            const currentCam = camName || document.getElementById(`selectedCamera`).value;
+            if (currentCam == 'VirtualMap') {
                 transparency = 1;
             }
             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${transparency})`;
@@ -284,15 +291,18 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick) {
 }
 
 // Existing logic adapted for external call
-function handlePixelSelection(event) {
+function handlePixelSelection(event, camNameOverride) {
     console.log("Canvas clicked!!", event);
     // Event is the mouse event derived from canvas
 
-    // We need to match the original coordinate calculation
-    // original: event.x - left (where left is bounds.left)
-    // The event passed here is the mouseup event on the canvas.
+    const camName = camNameOverride || document.getElementById('selectedCamera').value;
+    let imgElem = null;
+    if (camNameOverride) {
+        imgElem = document.getElementById('GameWorld_' + camNameOverride);
+    } else {
+        imgElem = document.getElementById('GameWorld');
+    }
 
-    const imgElem = document.getElementById(`GameWorld`)
     const bounds = imgElem.getBoundingClientRect();
 
 
@@ -309,10 +319,9 @@ function handlePixelSelection(event) {
     const cw = imgElem.clientWidth
     const ch = imgElem.clientHeight
 
-    const selectedCamera = document.getElementById(`selectedCamera`).value
     var natural_width = 1920
     var natural_height = 1080
-    if (selectedCamera === "VirtualMap") {
+    if (camName === "VirtualMap") {
         natural_width = 1200
         natural_height = 1200
     }
@@ -337,8 +346,18 @@ function handlePixelSelection(event) {
     }
 
     const selectPixelForm = document.getElementById(`selectPixelForm`)
+    
+    // Temporarily set the selectedCamera form field to the clicked camera
+    const selectedCameraInput = document.getElementById('selectedCamera');
+    selectedCameraInput.value = camName;
+    
     pixelField.value = JSON.stringify([~~image_x, ~~image_y])
     selectPixelForm.requestSubmit()
+    
+    // Restore if needed
+    if (camNameOverride) {
+        selectedCameraInput.value = 'All';
+    }
 }
 
 // Initialization function to be called from the HTML
@@ -370,30 +389,80 @@ function initHarmonyCanvas() {
 
 function gameWorldClick(camNum) {
     const view_id = document.getElementById(`viewId`).value;
-    var img = document.querySelector("#GameWorld");
+    var container = document.querySelector("#GameWorldViewer");
+    var header = document.querySelector("#GameWorldHeader");
 
-    // Set src first to start loading
-    const newSrc = `/harmony/camWithChanges/${camNum}/${view_id}`;
-    if (img.src !== newSrc) {
-        img.src = newSrc;
-    }
+    const showObjectsElem = document.getElementById('showObjectsHarmony');
+    const showObjects = showObjectsElem ? showObjectsElem.checked : true;
 
-    // Use decode() to wait for image frame to be ready
-    img.decode().then(() => {
-        var header = document.querySelector("#GameWorldHeader");
-        header.innerText = `Game World View -- ${camNum}`;
-
+    if (camNum === 'All') {
+        header.innerText = `Game World View -- All Views`;
         const camField = document.getElementById(`selectedCamera`);
-        camField.value = camNum;
+        camField.value = 'All';
 
-        // Update Editor Context
-        if (window.harmonyCanvasData) {
-            window.harmonyCanvasData.cameraName = camNum;
+        const btns = Array.from(document.querySelectorAll('input[type="button"][value^="Camera "], input[type="button"][value="Virtual Map"]'));
+        const camNames = btns.map(b => b.value.replace('Camera ', '').replace('Virtual Map', 'VirtualMap'));
+        
+        let html = '<div style="display: flex; flex-wrap: wrap; justify-content: center;">';
+        camNames.forEach(c => {
+            html += `<div style="flex: 1 1 45%; margin: 10px; text-align: center; max-width: 48%; min-width: 300px;">
+                       <h5>${c}</h5>
+                       <div style="position: relative; display: inline-block; width: 100%;">
+                         <img class="img-responsive border border-3 border-info" src="/harmony/camWithChanges/${c}/${view_id}" style="border-radius:20px; width:100%;" id="GameWorld_${c}">
+                         <canvas id="GameWorldOverlay_${c}" style="position:absolute; left:0; top:0; pointer-events:auto; display: ${showObjects ? 'block' : 'none'};"></canvas>
+                       </div>
+                     </div>`;
+        });
+        html += '</div>';
+        container.innerHTML = html;
+
+        setTimeout(() => {
+            if (window.harmonyCanvasData) {
+                window.harmonyEditors = [];
+                camNames.forEach(c => {
+                    const img = document.getElementById(`GameWorld_${c}`);
+                    if (img) {
+                        const editor = initCanvasEditor(`GameWorldOverlay_${c}`, window.harmonyCanvasData, null, 
+                            function (clickEvent) { handlePixelSelection(clickEvent, c); }, c);
+                        window.harmonyEditors.push(editor);
+                    }
+                });
+            }
+        }, 100);
+    } else {
+        if (!document.getElementById('GameWorld')) {
+            container.innerHTML = `<img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="/harmony/camWithChanges/${camNum}/${view_id}" style="border-radius: 40px; max-width: 90%;">
+                                   <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: ${showObjects ? 'block' : 'none'};"></canvas>`;
+            if (window.harmonyCanvasData) {
+                setTimeout(() => {
+                    window.harmonyEditor = initCanvasEditor("GameWorldOverlay", window.harmonyCanvasData, 
+                        function (updatedData) { console.log("Data updated", updatedData); },
+                        function (clickEvent) { handlePixelSelection(clickEvent); }
+                    );
+                }, 50);
+            }
         }
-        if (window.harmonyEditor) window.harmonyEditor.render();
-    }).catch((encodingError) => {
-        console.error("Image decode error", encodingError);
-    });
+
+        var img = document.querySelector("#GameWorld");
+        const newSrc = `/harmony/camWithChanges/${camNum}/${view_id}`;
+        if (img.src !== newSrc) {
+            img.src = newSrc;
+        }
+
+        img.decode().then(() => {
+            header.innerText = `Game World View -- ${camNum}`;
+            const camField = document.getElementById(`selectedCamera`);
+            camField.value = camNum;
+
+            if (window.harmonyCanvasData) {
+                window.harmonyCanvasData.cameraName = camNum;
+            }
+            if (window.harmonyEditor) window.harmonyEditor.render();
+            window.harmonyEditors = []; // clear multi-view mode
+        }).catch((err) => {
+            console.error("Image decode error", err);
+        });
+    }
 }
 
 function syncCanvasData(viewId) {
@@ -408,8 +477,11 @@ function syncCanvasData(viewId) {
     fetch(`/harmony/canvas_data/${viewId}`)
         .then(response => response.json())
         .then(data => {
-            if (window.harmonyEditor) {
+            if (window.harmonyEditor && document.getElementById('selectedCamera').value !== 'All') {
                 window.harmonyEditor.updateData(data);
+            }
+            if (window.harmonyEditors && document.getElementById('selectedCamera').value === 'All') {
+                window.harmonyEditors.forEach(ed => ed.updateData(data));
             }
         })
         .catch(err => console.error("Error syncing canvas data:", err));

@@ -216,13 +216,14 @@ def render_camera(cc, camName):
         masked = frame.copy()
 
         if hasattr(cc, 'rsc') and cc.rsc is not None:
-            try:
-                grid_overlay = draw_dynamic_grid(cc, camName)
-                if grid_overlay is not None:
-                    if grid_overlay.shape[:2] == masked.shape[:2]:
-                        cv2.addWeighted(grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked)
-            except Exception as e:
-                print(f"Grid blend error: {e}")
+            if getattr(cc, 'show_grid', True):
+                try:
+                    grid_overlay = draw_dynamic_grid(cc, camName)
+                    if grid_overlay is not None:
+                        if grid_overlay.shape[:2] == masked.shape[:2]:
+                            cv2.addWeighted(grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked)
+                except Exception as e:
+                    print(f"Grid blend error: {e}")
 
         masked = cam.cropToActiveZone(masked)
 
@@ -234,6 +235,14 @@ def render_camera(cc, camName):
     except Exception as e:
         print(f"Camera render error {camName}: {e}")
         return None
+
+
+@harmony.post('/set_overlays')
+async def setHarmonyOverlays(request: Request, show_grid: bool = Form(...), show_objects: bool = Form(...)):
+    cc = _get_cc()
+    cc.show_grid = show_grid
+    cc.show_objects = show_objects
+    return Response("Success")
 
 
 def get_broadcaster(key, render_func):
@@ -654,6 +663,7 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
 
     cameraButtons = ' '.join([f'''<input type="button" class="btn btn-info" value="Camera {camName}" onclick="gameWorldClick('{camName}')">''' for camName in cc.cameras.keys()])
     cameraButtons = f"""<input type="button" class="btn btn-info" value="Virtual Map" onclick="gameWorldClick('VirtualMap')">{cameraButtons}"""
+    cameraButtons += f""" <input type="button" class="btn btn-warning" value="All Views" onclick="gameWorldClick('All')">"""
 
     defaultCam = [camName for camName, cam in cc.cameras.items()]
     if len(defaultCam) == 0:

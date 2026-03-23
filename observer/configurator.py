@@ -248,17 +248,18 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
 
             # Overlay Hex Grid if configured and calibration exists
             if hasattr(cc, 'rsc') and cc.rsc is not None:
-                try:
-                    grid_overlay = draw_dynamic_grid(cc, camName)
-                    
-                    if grid_overlay is not None:
-                        if grid_overlay.shape[:2] == img.shape[:2]:
-                            cv2.addWeighted(grid_overlay, 0.5, img, 1.0, 0.0, dst=img)
-                except Exception as e:
-                    print(f"Grid overlay error: {e}")
+                if getattr(cc, 'show_grid', True):
+                    try:
+                        grid_overlay = draw_dynamic_grid(cc, camName)
+                        
+                        if grid_overlay is not None:
+                            if grid_overlay.shape[:2] == img.shape[:2]:
+                                cv2.addWeighted(grid_overlay, 0.5, img, 1.0, 0.0, dst=img)
+                    except Exception as e:
+                        print(f"Grid overlay error: {e}")
 
             # Overlay Calibration Objects
-            if hasattr(cm, 'calibrationPts') and cm.calibrationPts:
+            if getattr(cc, 'show_objects', True) and hasattr(cm, 'calibrationPts') and cm.calibrationPts:
                 for idx, calibObj in enumerate(cm.calibrationPts):
                     if camName in calibObj:
                         pts = calibObj[camName][0]  # pixelPoints
@@ -280,6 +281,14 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
             print(f"Failed genCameraFullViewWithActiveZone for {camName} -- {e}")
             yield (b'--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n')
             time.sleep(1.0) # Back off on error
+    
+
+@configurator.post('/set_overlays')
+async def setConfiguratorOverlays(request: Request, show_grid: bool = Form(...), show_objects: bool = Form(...)):
+    cc = request.app.state.cc
+    cc.show_grid = show_grid
+    cc.show_objects = show_objects
+    return Response("Success")
     
     
 @configurator.get('/camera/{camName}')

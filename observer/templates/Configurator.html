@@ -29,6 +29,14 @@
                     <input class="form-check-input" type="checkbox" id="modeSwitch" onchange="toggleMode()">
                     <label class="form-check-label" for="modeSwitch">Calibration Mode</label>
                 </div>
+                <div class="form-check form-switch d-inline-block ms-3">
+                    <input class="form-check-input" type="checkbox" id="showGridConfig" checked onchange="toggleConfigOverlays()">
+                    <label class="form-check-label" for="showGridConfig">Show Grid</label>
+                </div>
+                <div class="form-check form-switch d-inline-block ms-3">
+                    <input class="form-check-input" type="checkbox" id="showObjectsConfig" checked onchange="toggleConfigOverlays()">
+                    <label class="form-check-label" for="showObjectsConfig">Show Objects</label>
+                </div>
                 <div id="statusMessage" class="d-inline-block ms-3 fw-bold"></div>
             </div>
             <div class="col" align="right">
@@ -55,6 +63,13 @@
     </div>
 </body>
 <script>
+
+    function toggleConfigOverlays() {
+        let formData = new FormData();
+        formData.append('show_grid', document.getElementById('showGridConfig').checked);
+        formData.append('show_objects', document.getElementById('showObjectsConfig').checked);
+        fetch('{configuratorURL}set_overlays', { method: 'POST', body: formData });
+    }
 
     var cameraNames = __CAMERA_NAMES_JSON__;
     var calibrationPts = __CALIBRATION_PTS_JSON__ || [];

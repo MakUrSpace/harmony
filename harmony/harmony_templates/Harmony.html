@@ -61,6 +61,35 @@
             </div>
             <div class="container justify-content-center" align="center">
                 {cameraButtons}
+                <div class="form-check form-switch d-inline-block ms-3 mt-2">
+                    <input class="form-check-input" type="checkbox" id="showGridHarmony" checked onchange="toggleHarmonyOverlays()">
+                    <label class="form-check-label" for="showGridHarmony">Show Grid</label>
+                </div>
+                <div class="form-check form-switch d-inline-block ms-3 mt-2">
+                    <input class="form-check-input" type="checkbox" id="showObjectsHarmony" checked onchange="toggleHarmonyOverlays()">
+                    <label class="form-check-label" for="showObjectsHarmony">Show Objects</label>
+                </div>
+                <script>
+                    function toggleHarmonyOverlays() {
+                        let formData = new FormData();
+                        let showGrid = document.getElementById('showGridHarmony').checked;
+                        let showObjects = document.getElementById('showObjectsHarmony').checked;
+                        formData.append('show_grid', showGrid);
+                        formData.append('show_objects', showObjects);
+                        fetch('{harmonyURL}set_overlays', { method: 'POST', body: formData });
+                        
+                        // Hide/show the frontend canvas depending on showObjects flag
+                        const overlay = document.getElementById('GameWorldOverlay');
+                        if (overlay) {
+                            overlay.style.display = showObjects ? 'block' : 'none';
+                        }
+                        
+                        // Handle multiple overlays in All Views mode
+                        document.querySelectorAll('canvas[id^="GameWorldOverlay_"]').forEach(c => {
+                            c.style.display = showObjects ? 'block' : 'none';
+                        });
+                    }
+                </script>
             </div>
             <div class="row justify-content-center" align="center" style="min-width: 500px">
                 <div id="interactor" class="row"></div>
