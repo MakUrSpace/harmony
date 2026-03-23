@@ -357,14 +357,18 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         poly_i = np.round(poly).astype(np.int32).reshape((-1, 1, 2))
         return poly_i
 
-    def cam_hex_at_axial(self, cam, q: int, r: int):
+    def cam_hex_at_axial(self, cam: str, q: int, r: int):
         w, h = self.cameras[cam].mostRecentFrame.shape[:2]
-        center_real = self.axial_to_pixel(q, r)
-        cam_space_converter = self.rsc.closestConverterToRealCoord(cam, center_real)
-        M = cam_space_converter.M
-        Minv = np.linalg.inv(M)
         grid_poly = self.hex_at_axial(q, r)
-        cam_poly = np.array([[int(d) for d in cam_space_converter.convertRealToCameraSpace(p[0])] for p in grid_poly], dtype="int32")
+
+        cam_poly = []
+        for pt in grid_poly:    
+            x, y = pt[0]
+            converter = self.rsc.closestConverterToRealCoord(str(cam), (x, y))
+            cx, cy = converter.convertRealToCameraSpace((x, y))
+            cam_poly.append([int(round(cx)), int(round(cy))])
+        cam_poly = np.array(cam_poly, dtype=np.int32).reshape((-1, 1, 2))
+
         return cam_poly
 
     def objectToHull(self, obj):
