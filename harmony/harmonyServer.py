@@ -408,8 +408,8 @@ def get_conversion_params(cam_name):
                     scale_x = virtual_map_res[0] / crop_w_actual
                     scale_y = virtual_map_res[1] / crop_h_actual
 
-                    min_x = crop_x - shift_x
-                    min_y = crop_y - shift_y
+                    min_x = crop_x
+                    min_y = crop_y
 
                     return scale_x, scale_y, min_x, min_y
 

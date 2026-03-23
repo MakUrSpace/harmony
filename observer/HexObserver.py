@@ -43,8 +43,8 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         if self.hex is not None:
             self.hex = HexGridConfiguration(**self.hex)
         self.grid_overlays = None
-        self.camera_realspace_contours = self.buildCameraRealspaceContours()
-        self.camera_realspace_union_contours = self.buildCameraRealspaceUnionContours()
+        self.camera_realspace_contours = []
+        self.camera_realspace_union_contours = []
 
     def buildConfiguration(self):
         config = super().buildConfiguration()
@@ -143,25 +143,29 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
     def pixel_to_axial(
         self,
-        px: float, py: float
+        px: float, py: float,
+        apply_affine=True
     ) -> tuple[int, int]:
         """
         Image pixel → axial hex (q, r)
         """
-        # Invert affine (2x3 → 3x3)
-        M = self.make_affine_2x3()
-        M3 = np.vstack([M, [0, 0, 1]])
-        M_inv = np.linalg.inv(M3)
+        if apply_affine:
+            # Invert affine (2x3 → 3x3)
+            M = self.make_affine_2x3()
+            M3 = np.vstack([M, [0, 0, 1]])
+            M_inv = np.linalg.inv(M3)
 
-        pt = np.array([[px, py, 1.0]], dtype=np.float32).T
-        gx, gy, _ = (M_inv @ pt).ravel()
+            pt = np.array([[px, py, 1.0]], dtype=np.float32).T
+            gx, gy, _ = (M_inv @ pt).ravel()
+        else:
+            gx, gy = px, py
 
         qf, rf = self.pixel_to_axial_frac(gx, gy, self.hex.size)
         return self.axial_round(qf, rf)
 
     def camCoordToAxial(self, cam, cam_coord: tuple[float]):
         real_coord = self.rsc.camCoordToRealSpace(cam, cam_coord)
-        axial = self.pixel_to_axial(*real_coord)
+        axial = self.pixel_to_axial(*real_coord, apply_affine=False)
         return axial
 
     def axialToCamCoord(self, cam, axial_coord: tuple[float]):
@@ -170,7 +174,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
     def changeSetToAxialCoord(self, changeSet):
         real_coord = self.rsc.changeSetToRealCenter(changeSet)
-        return self.pixel_to_axial(*real_coord)
+        return self.pixel_to_axial(*real_coord, apply_affine=False)
 
     @staticmethod
     def axial_distance(a: tuple[int, int], b: tuple[int, int] = (0, 0)) -> int:
@@ -264,60 +268,47 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
         self._cached_grid_params = params
 
-        # FIX: OpenCV expects (height, width, 3)
+        # OpenCV expects (height, width, 3)
         overlay = np.zeros((self.hex.height, self.hex.width, 3), dtype=np.uint8)
 
-        # If you need it computed for internal state, keep it; otherwise can remove.
-        M = self.make_affine_2x3()
-
-        dx = math.sqrt(3) * self.hex.size
-        dy = 1.5 * self.hex.size
-
-        corner_offs = self.hex_offsets_pointy()[0]  # (6,2) float offsets
-
-        pad = 4.0 * self.hex.size
-        xmin_g = self.hex.anchor_xy[0] - pad
-        xmax_g = self.hex.anchor_xy[0] + self.hex.width + pad
-        ymin_g = self.hex.anchor_xy[1] - pad
-        ymax_g = self.hex.anchor_xy[1] + self.hex.height + pad
-
-        row = 0
-        cy_g = ymin_g
-        while cy_g <= ymax_g:
-            x_off = 0.0 if (row % 2 == 0) else (dx / 2.0)
-            cx_g = xmin_g + x_off
-            while cx_g <= xmax_g:
-                center_g = np.array([[cx_g, cy_g]], dtype=np.float32)
-
-                # Transform center for quick reject
-                center_p = self.apply_affine_pts(center_g)[0]
-
-                if (-200 <= center_p[0] <= self.hex.width + 200) and (-200 <= center_p[1] <= self.hex.height + 200):
-                    # Build hex in grid space then transform corners
-                    poly_g = corner_offs + center_g          # (6,2)
-                    poly_p = self.apply_affine_pts(poly_g)   # (6,2) float in pixel space
-
-                    # Optional: reject if polygon bbox is fully off-screen
-                    minx, miny = poly_p.min(axis=0)
-                    maxx, maxy = poly_p.max(axis=0)
-                    if maxx < -5 or maxy < -5 or minx > self.hex.width + 5 or miny > self.hex.height + 5:
-                        cx_g += dx
-                        continue
-
-                    poly_i = np.round(poly_p).astype(np.int32).reshape((-1, 1, 2))
-
-                    cv2.polylines(
-                        overlay,
-                        [poly_i],
-                        isClosed=True,
-                        color=color,
-                        thickness=thickness,
-                        lineType=cv2.LINE_8
-                    )
-
-                cx_g += dx
-            cy_g += dy
-            row += 1
+        # Get the bounding Q, R by computing axial coords of the 4 screen corners
+        corners_screen = [
+            (0, 0),
+            (self.hex.width, 0),
+            (self.hex.width, self.hex.height),
+            (0, self.hex.height)
+        ]
+        
+        qs, rs = [], []
+        for (px, py) in corners_screen:
+            q, r = self.pixel_to_axial(px, py)
+            qs.append(q)
+            rs.append(r)
+            
+        min_q, max_q = min(qs), max(qs)
+        min_r, max_r = min(rs), max(rs)
+        
+        # Add padding to ensure smooth edges
+        pad = 2
+        
+        for q in range(min_q - pad, max_q + pad + 1):
+            for r in range(min_r - pad, max_r + pad + 1):
+                poly_i = self.hex_at_axial(q, r)
+                
+                # Check bounds loosely so we don't draw far outside
+                minx, miny = poly_i.min(axis=0)[0]
+                maxx, maxy = poly_i.max(axis=0)[0]
+                if maxx < -5 or maxy < -5 or minx > self.hex.width + 5 or miny > self.hex.height + 5:
+                    continue
+                    
+                cv2.polylines(
+                    overlay,
+                    [poly_i],
+                    isClosed=True,
+                    color=color,
+                    thickness=thickness,
+                    lineType=cv2.LINE_8
+                )
 
         self._cached_grid_overlay = overlay.copy()
         return overlay
@@ -325,7 +316,8 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def hex_at_axial(
         self,
         q: int,
-        r: int
+        r: int,
+        apply_affine: bool = True
     ):
         """
         Fill a single pointy-top hex at axial coordinate (q, r) and return polygon points in grid coordinates.
@@ -352,14 +344,15 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             ])
 
         poly = np.array(corners, dtype=np.float32)
-        poly = self.apply_affine_pts(poly)
+        if apply_affine:
+            poly = self.apply_affine_pts(poly)
 
         poly_i = np.round(poly).astype(np.int32).reshape((-1, 1, 2))
         return poly_i
 
     def cam_hex_at_axial(self, cam: str, q: int, r: int):
         w, h = self.cameras[cam].mostRecentFrame.shape[:2]
-        grid_poly = self.hex_at_axial(q, r)
+        grid_poly = self.hex_at_axial(q, r, apply_affine=False)
 
         cam_poly = []
         for pt in grid_poly:    
@@ -480,12 +473,26 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         # Calculate Global Bounding Box from these TRUE contours
         if true_real_contours:
             all_pts = np.vstack(true_real_contours)
-            min_x = float(np.min(all_pts[:, 0]))
-            max_x = float(np.max(all_pts[:, 0]))
-            min_y = float(np.min(all_pts[:, 1]))
-            max_y = float(np.max(all_pts[:, 1]))
+
+            # Use an un-offset affine matrix to determine raw mapped bounds safely
+            M_no_offset = self.make_affine_2x3()
+            if hasattr(self, 'hex') and self.hex:
+                M_no_offset[0, 2] -= self.hex.offset_xy[0]
+                M_no_offset[1, 2] -= self.hex.offset_xy[1]
+                
+            x = all_pts[:, 0]
+            y = all_pts[:, 1]
+            map_pts = np.stack([
+                M_no_offset[0, 0] * x + M_no_offset[0, 1] * y + M_no_offset[0, 2],
+                M_no_offset[1, 0] * x + M_no_offset[1, 1] * y + M_no_offset[1, 2]
+            ], axis=1)
+                
+            min_x = float(np.min(map_pts[:, 0]))
+            max_x = float(np.max(map_pts[:, 0]))
+            min_y = float(np.min(map_pts[:, 1]))
+            max_y = float(np.max(map_pts[:, 1]))
             
-            # Recalculate Shift & Dimensions based on TRUE bounds
+            # Recalculate Shift & Dimensions based on map bounds
             shift_x = 0.0
             shift_y = 0.0
             if min_x < 0: shift_x = -min_x
@@ -494,9 +501,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             req_w = int(max_x - min_x) if min_x < 0 else int(max_x)
             req_h = int(max_y - min_y) if min_y < 0 else int(max_y)
 
-            # Expand canvas if needed
-            width = max(width, req_w)
-            height = max(height, req_h)
+            # Expand canvas dynamically but allow shrinking
+            width = max(1600, req_w + 50)
+            height = max(1600, req_h + 50)
             
             # Update hex config (Critical for grid alignment)
             if hasattr(self, 'hex') and self.hex:
@@ -504,12 +511,13 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                 self.hex.height = height
                 self.hex.offset_xy = (shift_x, shift_y)
 
-            # Re-initialize image with new dimensions if they changed
+            # Re-initialize image with new dimensions if they changed (not actually used since image is just drawn, but resets cache? Oh wait, draw_hex_grid_overlay draws ON the image, but does not use "image" reference returned. Oh wait, it caches grid!)
+            # We don't need to rebuild the image here, just let dynamic build in minimap catch it? Wait, draw_hex_grid_overlay returns out, but image is never assigned to self. We don't need to call draw_hex_grid_overlay here as it's not saved. I will keep it as original just in case it populates cache.
             image = self.draw_hex_grid_overlay(
                 np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
             )
 
-            # Draw the Unclipped Contours
+            # Draw the Transformed Contours
             transformed_contours = []
             for pts_real in true_real_contours:
                 if hasattr(self, 'apply_affine_pts'):
@@ -518,17 +526,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                     pts_map = pts_real
                     print("ERROR: apply_affine_pts not found!")
 
-                # Apply the shift
-                pts_map[:, 0] += shift_x
-                pts_map[:, 1] += shift_y
+                # Do NOT apply the shift again, apply_affine_pts inherently applies self.hex.offset_xy
                     
                 cnt_map = np.round(pts_map).astype(np.int32).reshape(-1, 1, 2)
                 transformed_contours.append(cnt_map)
 
         return transformed_contours
 
-    def buildCameraRealspaceUnionContours(self):
-        transformed_contours = self.camera_realspace_contours
+    def buildCameraRealspaceUnionContours(self, transformed_contours):
         union_cnts = []
         # Draw Unified Boundary
 
@@ -561,21 +566,22 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         if objectsAndColors is None:
             objectsAndColors = []
             
+        # Ensure active zones align with the newly affine-transformed grid dynamically
+        dynamic_camera_contours = self.buildCameraRealspaceContours()
+        dynamic_union_contours = self.buildCameraRealspaceUnionContours(dynamic_camera_contours)
+        
+        # Refresh width, height after bounds are recalculated
         width, height = self.realspaceDimensions()
-
-        # Transform and Draw RealSpaceContours (Active Zones)
-        # Ensure they align with the affine-transformed grid
-        # FIX: We now fetch Active Zones directly from self.cc.cameras to avoid warpPerspective clipping
         shift_x = 0
         shift_y = 0
         
-        # Initialize with default or current dimensions to ensure 'image' exists
+        # Initialize with current dimensions to ensure 'image' exists
         image = self.draw_hex_grid_overlay(
             np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
         )
         
-        cv2.drawContours(image, self.camera_realspace_contours, -1, (125, 125, 125), 6)
-        cv2.drawContours(image, self.camera_realspace_union_contours, -1, (255, 255, 255), 4)
+        cv2.drawContours(image, dynamic_camera_contours, -1, (125, 125, 125), 6)
+        cv2.drawContours(image, dynamic_union_contours, -1, (255, 255, 255), 4)
 
         drawnObjs = []
         print(f"MiniMap: Rendering {len(objectsAndColors)} objects")
@@ -776,7 +782,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             raise Exception("Cannot define an object without a RealSpace Configuration")
 
         rsc = self.rsc
-        realSpacePoly = self.hex_at_axial(q, r)
+        realSpacePoly = self.hex_at_axial(q, r, apply_affine=False)
 
         changeSet = {}
         for cam in self.cameras.keys():
@@ -814,7 +820,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
             # 1) Project each axial hex to camera space and fill it into the mask
             for (q, r) in axials:
-                real_hex = self.hex_at_axial(q, r)  # iterable of points, often (6,1,2) or (6,2)
+                real_hex = self.hex_at_axial(q, r, apply_affine=False)  # iterable of points, often (6,1,2) or (6,2)
                 
                 center_real = self.axial_to_pixel(q, r)
                 conv = rsc.closestConverterToRealCoord(cam, center_real)

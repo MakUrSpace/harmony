@@ -214,7 +214,7 @@ def draw_dynamic_grid(cc, camName):
         for q in range(min_q - pad, max_q + pad + 1):
             for r in range(min_r - pad, max_r + pad + 1):
                 # Calculate Hex in Real Space
-                real_poly = cc.hex_at_axial(q, r) # numpy array (6, 1, 2)
+                real_poly = cc.hex_at_axial(q, r, apply_affine=False) # numpy array (6, 1, 2)
                 
                 cam_pts = []
                 for pt in real_poly:
