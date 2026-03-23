@@ -164,33 +164,12 @@ def render_minimap(cm, encode=True):
         if bounds is None:
             return None
 
-        x, y, w, h = bounds
-        x, y, w, h = int(x), int(y), int(w), int(h)
+        cx, cy, cw, ch, sx, sy, lx, ly = get_virtual_map_crop(cm)
+        
+        if cw > 0 and ch > 0:
+            camImage = camImage[cy:cy+ch, cx:cx+cw]
 
-        shift_x = 0
-        shift_y = 0
-        if x < 0: shift_x = -x
-        if y < 0: shift_y = -y
-
-        map_x = x + shift_x
-        map_y = y + shift_y
-
-        margin = 150
-
-        crop_x = max(0, map_x - margin)
-        crop_y = max(0, map_y - margin)
-
-        crop_w = w + margin * 2
-        crop_h = h + margin * 2
-
-        if crop_w > 0 and crop_h > 0:
-            img_h, img_w = camImage.shape[:2]
-            end_x = min(img_w, crop_x + crop_w)
-            end_y = min(img_h, crop_y + crop_h)
-            # print(f"Cropping Minimap to: Y:[{crop_y}:{end_y}], X:[{crop_x}:{end_x}]")
-            camImage = camImage[crop_y:end_y, crop_x:end_x]
-
-        camImage = cv2.resize(camImage, virtual_map_res, interpolation=cv2.INTER_AREA)
+        camImage = cv2.resize(camImage, (virtual_map_res[0], virtual_map_res[1]), interpolation=cv2.INTER_AREA)
         if not encode:
             return cv2.cvtColor(camImage, cv2.COLOR_BGR2RGB)
 
@@ -351,6 +330,7 @@ def cameraViewWithChangesResponse(camName: str, viewId: str):
 # Coordinate conversion helpers
 # ---------------------------------------------------------------------------
 
+
 def safe_point(pt):
     p = pt.tolist()
     if len(p) > 0 and isinstance(p[0], list):
@@ -358,64 +338,75 @@ def safe_point(pt):
     return (p[0], p[1])
 
 
+def get_virtual_map_crop(cm):
+    """
+    Unified logic to calculate the tight crop of the VirtualMap.
+    Returns: (crop_x, crop_y, crop_w, crop_h, scale_x, scale_y, logical_x, logical_y)
+    """
+    if not cm or not hasattr(cm.cc, 'realSpaceBoundingBox'):
+        return 0, 0, 1600, 1600, 1200/1600, 1200/1600, 0, 0
+
+    bx, by, bw, bh = cm.cc.realSpaceBoundingBox()
+
+    # Grid shift logic (must match HexObserver.py)
+    shift_x = 0.0
+    shift_y = 0.0
+    if bx < 0: shift_x = -bx
+    if by < 0: shift_y = -by
+
+    map_x = int(bx) + shift_x
+    map_y = int(by) + shift_y
+
+    margin = 20 # Tight margin
+    crop_x = int(max(0, map_x - margin))
+    crop_y = int(max(0, map_y - margin))
+
+    # Calculate available canvas size
+    w_canvas = 1600
+    h_canvas = 1600
+    if hasattr(cm.cc, 'hex') and cm.cc.hex:
+        w_canvas = cm.cc.hex.width
+        h_canvas = cm.cc.hex.height
+
+    req_w = int(bx + bw + shift_x)
+    req_h = int(by + bh + shift_y)
+    img_w = max(w_canvas, req_w)
+    img_h = max(h_canvas, req_h)
+
+    crop_w = int(bw) + margin * 2
+    crop_h = int(bh) + margin * 2
+
+    end_x = min(img_w, crop_x + crop_w)
+    end_y = min(img_h, crop_y + crop_h)
+
+    crop_w_actual = int(end_x - crop_x)
+    crop_h_actual = int(end_y - crop_y)
+
+    if crop_w_actual <= 0 or crop_h_actual <= 0:
+        return 0, 0, 1600, 1600, 1200/1600, 1200/1600, 0, 0
+
+    scale_x = 1200 / crop_w_actual
+    scale_y = 1200 / crop_h_actual
+
+    # Logical origin relative to raw Map space (0,0)
+    logical_x = crop_x - shift_x
+    logical_y = crop_y - shift_y
+
+    return crop_x, crop_y, crop_w_actual, crop_h_actual, scale_x, scale_y, logical_x, logical_y
+
+
 def get_conversion_params(cam_name):
     cc = _get_cc()
     cm = _get_cm()
+
     try:
-        am_virtual_map = (cam_name == "VirtualMap")
-
-        if am_virtual_map:
+        if cam_name == "VirtualMap":
             try:
-                if hasattr(cm.cc, 'realSpaceBoundingBox'):
-                    bx, by, bw, bh = cm.cc.realSpaceBoundingBox()
-
-                    shift_x = 0
-                    shift_y = 0
-                    if bx < 0: shift_x = -bx
-                    if by < 0: shift_y = -by
-
-                    map_x = int(bx) + shift_x
-                    map_y = int(by) + shift_y
-
-                    margin = 150
-                    crop_x = max(0, map_x - margin)
-                    crop_y = max(0, map_y - margin)
-
-                    crop_w = int(bw) + margin * 2
-                    crop_h = int(bh) + margin * 2
-
-                    req_w = int(bx + bw + shift_x)
-                    req_h = int(by + bh + shift_y)
-
-                    w_canvas = 1600
-                    h_canvas = 1600
-                    if hasattr(cm.cc, 'hex') and cm.cc.hex:
-                        w_canvas = cm.cc.hex.width
-                        h_canvas = cm.cc.hex.height
-
-                    img_w = max(w_canvas, req_w)
-                    img_h = max(h_canvas, req_h)
-
-                    end_x = min(img_w, crop_x + crop_w)
-                    end_y = min(img_h, crop_y + crop_h)
-
-                    crop_w_actual = end_x - crop_x
-                    crop_h_actual = end_y - crop_y
-
-                    if crop_w_actual <= 0 or crop_h_actual <= 0:
-                        return 1.0, 1.0, 0, 0
-
-                    scale_x = virtual_map_res[0] / crop_w_actual
-                    scale_y = virtual_map_res[1] / crop_h_actual
-
-                    min_x = crop_x
-                    min_y = crop_y
-
-                    return scale_x, scale_y, min_x, min_y
-
+                if cm:
+                    cx, cy, cw, ch, sx, sy, lx, ly = get_virtual_map_crop(cm)
+                    return sx, sy, lx, ly
             except Exception as e:
-                print(f"Error in get_conversion_params expansion: {e}")
-
+                print(f"Error in get_conversion_params VirtualMap: {e}")
             return 1.0, 1.0, 0, 0
 
         cam = cc.cameras.get(cam_name)
