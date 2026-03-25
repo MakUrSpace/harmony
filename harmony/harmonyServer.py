@@ -532,7 +532,9 @@ def combinedCamerasWithChangesResponse():
 # ---------------------------------------------------------------------------
 
 @harmony.get('/reset')
-def resetHarmony():
+def resetHarmony(request: Request):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     global _cm
     with DATA_LOCK:
         new_cm = HarmonyMachine(_get_cc())
@@ -542,21 +544,27 @@ def resetHarmony():
 
 
 @harmony.post('/save')
-async def saveHarmonyPost(game_name: str = Form(...)):
+async def saveHarmonyPost(request: Request, game_name: str = Form(...)):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     if not game_name:
         return Response("Game name required", status_code=400)
     return _save_harmony(game_name)
 
 
 @harmony.post('/load')
-async def loadHarmonyPost(game_name: str = Form(...)):
+async def loadHarmonyPost(request: Request, game_name: str = Form(...)):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     if not game_name:
         return Response("Game name required", status_code=400)
     return _load_harmony(game_name)
 
 
 @harmony.get('/save_game/{gameName}')
-def saveHarmony(gameName: str):
+def saveHarmony(request: Request, gameName: str):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     return _save_harmony(gameName)
 
 
@@ -578,7 +586,9 @@ def _save_harmony(gameName: str):
 
 
 @harmony.get('/load_game/{gameName}')
-def loadHarmony(gameName: str):
+def loadHarmony(request: Request, gameName: str):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     return _load_harmony(gameName)
 
 
@@ -648,7 +658,7 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
     except TypeError:
         pass  # HarmonyMachine may be a mock during testing
 
-    template_name = _config.get('HARMONY_TEMPLATE', 'Harmony.html')
+    template_name = request.app.state.config.get('HARMONY_TEMPLATE', 'Harmony.html')
     with open(f"{os.path.dirname(__file__)}/harmony_templates/{template_name}", "r") as f:
         template = f.read()
 
@@ -830,7 +840,7 @@ def _find_object(objectId: str):
 
 
 @harmony.get('/objects/{objectId}')
-def getObject(objectId: str, footprint: str = Query(default="false")):
+def getObject(request: Request, objectId: str, footprint: str = Query(default="false")):
     cap = _find_object(objectId)
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
@@ -847,7 +857,9 @@ def getObject(objectId: str, footprint: str = Query(default="false")):
 
 
 @harmony.post('/objects/{objectId}')
-def updateObjectSettings(objectId: str):
+def updateObjectSettings(request: Request, objectId: str):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     cap = _find_object(objectId)
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
@@ -855,7 +867,9 @@ def updateObjectSettings(objectId: str):
 
 
 @harmony.delete('/objects/{objectId}')
-def deleteObjectSettings(objectId: str):
+def deleteObjectSettings(request: Request, objectId: str):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     cap = _find_object(objectId)
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
@@ -906,7 +920,9 @@ interactor_template = """
 
 
 @harmony.get('/object_factory/{viewId}')
-def buildObjectFactory(viewId: str):
+def buildObjectFactory(request: Request, viewId: str):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     selectedCell = SESSIONS[viewId].selection.firstCell
     return HTMLResponse(f"""
         <form hx-post="/harmony/object_factory/{viewId}" hx-target="#interactor">
@@ -920,7 +936,9 @@ def buildObjectFactory(viewId: str):
 
 
 @harmony.post('/object_factory/{viewId}')
-async def buildObject(viewId: str, object_name: str = Form(...)):
+async def buildObject(request: Request, viewId: str, object_name: str = Form(...)):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     cm = _get_cm()
     objectName = str(object_name)
     selectedAxial = SESSIONS[viewId].selection.firstCell
@@ -939,7 +957,9 @@ async def buildObject(viewId: str, object_name: str = Form(...)):
 
 
 @harmony.delete('/object_factory/{viewId}')
-def deleteObject(viewId: str):
+def deleteObject(request: Request, viewId: str):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     cm = _get_cm()
     selected = SESSIONS[viewId].selection
     mem = None
@@ -959,7 +979,9 @@ def deleteObject(viewId: str):
 # ---------------------------------------------------------------------------
 
 @harmony.get('/request_move/{oid}/{viewId}')
-def moveObjectDefinition(oid: str, viewId: str):
+def moveObjectDefinition(request: Request, oid: str, viewId: str):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     cm = _get_cm()
     try:
         session = SESSIONS[viewId]
@@ -1080,7 +1102,7 @@ async def selectPixel(request: Request):
     if first_obj:
         if selected.additionalCells:
             target = selected.additionalCells[0]
-            is_admin = _config.get('HARMONY_TEMPLATE') == "Harmony.html"
+            is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
             session = SESSIONS.get(viewId)
             is_moveable = session and first_obj.oid in session.moveable
             if is_admin or is_moveable:
@@ -1088,16 +1110,18 @@ async def selectPixel(request: Request):
                     <input type="button" class="btn btn-info" value="Move {first_obj.oid} Here" hx-get="/harmony/request_move/{first_obj.oid}/{viewId}" hx-target="#interactor">
                 """
         else:
-            if _config.get('HARMONY_TEMPLATE') == "Harmony.html":
+            if request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html":
                 actions_html += f"""
                    <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="/harmony/object_factory/{viewId}" hx-target="#interactor">
                 """
     else:
-        actions_html += f"""
-            <div id="object_factory">
-                <input type="button" class="btn btn-success" value="Define Object" hx-get="/harmony/object_factory/{viewId}" hx-target="#object_factory">
-            </div>
-        """
+        is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
+        if is_admin:
+            actions_html += f"""
+                <div id="object_factory">
+                    <input type="button" class="btn btn-success" value="Define Object" hx-get="/harmony/object_factory/{viewId}" hx-target="#object_factory">
+                </div>
+            """
 
     actions_html += f"""
         <hr>
@@ -1129,6 +1153,8 @@ def minimapResponse(viewId: str):
 
 @harmony.get('/control')
 def session_control_list(request: Request):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     cm = _get_cm()
     return templates.TemplateResponse("SessionList.html", {
         "request": request,
@@ -1138,6 +1164,8 @@ def session_control_list(request: Request):
 
 @harmony.get('/control/{viewId}')
 def session_control_panel(request: Request, viewId: str):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     if viewId not in SESSIONS:
         return Response(f"Session {viewId} not found", status_code=404)
     cm = _get_cm()
@@ -1153,6 +1181,8 @@ def session_control_panel(request: Request, viewId: str):
 
 @harmony.post('/control/{viewId}/update')
 async def update_session_config(viewId: str, request: Request):
+    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+        return Response("Forbidden", status_code=403)
     if viewId not in SESSIONS:
         return Response(f"Session {viewId} not found", status_code=404)
 
@@ -1196,12 +1226,12 @@ def _make_static_router():
 
 def _build_fastapi_app(template_name="Harmony.html", include_configurator=False) -> FastAPI:
     """Create a FastAPI app for harmony."""
-    global _config, _cc, _cm
+    global _cc, _cm
 
     app = FastAPI()
 
     # State
-    _config['HARMONY_TEMPLATE'] = template_name
+    app.state.config = {'HARMONY_TEMPLATE': template_name}
 
     # Include the harmony router
     app.include_router(harmony)
@@ -1269,7 +1299,6 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
     global _cc, _cm, APPS
 
     app = FastAPI()
-    _config['HARMONY_TEMPLATE'] = template_name
 
     cc = HexCaptureConfiguration()
     if cc.hex is None:
@@ -1283,7 +1312,7 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
     # Expose on app.state for test compatibility
     app.state.cc = cc
     app.state.cm = cm
-    app.state.config = _config
+    app.state.config = {'HARMONY_TEMPLATE': template_name}
 
     app.include_router(harmony)
 
@@ -1377,9 +1406,7 @@ def start_servers():
             with broadcaster.condition:
                 broadcaster.condition.notify_all()
 
-    # --- Admin App (port 7000) ---
-    _config['HARMONY_TEMPLATE'] = 'Harmony.html'
-
+    # --- Admin App (port 7001) ---
     from observer.CalibratedObserver import CalibrationObserver as _CalObs
     admin_app = FastAPI(lifespan=lifespan) # Shared State
     admin_app.state.cc = cc
@@ -1394,7 +1421,7 @@ def start_servers():
     # We should ensure the admin_app.state.cm is what's expected.
     # The old flask_sub.cm was _CalObs(cc).
     admin_app.state.cm = _CalObs(cc) # For configurator
-    admin_app.state.config = _config
+    admin_app.state.config = {'HARMONY_TEMPLATE': 'Harmony.html'}
     APPS.append(admin_app)
 
     admin_app.include_router(harmony)
@@ -1427,7 +1454,7 @@ def start_servers():
     # Note: calibrator and observerServer Flask blueprints are abandoned.
     # registerCaptureService(_CaptureServiceProxy())
 
-    # --- User App (port 7001) ---
+    # --- User App (port 7000) ---
     user_config = {'HARMONY_TEMPLATE': 'HarmonyUser.html'}
 
     user_app = FastAPI(lifespan=lifespan)
@@ -1435,13 +1462,6 @@ def start_servers():
     user_app.state.cm = cm
     user_app.state.config = user_config
     APPS.append(user_app)
-
-    # User app needs its own router with different config
-    # We use a workaround: temporarily swap _config when building the user router
-    # Since they share module globals, the user app just uses the same router
-    # but the template name will match whatever _config says at request time.
-    # For multi-app support we include the same harmony router but the _config
-    # dict is shared (admin wins). We override for the user app via middleware.
 
     user_app.include_router(harmony)
 
@@ -1480,8 +1500,8 @@ def start_servers():
     # installation — only the main-thread uvicorn should own SIGINT/SIGTERM.
     def run_user():
         import asyncio
-        print("Launching Harmony User Server on 7001")
-        cfg = uvicorn.Config(user_app, host="0.0.0.0", port=7001, log_level="warning")
+        print("Launching Harmony User Server on 7000")
+        cfg = uvicorn.Config(user_app, host="0.0.0.0", port=7000, log_level="warning", timeout_graceful_shutdown=1)
         server = uvicorn.Server(cfg)
         asyncio.run(server.serve())
 
@@ -1490,9 +1510,9 @@ def start_servers():
 
     # Launch admin server (blocking)
     import uvicorn
-    print(f"Launching Harmony Admin Server on 7000 (PID: {os.getpid()})")
+    print(f"Launching Harmony Admin Server on 7001 (PID: {os.getpid()})")
     
-    cfg = uvicorn.Config(admin_app, host="0.0.0.0", port=7000, log_level="info", timeout_graceful_shutdown=1)
+    cfg = uvicorn.Config(admin_app, host="0.0.0.0", port=7001, log_level="info", timeout_graceful_shutdown=1)
     server = uvicorn.Server(cfg)
 
     # Monkey-patch uvicorn's handle_exit to set our shutdown event immediately
