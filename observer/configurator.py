@@ -42,9 +42,17 @@ def buildConfigurator(request: Request):
                         onmousemove="onMouseMove('{cam.camName}', event)"
                         ></canvas>
                 </div>
-                <div class="text-center mt-2">
+                <div class="text-center mt-2 d-flex flex-wrap justify-content-center align-items-center gap-2">
                     <button class="btn btn-sm btn-warning" onclick="clearShape('{cam.camName}')">Clear Manual Points</button>
                     <button class="btn btn-sm btn-info" onclick="advanceColumn('{cam.camName}')">Next Column</button>
+                    <span class="d-inline-flex align-items-center gap-1 ms-2" title="Axial coordinate increment per click within a column, and per new column">
+                        <small class="text-muted">Row&nbsp;&Delta;(q,r):</small>
+                        <input type="number" id="rowIncrQ_{cam.camName}" value="8" style="width:4em" class="form-control form-control-sm d-inline-block">
+                        <input type="number" id="rowIncrR_{cam.camName}" value="0" style="width:4em" class="form-control form-control-sm d-inline-block">
+                        <small class="text-muted ms-2">Col&nbsp;&Delta;(q,r):</small>
+                        <input type="number" id="colIncrQ_{cam.camName}" value="-2" style="width:4em" class="form-control form-control-sm d-inline-block">
+                        <input type="number" id="colIncrR_{cam.camName}" value="4" style="width:4em" class="form-control form-control-sm d-inline-block">
+                    </span>
                     <!-- AZ controls below -->
                 </div>
                 
@@ -426,13 +434,21 @@ async def manualCalibration(request: Request):
         seen_blocks = set()
         for col_idx, col in enumerate(col_values[:-1]):
             next_col = col_values[col_idx + 1]
-            for idx, calib_pt in enumerate(calib_pt_columns[col][:-1]):
-                next_same_r = calib_pt_columns[col][idx + 1]
-                next_q = calib_pt_columns[next_col][idx:idx+2]
+            col_pts = calib_pt_columns[col]
+            next_col_pts = calib_pt_columns[next_col]
+            # Only form blocks where both columns have a consecutive pair of points
+            max_idx = min(len(col_pts), len(next_col_pts)) - 1
+            for idx in range(max_idx):
+                calib_pt = col_pts[idx]
+                next_same_r = col_pts[idx + 1]
+                next_q = next_col_pts[idx:idx + 2]
+
+                if len(next_q) < 2:
+                    continue  # Safety guard — should not occur given max_idx, but be explicit
 
                 block = [calib_pt, next_same_r, *next_q]
                 block = order_points_clockwise(block)
-                
+
                 block_sig = tuple(sorted([tuple(p.axial) for p in block]))
                 if block_sig not in seen_blocks:
                     seen_blocks.add(block_sig)

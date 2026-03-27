@@ -30,11 +30,13 @@
                     <label class="form-check-label" for="modeSwitch">Calibration Mode</label>
                 </div>
                 <div class="form-check form-switch d-inline-block ms-3">
-                    <input class="form-check-input" type="checkbox" id="showGridConfig" checked onchange="toggleConfigOverlays()">
+                    <input class="form-check-input" type="checkbox" id="showGridConfig" checked
+                        onchange="toggleConfigOverlays()">
                     <label class="form-check-label" for="showGridConfig">Show Grid</label>
                 </div>
                 <div class="form-check form-switch d-inline-block ms-3">
-                    <input class="form-check-input" type="checkbox" id="showObjectsConfig" checked onchange="toggleConfigOverlays()">
+                    <input class="form-check-input" type="checkbox" id="showObjectsConfig" checked
+                        onchange="toggleConfigOverlays()">
                     <label class="form-check-label" for="showObjectsConfig">Show Objects</label>
                 </div>
                 <div id="statusMessage" class="d-inline-block ms-3 fw-bold"></div>
@@ -80,6 +82,7 @@
     var dragCamName = null;
     var currentCol = {};
     var currentRow = {};
+    var colAnchor = {};  // axial [q, r] of the first point in the current column
     var loadedCams = {};
 
     cameraNames.forEach(function (name) {
@@ -87,6 +90,7 @@
         axialPoints[name] = [];
         currentCol[name] = 0;
         currentRow[name] = 0;
+        colAnchor[name] = [0, 0];
     });
 
     function resizeCanvas() {
@@ -190,8 +194,31 @@
             var col = currentCol[camName] || 0;
             var row = currentRow[camName] || 0;
 
-            var predictedQ = col * -2 + row * 8;
-            var predictedR = col * 4;
+            var rowDQ = parseInt(document.getElementById('rowIncrQ_' + camName).value) || 8;
+            var rowDR = parseInt(document.getElementById('rowIncrR_' + camName).value) || 0;
+            var colDQ = parseInt(document.getElementById('colIncrQ_' + camName).value) || -2;
+            var colDR = parseInt(document.getElementById('colIncrR_' + camName).value) || 4;
+
+            var predictedQ, predictedR;
+            if (axialPoints[camName].length === 0) {
+                // Very first point: start at origin
+                predictedQ = 0;
+                predictedR = 0;
+            } else if (row === 0) {
+                // First point of a new column: apply colDelta to the previous column's anchor
+                predictedQ = colAnchor[camName][0] + colDQ;
+                predictedR = colAnchor[camName][1] + colDR;
+            } else {
+                // Subsequent point in same column: apply rowDelta to the previous point
+                var prev = axialPoints[camName][axialPoints[camName].length - 1];
+                predictedQ = prev[0] + rowDQ;
+                predictedR = prev[1] + rowDR;
+            }
+
+            // Record column anchor on the first point of each column
+            if (row === 0) {
+                colAnchor[camName] = [predictedQ, predictedR];
+            }
 
             manualPoints[camName].push([x / w, y / h]);
             axialPoints[camName].push([predictedQ, predictedR]);
@@ -265,6 +292,7 @@
             axialPoints[camName] = [];
             currentCol[camName] = 0;
             currentRow[camName] = 0;
+            colAnchor[camName] = [0, 0];
             stopDrag();
             drawPoints(camName);
             renderActiveCalibrationTable(camName);
@@ -274,6 +302,7 @@
                 axialPoints[name] = [];
                 currentCol[name] = 0;
                 currentRow[name] = 0;
+                colAnchor[name] = [0, 0];
                 drawPoints(name);
                 renderActiveCalibrationTable(name);
             });
