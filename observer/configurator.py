@@ -418,18 +418,29 @@ async def manualCalibration(request: Request):
              print(f"Camera {camName} has no frame.")
              continue
 
-        calib_pts = []
-        calib_pt_columns = {}
+        unique_pts = {}
         for pixel, axial in zip(pixel_data, axial_data):
             pixel_full = [int(pixel[0] * w), int(pixel[1] * h)]
             real = cc.axial_to_pixel(*axial)
             calib_pt = CalibrationPoint(pixel=pixel_full, axial=axial, real=real)
-            calib_pts.append(calib_pt)
+            # Use tuple of axial as unique key to deduplicate
+            axial_tup = tuple(axial)
+            if axial_tup not in unique_pts:
+                unique_pts[axial_tup] = calib_pt
+
+        calib_pts = list(unique_pts.values())
+        calib_pt_columns = {}
+        for calib_pt in calib_pts:
             if calib_pt.axial[1] not in calib_pt_columns:
                 calib_pt_columns[calib_pt.axial[1]] = []
             calib_pt_columns[calib_pt.axial[1]].append(calib_pt)
         
         col_values = sorted(list(calib_pt_columns.keys()))
+        
+        # Sort each column's points by row coordinate q (axial[0])
+        for r_val in col_values:
+            calib_pt_columns[r_val].sort(key=lambda pt: pt.axial[0])
+
         valid_blocks = []
         seen_blocks = set()
         for col_idx, col in enumerate(col_values[:-1]):
