@@ -481,7 +481,6 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
         x, y, w, h = self.realSpaceBoundingBox()
         cv2.drawContours(image, self.realSpaceContours, -1, (125, 125, 125), 2)
 
-        print(f"Minimap has {len(objectsAndColors)} objects")
         if len(objectsAndColors) == 0:
             return image[y:y+h, x:x+w]
         drawnObjs = []

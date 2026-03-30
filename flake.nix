@@ -66,13 +66,13 @@
           propagatedBuildInputs = harmony-deps;
         };
 
-    	harmony-dev-env = python.withPackages (ps: with ps; harmony-deps ++ [ pytest pytest-cov ]);
+    	harmony-dev-env = python.withPackages (ps: with ps; harmony-deps ++ [ pytest pytest-cov pytest-playwright ]);
       in {
         packages.default = harmony;
         packages.harmony = harmony;
         packages.jupyter = writeShellApplication {
           name = "jupyter";
-          runtimeInputs = [ harmony-dev-env ];
+          runtimeInputs = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm ];
           text = ''
             #!/usr/bin/env bash
             # Run from whatever dir `nix run` is invoked in.
@@ -145,15 +145,39 @@
         };
         packages.tests = writeShellApplication {
           name = "run-tests";
-          runtimeInputs = [ harmony-dev-env self'.packages.harmony ];
+          runtimeInputs = [ harmony-dev-env self'.packages.harmony pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver ];
           text = ''
-            pytest tests/ "$@"
+            export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+            # Ensure node_modules are present for vitest
+            if [ ! -d "node_modules" ]; then
+              echo "node_modules not found, running npm install..."
+              npm install
+            fi
+
+            EXIT_CODE=0
+            echo "--- Running Python tests (pytest) ---"
+            if ! pytest tests/ "$@"; then
+              EXIT_CODE=1
+            fi
+
+            echo ""
+            echo "--- Running UI Javascript tests (vitest) ---"
+            if ! npm test; then
+              EXIT_CODE=1
+            fi
+
+            exit "$EXIT_CODE"
           '';
         };
         devShells.default = pkgs.mkShell {
           name = "harmonyShell";
-          packages = [ harmony-dev-env ];
+          packages = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver ];
           shellHook = ''
+            export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
             PROJECT_NAME="$(basename "$PWD")"
             export PYTHONPATH="$PWD/harmony:$PWD/observer:${PYTHONPATH:-}"
             export PS1="\[\e[1;36m\][$PROJECT_NAME]\[\e[0m\] \w \$ "

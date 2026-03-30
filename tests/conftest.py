@@ -66,7 +66,7 @@ def configurator_app(mock_cv2):
 def configurator_app(mock_cv2):
     """Fixture to create the Configurator app with mocked hardware."""
     # Patch where it is used in configuratorServer
-    with mock.patch('observer.configuratorServer.HexCaptureConfiguration') as MockCC:
+    with mock.patch('observer.configuratorServer.CalibratedCaptureConfiguration') as MockCC:
         mock_cc = MockCC.return_value
         mock_cc.cameras = {"Camera 0": mock.MagicMock()}
         mock_cc.cameras["Camera 0"].mostRecentFrame = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -80,7 +80,7 @@ def configurator_app(mock_cv2):
         from observer.configuratorServer import create_configurator_app
         
         app = create_configurator_app()
-        # Ensure the app uses our mock (create_configurator_app calls HexCaptureConfiguration() 
+        # Ensure the app uses our mock (create_configurator_app calls CalibratedCaptureConfiguration() 
         # which returns mock_cc because of the patch)
         
         # Re-assign cm with new cc if needed, but create_configurator_app already does:
@@ -90,29 +90,33 @@ def configurator_app(mock_cv2):
         # But we let it run with mocked cc for now.
         
         # We need to make sure the global 'app' variables in modules are updated
-        from observer.configurator import setConfiguratorApp
         from observer.calibrator import setCalibratorApp
-        setConfiguratorApp(app)
         setCalibratorApp(app)
         
         yield app
 
 @pytest.fixture
 def configurator_client(configurator_app):
-    return configurator_app.test_client()
+    from fastapi.testclient import TestClient
+    return TestClient(configurator_app)
 
 @pytest.fixture
 def harmony_app(mock_cv2):
     """Fixture to create the Harmony app with mocked hardware."""
     with mock.patch('observer.calibrator.CalibratedCaptureConfiguration') as MockCC, \
          mock.patch('observer.HexGridConfiguration') as MockHex, \
-         mock.patch('observer.HexCaptureConfiguration'), \
+         mock.patch('observer.CalibratedCaptureConfiguration'), \
+         mock.patch('harmony.harmonyServer.HexCaptureConfiguration') as MockHexCC, \
          mock.patch('harmony.harmonyServer.registerCaptureService'), \
          mock.patch('harmony.harmonyServer.HarmonyMachine') as MockHM:
         
         mock_cc = MockCC.return_value
         mock_cc.cameras = {"Camera 0": mock.MagicMock()}
         mock_cc.cameras["Camera 0"].mostRecentFrame = np.zeros((480, 640, 3), dtype=np.uint8)
+        
+        mock_hex_cc = MockHexCC.return_value
+        mock_hex_cc.cameras = {"Camera 0": mock.MagicMock()}
+        mock_hex_cc.cameras["Camera 0"].mostRecentFrame = np.zeros((480, 640, 3), dtype=np.uint8)
         
         # Configure HarmonyMachine mock
         def harmony_machine_side_effect(cc):

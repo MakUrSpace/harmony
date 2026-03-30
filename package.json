@@ -1,0 +1,16 @@
+{
+  "name": "harmony-ui-tests",
+  "version": "1.0.0",
+  "description": "UI Tests for Harmony",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "jsdom": "^24.0.0",
+    "@playwright/test": "^1.40.0"
+  }
+}

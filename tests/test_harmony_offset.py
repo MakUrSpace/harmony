@@ -103,7 +103,7 @@ def test_get_canvas_data_scaling(client, app):
 def test_virtualmap_crop_scaling(client, app):
     """
     Test that getCanvasData scales and offsets VirtualMap coordinates 
-    correctly when cropped with a 150px margin.
+    correctly when cropped with a 20px margin.
     """
     from harmonyServer import SESSIONS, SessionConfig
     SESSIONS['test_view'] = SessionConfig()
@@ -123,9 +123,9 @@ def test_virtualmap_crop_scaling(client, app):
     pts = data['objects']['TestObject']['VirtualMap']
     x, y = pts[0]
     
-    # Logic: Offset = 500 - 150 = 350. Scale = 1200 / (800 + 300) = 1.090909
-    expected_x = (500 - 350) * (1200 / 1100)
-    expected_y = (500 - 350) * (1200 / 1100)
+    # Logic: Offset = 500 - 20 = 480. Scale = 1200 / (800 + 40) = 1.4285714
+    expected_x = (500 - 480) * (1200 / 840)
+    expected_y = (500 - 480) * (1200 / 840)
     
     assert abs(x - expected_x) < 0.1
     assert abs(y - expected_y) < 0.1

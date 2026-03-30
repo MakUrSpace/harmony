@@ -45,45 +45,13 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     // Also resize periodically in case of layout shifts
     setInterval(resizeCanvas, 1000);
 
-    function getNaturalDims() {
-        const currentCam = camName || document.getElementById('selectedCamera').value;
-        if (currentCam === "VirtualMap") {
-            return { w: 1200, h: 1200 };
-        }
-        return { w: 1920, h: 1080 };
-    }
-
-    function getScale() {
-        const dims = getNaturalDims();
-        // avoid div by zero
-        if (dims.w === 0 || dims.h === 0) return { x: 1, y: 1 };
-        return {
-            x: canvas.width / dims.w,
-            y: canvas.height / dims.h
-        };
-    }
-
-    function getMousePos(evt) {
-        const rect = canvas.getBoundingClientRect();
-        return {
-            x: (evt.clientX - rect.left) * (canvas.width / rect.width),
-            y: (evt.clientY - rect.top) * (canvas.height / rect.height),
-            originalEvent: evt
-        };
-    }
-
-    function dist(p1, p2) {
-        if (Array.isArray(p1)) p1 = { x: p1[0], y: p1[1] };
-        if (Array.isArray(p2)) p2 = { x: p2[0], y: p2[1] };
-        return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
-    }
-
     function getPoly(objOrMap) {
         if (!objOrMap) return null;
         if (Array.isArray(objOrMap)) return objOrMap;
         const currentCam = camName || document.getElementById('selectedCamera').value;
         return objOrMap[currentCam];
     }
+
 
 
     function drawPoly(poly, scale, fill = true, r = 255, g = 255, b = 0) {
@@ -111,7 +79,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     }
 
     function drawGroup(group, r, g, b, drawnSet) {
-        const scale = getScale();
+        const scale = getScale(canvas, camName);
         group.forEach(name => {
             if (drawnSet && drawnSet.has(name)) return;
             if (data.objects[name]) {
@@ -125,8 +93,9 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
 
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const scale = getScale();
+        const scale = getScale(canvas, camName);
         const drawnSet = new Set();
+
 
         // selectable (lowest priority, “neutral hint”): RGB(180, 190, 205)
         // terrain (background structure, stone/metal vibe): RGB(120, 125, 135)
@@ -203,9 +172,9 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     }
 
     canvas.onmousedown = function (e) {
-        const m = getMousePos(e); // Screen coords
+        const m = getMousePos(canvas, e); // Screen coords
         isClickCandidate = true;
-        const scale = getScale();
+        const scale = getScale(canvas, camName);
 
         if (data.moveable) {
             for (let name of data.moveable) {
@@ -231,8 +200,8 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     };
 
     canvas.onmousemove = function (e) {
-        const m = getMousePos(e); // Screen coords
-        const scale = getScale();
+        const m = getMousePos(canvas, e); // Screen coords
+        const scale = getScale(canvas, camName);
 
         if (potentialDrag && !isDragging) {
             if (dist(m, dragStartPos) > DRAG_THRESHOLD) {
@@ -258,6 +227,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
             draw();
         }
     };
+
 
     canvas.onmouseup = function (e) {
         if (isDragging) {
@@ -289,6 +259,40 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         }
     };
 }
+
+function getNaturalDims(camName) {
+    const currentCam = camName || document.getElementById('selectedCamera').value;
+    if (currentCam === "VirtualMap") {
+        return { w: 1200, h: 1200 };
+    }
+    return { w: 1920, h: 1080 };
+}
+
+function getScale(canvas, camName) {
+    const dims = getNaturalDims(camName);
+    // avoid div by zero
+    if (dims.w === 0 || dims.h === 0) return { x: 1, y: 1 };
+    return {
+        x: canvas.width / dims.w,
+        y: canvas.height / dims.h
+    };
+}
+
+function getMousePos(canvas, evt) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: (evt.clientX - rect.left) * (canvas.width / rect.width),
+        y: (evt.clientY - rect.top) * (canvas.height / rect.height),
+        originalEvent: evt
+    };
+}
+
+function dist(p1, p2) {
+    if (Array.isArray(p1)) p1 = { x: p1[0], y: p1[1] };
+    if (Array.isArray(p2)) p2 = { x: p2[0], y: p2[1] };
+    return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+}
+
 
 // Existing logic adapted for external call
 function handlePixelSelection(event, camNameOverride) {

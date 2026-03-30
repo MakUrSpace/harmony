@@ -45,6 +45,25 @@ class TestHarmonyServer(unittest.TestCase):
         # Create the app and FastAPI test client
         from fastapi.testclient import TestClient
 
+        # Start patchers first to prevent thread leaks in app creation
+        self.patchers = [
+            mock.patch.object(harmonyServer, 'getConsoleImage', side_effect=mock_gen),
+            mock.patch.object(harmonyServer, 'renderConsole', side_effect=mock_gen, create=True),
+            mock.patch.object(harmonyServer, 'genCombinedCamerasView', side_effect=mock_gen),
+            mock.patch.object(harmonyServer, 'genCombinedCameraWithChangesView', side_effect=mock_gen),
+            mock.patch.object(harmonyServer, 'get_broadcaster'),
+            mock.patch('harmony.harmonyServer.HexCaptureConfiguration')
+        ]
+        
+        self.started_patchers = []
+        for patcher in self.patchers:
+            mock_obj = patcher.start()
+            self.started_patchers.append(patcher)
+            if hasattr(patcher, 'attribute') and patcher.attribute == 'get_broadcaster':
+                mock_broadcaster = mock.MagicMock()
+                mock_broadcaster.subscribe.side_effect = mock_gen
+                mock_obj.return_value = mock_broadcaster
+
         self.app = harmonyServer.create_harmony_app()
         self.client = TestClient(self.app, raise_server_exceptions=True)
 
@@ -54,18 +73,13 @@ class TestHarmonyServer(unittest.TestCase):
             mock.patch.object(harmonyServer, 'renderConsole', side_effect=mock_gen, create=True),
             mock.patch.object(harmonyServer, 'genCombinedCamerasView', side_effect=mock_gen),
             mock.patch.object(harmonyServer, 'genCombinedCameraWithChangesView', side_effect=mock_gen),
-            mock.patch.object(harmonyServer, 'get_broadcaster')
+            mock.patch.object(harmonyServer, 'get_broadcaster'),
+            mock.patch('harmony.harmonyServer.HexCaptureConfiguration')
         ]
-        for patcher in self.patchers:
-            mock_obj = patcher.start()
-            if patcher.attribute == 'get_broadcaster':
-                # Mock broadcaster instance
-                mock_broadcaster = mock.MagicMock()
-                mock_broadcaster.subscribe.side_effect = mock_gen
-                mock_obj.return_value = mock_broadcaster
+        # Patchers are already handled above
 
     def tearDown(self):
-        for patcher in self.patchers:
+        for patcher in self.started_patchers:
             patcher.stop()
 
     def test_harmony_dashboard(self):
@@ -270,6 +284,238 @@ class TestHarmonyServer(unittest.TestCase):
         self.assertEqual(response3.cookies.get('session_view_id'), new_val)
         self.assertIn(f"Session ID: {new_val}".encode(), response3.content)
 
+
+    def test_multi_selection_logic(self):
+        """Test multi-selection type prioritization and appending."""
+        view_id = 'test_session_multi'
+        from harmony.harmonyServer import SessionConfig
+        
+        session = SessionConfig()
+        session.allies = ["Obj1"]
+        session.terrain = ["Obj1", "Obj2"] 
+        harmonyServer.SESSIONS[view_id] = session
+
+        from harmony.harmonyServer import _cm, _cc
+        
+        mock_obj1 = mock.MagicMock()
+        mock_obj1.oid = "Obj1"
+        del mock_obj1.objectType
+        
+        mock_obj2 = mock.MagicMock()
+        mock_obj2.oid = "Obj2"
+        del mock_obj2.objectType
+        
+        mock_obj3 = mock.MagicMock()
+        mock_obj3.oid = "Obj3"
+        del mock_obj3.objectType
+        
+        harmonyServer._cm.memory = [mock_obj1, mock_obj2, mock_obj3]
+
+        def mock_cstac(mem):
+            if mem.oid == "Obj1": return (10, 10)
+            if mem.oid == "Obj2": return (20, 20)
+    def test_multi_selection_logic(self):
+        """Test multi-selection type prioritization and appending."""
+        view_id = 'test_session_multi'
+        from harmony.harmonyServer import SessionConfig
+        
+        session = SessionConfig()
+        session.allies = ["Obj1"]
+        session.terrain = ["Obj1", "Obj2"] 
+        harmonyServer.SESSIONS[view_id] = session
+
+        from harmony.harmonyServer import _cm, _cc
+        
+        mock_obj1 = mock.MagicMock()
+        mock_obj1.oid = "Obj1"
+        del mock_obj1.objectType
+        
+        mock_obj2 = mock.MagicMock()
+        mock_obj2.oid = "Obj2"
+        del mock_obj2.objectType
+        
+        mock_obj3 = mock.MagicMock()
+        mock_obj3.oid = "Obj3"
+        del mock_obj3.objectType
+        
+        harmonyServer._cm.memory = [mock_obj1, mock_obj2, mock_obj3]
+
+        def mock_cstac(mem):
+            if mem.oid == "Obj1": return (10, 10)
+            if mem.oid == "Obj2": return (20, 20)
+            if mem.oid == "Obj3": return (30, 30)
+            return (0, 0)
+            
+        harmonyServer._cm.cc = harmonyServer._cc
+        harmonyServer._cm.cc.changeSetToAxialCoord = mock.MagicMock(side_effect=mock_cstac)
+        harmonyServer._cm.cc.camCoordToAxial = mock.MagicMock(return_value=(10, 10))
+        harmonyServer._cm.cc.axial_distance = mock.MagicMock(return_value=20)
+        harmonyServer.get_conversion_params = mock.MagicMock(return_value=(1.0, 1.0, 0, 0))
+
+        # Select Obj1 (Ally > Terrain)
+        resp = self.client.post('/harmony/select_pixel', data={
+            "viewId": view_id,
+            "selectedPixel": "[10, 10]",
+            "selectedCamera": "Camera 0",
+            "appendPixel": ""
+        })
+        html = resp.content.decode()
+        self.assertIn("Selected First Cell: (10, 10)", html)
+        self.assertIn("Object: Obj1", html)
+        self.assertIn("Type: Ally", html)
+        self.assertIn("Delete Object", html)
+        self.assertNotIn("Type: Terrain", html)
+
+        # Select Obj2 with append (Terrain)
+        harmonyServer._cm.cc.camCoordToAxial = mock.MagicMock(return_value=(20, 20))
+        resp = self.client.post('/harmony/select_pixel', data={
+            "viewId": view_id,
+            "selectedPixel": "[20, 20]",
+            "selectedCamera": "Camera 0",
+            "appendPixel": "true"
+        })
+        html = resp.content.decode()
+        self.assertIn("Selected First Cell: (10, 10)", html)
+        self.assertIn("Latest Selection: (20, 20)", html)
+        self.assertIn("Object: Obj2 (Terrain)", html)
+        
+        # Select Obj3 (Default Selectable)
+        harmonyServer._cm.cc.camCoordToAxial = mock.MagicMock(return_value=(30, 30))
+        resp = self.client.post('/harmony/select_pixel', data={
+            "viewId": view_id,
+            "selectedPixel": "[30, 30]",
+            "selectedCamera": "Camera 0",
+            "appendPixel": "true"
+        })
+        html = resp.content.decode()
+        self.assertIn("Object: Obj3 (Selectable)", html)
+
+    def test_admin_vs_user_delete(self):
+        """Verify Delete Object is only in Admin."""
+        SessionConfig = harmonyServer.SessionConfig
+        create_harmony_app = harmonyServer.create_harmony_app
+        from fastapi.testclient import TestClient
+        
+        admin_client = self.client
+        user_app = create_harmony_app(template_name="HarmonyUser.html")
+        user_client = TestClient(user_app)
+        
+        mock_obj = mock.MagicMock()
+        mock_obj.oid = "AdminObj"
+        del mock_obj.objectType
+        harmonyServer._cm.memory = [mock_obj]
+
+        harmonyServer.SESSIONS['admin_session'] = SessionConfig()
+        harmonyServer.SESSIONS['user_session'] = SessionConfig()
+
+        harmonyServer._cm.cc = harmonyServer._cc
+        harmonyServer._cm.cc.changeSetToAxialCoord = mock.MagicMock(return_value=(10, 10))
+        harmonyServer._cm.cc.camCoordToAxial = mock.MagicMock(return_value=(10, 10))
+        harmonyServer.get_conversion_params = mock.MagicMock(return_value=(1.0, 1.0, 0, 0))
+
+        resp = admin_client.post('/harmony/select_pixel', data={
+            "viewId": "admin_session",
+            "selectedPixel": "[10, 10]",
+            "selectedCamera": "Camera 0",
+            "appendPixel": "" 
+        })
+        self.assertIn("Delete Object", resp.content.decode())
+        
+        resp_user = user_client.post('/harmony/select_pixel', data={
+            "viewId": "user_session",
+            "selectedPixel": "[10, 10]",
+            "selectedCamera": "Camera 0",
+            "appendPixel": "" 
+        })
+        self.assertNotIn("Delete Object", resp_user.content.decode())
+
+    def test_move_permissions(self):
+        """Verify move permissions matrix for admin and users."""
+        SessionConfig = harmonyServer.SessionConfig
+        create_harmony_app = harmonyServer.create_harmony_app
+        from fastapi.testclient import TestClient
+        
+        admin_client = self.client 
+        user_app = create_harmony_app(template_name="HarmonyUser.html")
+        user_client = TestClient(user_app)
+        
+        mock_obj = mock.MagicMock()
+        mock_obj.oid = "Statue"
+        del mock_obj.objectType
+        harmonyServer._cm.memory = [mock_obj]
+
+        harmonyServer.SESSIONS['user_session_move'] = SessionConfig()
+        harmonyServer.SESSIONS['admin_session_move'] = SessionConfig()
+
+        harmonyServer._cm.cc = harmonyServer._cc
+        harmonyServer._cm.cc.changeSetToAxialCoord = mock.MagicMock(return_value=(10, 10))
+        harmonyServer._cm.cc.camCoordToAxial = mock.MagicMock(side_effect=lambda cam, pt: tuple(map(int, pt)))
+        harmonyServer.get_conversion_params = mock.MagicMock(return_value=(1.0, 1.0, 0, 0))
+         
+        print(f"TEST SESSIONS ID: {id(harmonyServer.SESSIONS)}")
+        # User -> Non-Moveable Object -> No Move Button
+        user_client.post('/harmony/select_pixel', data={"viewId": "user_session_move", "selectedPixel": "[10, 10]", "selectedCamera": "Camera 0", "appendPixel": ""})
+        resp = user_client.post('/harmony/select_pixel', data={"viewId": "user_session_move", "selectedPixel": "[20, 20]", "selectedCamera": "Camera 0", "appendPixel": "true"})
+        self.assertNotIn("Move Statue Here", resp.content.decode())
+
+        # User -> Moveable Object -> Has Move Button
+        harmonyServer.SESSIONS['user_session_move'].moveable = ["Hero"]
+        mock_obj.oid = "Hero"
+        user_client.post('/harmony/select_pixel', data={"viewId": "user_session_move", "selectedPixel": "[10, 10]", "selectedCamera": "Camera 0", "appendPixel": ""})
+        resp = user_client.post('/harmony/select_pixel', data={"viewId": "user_session_move", "selectedPixel": "[20, 20]", "selectedCamera": "Camera 0", "appendPixel": "true"})
+        self.assertIn("Move Hero Here", resp.content.decode())
+
+        # Admin -> Non-Moveable -> Has Move Button (Override)
+        mock_obj.oid = "Statue"
+        admin_client.post('/harmony/select_pixel', data={"viewId": "admin_session_move", "selectedPixel": "[10, 10]", "selectedCamera": "Camera 0", "appendPixel": ""})
+        resp = admin_client.post('/harmony/select_pixel', data={"viewId": "admin_session_move", "selectedPixel": "[20, 20]", "selectedCamera": "Camera 0", "appendPixel": "true"})
+        self.assertIn("Move Statue Here", resp.content.decode())
+
+    def test_canvas_data_mapping(self):
+        """Test the UI coordinate mapping in the canvas_data endpoint."""
+        SessionConfig = harmonyServer.SessionConfig
+        view_id = "test_canvas"
+        session = SessionConfig()
+        session.selection.firstCell = (1, 2)
+        session.selection.additionalCells = [(3, 4)]
+        harmonyServer.SESSIONS[view_id] = session
+        
+        mock_obj = mock.MagicMock()
+        mock_obj.oid = "TargetMapObj"
+        harmonyServer._cm.memory = [mock_obj]
+        
+        import numpy as np
+        
+        # mock hull and points
+        harmonyServer._cm.cc.objectToHull.return_value = np.array([[10, 10], [10, 20]])
+        
+        # mock cam change points
+        cam_change = mock.MagicMock()
+        cam_change.changePoints = [np.array([5, 5])]
+        mock_obj.changeSet = {"Camera 0": cam_change}
+
+        harmonyServer._cm.cc = harmonyServer._cc
+        harmonyServer._cc.cameras = {"Camera 0": mock.MagicMock()}
+        harmonyServer.get_conversion_params = mock.MagicMock(return_value=(2.0, 2.0, 5.0, 5.0))
+        harmonyServer._cm.cc.hex_at_axial = mock.MagicMock(return_value=[np.array([100, 100])])
+        harmonyServer._cm.cc.cam_hex_at_axial = mock.MagicMock(return_value=[np.array([50, 50])])
+
+        resp = self.client.get(f'/harmony/canvas_data/{view_id}')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+
+        self.assertIn("selection", data)
+        self.assertIsNotNone(data["selection"]["firstCell"])
+        first_vm_pts = data["selection"]["firstCell"]["VirtualMap"]
+        self.assertEqual(first_vm_pts[0], [190.0, 190.0])
+        
+        first_cam_pts = data["selection"]["firstCell"]["Camera 0"]
+        self.assertEqual(first_cam_pts[0], [90.0, 90.0])
+        
+        self.assertIn("TargetMapObj", data["objects"])
+        obj_vm = data["objects"]["TargetMapObj"]["VirtualMap"]
+        self.assertEqual(obj_vm[0], [10.0, 10.0])
+        self.assertEqual(obj_vm[1], [10.0, 30.0])
 
 if __name__ == '__main__':
     unittest.main()

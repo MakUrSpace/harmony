@@ -32,6 +32,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from observer import HexGridConfiguration, HexCaptureConfiguration
 from observer.Observer import hStackImages, clipImage, Camera
 from observer.configurator import configurator, draw_dynamic_grid
+from observer.observerServer import setObserverApp
+from observer.calibrator import registerCaptureService
 
 from harmony.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
 
@@ -532,8 +534,8 @@ def combinedCamerasWithChangesResponse():
 # ---------------------------------------------------------------------------
 
 @harmony.get('/reset')
-def resetHarmony(request: Request):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+def resetHarmony(request: Request = None):
+    if request and request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
         return Response("Forbidden", status_code=403)
     global _cm
     with DATA_LOCK:
@@ -857,25 +859,57 @@ def getObject(request: Request, objectId: str, footprint: str = Query(default="f
 
 
 @harmony.post('/objects/{objectId}')
-def updateObjectSettings(request: Request, objectId: str):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+async def updateObjectSettings(request: Request, objectId: str):
+    is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
+    viewId = request.cookies.get('session_view_id')
+    session = SESSIONS.get(viewId)
+    is_moveable = session and objectId in session.moveable
+    
+    if not (is_admin or is_moveable):
         return Response("Forbidden", status_code=403)
+        
     cap = _find_object(objectId)
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
-    return HTMLResponse(buildObjectTable())
+        
+    form = await request.form()
+    new_name = form.get("objectName", "").strip()
+    if new_name and new_name != objectId:
+        if _find_object(new_name):
+            return Response("Object with that name already exists", status_code=400)
+            
+        with DATA_LOCK:
+            cap.oid = new_name
+            for sid, sess in SESSIONS.items():
+                for lst in [sess.moveable, sess.selectable, sess.terrain, sess.allies, sess.enemies, sess.targetable]:
+                    if objectId in lst:
+                        lst[lst.index(objectId)] = new_name
+                        
+    return HTMLResponse(buildObjectTable(viewId))
 
 
 @harmony.delete('/objects/{objectId}')
 def deleteObjectSettings(request: Request, objectId: str):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
+    viewId = request.cookies.get('session_view_id')
+    session = SESSIONS.get(viewId)
+    is_moveable = session and objectId in session.moveable
+    
+    if not (is_admin or is_moveable):
         return Response("Forbidden", status_code=403)
+        
     cap = _find_object(objectId)
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
+        
     with DATA_LOCK:
         _get_cm().deleteObject(cap.oid)
-    return HTMLResponse(buildObjectTable())
+        for sid, sess in SESSIONS.items():
+            for lst in [sess.moveable, sess.selectable, sess.terrain, sess.allies, sess.enemies, sess.targetable]:
+                if objectId in lst:
+                    lst.remove(objectId)
+                    
+    return HTMLResponse(buildObjectTable(viewId))
 
 
 def buildObjectSettings(cap, objType=None):
@@ -1042,6 +1076,7 @@ async def selectPixel(request: Request):
         axial_coord = cm.cc.camCoordToAxial(cam, (raw_x, raw_y))
 
     print(f"viewId {viewId} || Received: Pixel {pixel} on Cam {cam} || Translated to Axial: {axial_coord}")
+    print(f"INTERNAL SESSIONS ID: {id(SESSIONS)}")
     with DATA_LOCK:
         existing = SESSIONS.get(viewId, SessionConfig()).selection
         if existing.firstCell:
@@ -1300,13 +1335,16 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
 
     app = FastAPI()
 
-    cc = HexCaptureConfiguration()
-    if cc.hex is None:
-        cc.hex = HexGridConfiguration()
-    cc.capture()
-    cm = HarmonyMachine(cc)
+    if _cc is None:
+        cc = HexCaptureConfiguration()
+        if cc.hex is None:
+            cc.hex = HexGridConfiguration()
+        cc.capture()
+        _cc = cc
+    else:
+        cc = _cc
 
-    _cc = cc
+    cm = HarmonyMachine(cc)
     _cm = cm
 
     # Expose on app.state for test compatibility
