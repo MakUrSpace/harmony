@@ -19,6 +19,7 @@ import sys
 import shutil
 import pickle
 import random
+import re
 from collections import defaultdict
 
 import cv2
@@ -306,6 +307,7 @@ class SessionConfig:
     enemies: list = field(default_factory=list)
     targetable: list = field(default_factory=list)
     selection: CellSelection = field(default_factory=CellSelection)
+    selected_oid: str | None = None
 
 
 SESSIONS = {}
@@ -442,6 +444,51 @@ def scale_point(pt, scale):
     return (pt[0] * scale[0], pt[1] * scale[1])
 
 
+# ---------------------------------------------------------------------------
+# Multi-cell object helpers
+# ---------------------------------------------------------------------------
+
+def _get_constituent_axials(obj, cc):
+    """
+    Return the canonical ordered list of axial cells for *obj*.
+    For objects defined with define_object_from_axials the list is stored
+    directly on the object.  For legacy single-cell objects the list is
+    derived on-the-fly from changeSetToAxialCoord.
+    """
+    axials = getattr(obj, 'constituent_axials', None)
+    # Must be an actual non-empty list — guards against MagicMock attributes in tests
+    # and against legacy objects that never had the field set.
+    if isinstance(axials, list) and axials:
+        return list(axials)
+    # Legacy fallback
+    try:
+        coord = cc.changeSetToAxialCoord(obj)
+        return [coord]
+    except Exception:
+        return []
+
+
+def _find_objects_for_axial(axial_coord):
+    """
+    Search cm.memory for all objects that own *axial_coord*.
+    Returns a list of (TrackedObject, origin_axial) tuples.
+    """
+    cm = _get_cm()
+    cc = _get_cc()
+    matches = []
+    for obj in cm.memory:
+        axials = _get_constituent_axials(obj, cc)
+        if axial_coord in axials:
+            matches.append((obj, axials[0]))
+    # Order by OID for stable cycling
+    return sorted(matches, key=lambda x: x[0].oid)
+
+
+def _find_object_for_axial(axial_coord):
+    results = _find_objects_for_axial(axial_coord)
+    return results[0] if results else (None, None)
+
+
 def axial_to_ui_object(q, r):
     cm = _get_cm()
     cc = _get_cc()
@@ -498,7 +545,11 @@ def getCanvasData(viewId: str):
             "firstCell": axial_to_ui_object(*session_config.selection.firstCell) if session_config.selection.firstCell is not None else None,
             "additionalCells": [axial_to_ui_object(*cell) for cell in session_config.selection.additionalCells]
         },
-        "selectable": [obj.oid for obj in cm.memory]
+        "selectable": [obj.oid for obj in cm.memory],
+        "constituent_axials": {
+            obj.oid: _get_constituent_axials(obj, cc)
+            for obj in cm.memory
+        }
     }
     return JSONResponse(data)
 
@@ -758,7 +809,7 @@ with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectRow.html"
     _TRACKED_OBJECT_ROW_TEMPLATE = f.read()
 
 
-def captureToChangeRow(capture, color=None):
+def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
     cm = _get_cm()
     moveDistance = cm.cc.trackedObjectLastDistance(capture)
     try:
@@ -771,12 +822,33 @@ def captureToChangeRow(capture, color=None):
     else:
         visual_image = cm.object_visual(capture)
 
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', capture.oid)
+
+    if is_moveable:
+        moveable_actions = f"""
+            <div class="col-auto d-flex gap-1">
+                <button class="btn btn-sm btn-outline-warning py-0"
+                    onclick="openRenameModal('{capture.oid}'); event.stopPropagation(); return false;"
+                    title="Rename unit">&#9998;</button>
+                <button class="btn btn-sm btn-outline-danger py-0"
+                    hx-delete="/harmony/objects/{capture.oid}"
+                    hx-target="#objectFilterRetriever"
+                    hx-confirm="Delete unit '{capture.oid}'?"
+                    onclick="event.stopPropagation();"
+                    title="Delete unit">&#128465;</button>
+            </div>"""
+    else:
+        moveable_actions = ""
+
     changeRow = _TRACKED_OBJECT_ROW_TEMPLATE.replace(
         "{objectName}", capture.oid).replace(
+        "{safeObjectName}", safe_name).replace(
         "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in cm.cc.changeSetToAxialCoord(capture)])).replace(
         "{moveDistance}", moveDistance).replace(
         "{observerURL}", "/harmony/").replace(
-        "{encodedBA}", imageToBase64(visual_image))
+        "{moveableActions}", moveable_actions).replace(
+        "{encodedBA}", imageToBase64(visual_image)).replace(
+        "{viewId}", str(viewId) if viewId else "")
     return changeRow
 
 
@@ -800,11 +872,12 @@ def buildObjectTable(viewId=None):
         for group_name, oids in groups:
             group_rows = []
             color = GROUP_COLORS.get(group_name)
+            is_moveable_group = (group_name == "moveable")
             for oid in oids:
                 if oid not in seen_oids:
                     for capture in cm.memory:
                         if capture.oid == oid:
-                            group_rows.append(captureToChangeRow(capture, color))
+                            group_rows.append(captureToChangeRow(capture, color, is_moveable=is_moveable_group, viewId=viewId))
                             seen_oids.add(oid)
                             break
             if group_rows:
@@ -814,7 +887,7 @@ def buildObjectTable(viewId=None):
     selectable_color = GROUP_COLORS.get("selectable")
     for capture in cm.memory:
         if capture.oid not in seen_oids:
-            selectable_rows.append(captureToChangeRow(capture, selectable_color))
+            selectable_rows.append(captureToChangeRow(capture, selectable_color, viewId=viewId))
             seen_oids.add(capture.oid)
 
     if selectable_rows:
@@ -838,7 +911,10 @@ def getInteractor():
 
 def _find_object(objectId: str):
     cm = _get_cm()
-    return cm.findObject(objectId=objectId)
+    try:
+        return cm.findObject(objectId=objectId)
+    except Exception:
+        return None
 
 
 @harmony.get('/objects/{objectId}')
@@ -957,14 +1033,18 @@ interactor_template = """
 def buildObjectFactory(request: Request, viewId: str):
     if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
         return Response("Forbidden", status_code=403)
-    selectedCell = SESSIONS[viewId].selection.firstCell
+    sel = SESSIONS[viewId].selection
+    all_cells = ([sel.firstCell] if sel.firstCell else []) + (sel.additionalCells or [])
+    cells_display = ", ".join(str(c) for c in all_cells) if all_cells else "(none)"
+    cell_count = len(all_cells)
     return HTMLResponse(f"""
         <form hx-post="/harmony/object_factory/{viewId}" hx-target="#interactor">
             <label for="object_name" class="form-check-label">Object Name</label>
-            <input type="text" name="object_name" value=""><br>
-            <label for="selected_cells" class="form-check-label">Selected Cells</label>
-            <input type="text" name="selected_cells" value="{selectedCell}"><br>
-            <input type="submit" class="btn btn-primary" value="Define Object">
+            <input type="text" name="object_name" id="object_name" value=""><br>
+            <div class="mt-2 mb-1">
+                <small class="text-muted">Cells ({cell_count}): <code>{cells_display}</code></small>
+            </div>
+            <input type="submit" class="btn btn-primary" value="Define Object ({cell_count} {'cell' if cell_count == 1 else 'cells'})">
         </form>
     """)
 
@@ -975,13 +1055,22 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
         return Response("Forbidden", status_code=403)
     cm = _get_cm()
     objectName = str(object_name)
-    selectedAxial = SESSIONS[viewId].selection.firstCell
-    trackedObject = cm.cc.define_object_from_axial(objectName, *selectedAxial)
+    sel = SESSIONS[viewId].selection
+    # Collect all selected cells: firstCell is the anchor (origin), additionalCells are the rest.
+    axials = ([sel.firstCell] if sel.firstCell else []) + (sel.additionalCells or [])
+    if not axials:
+        return Response("No cells selected", status_code=400)
+    if len(axials) == 1:
+        trackedObject = cm.cc.define_object_from_axial(objectName, *axials[0])
+    else:
+        trackedObject = cm.cc.define_object_from_axials(objectName, axials)
     cm.commitChanges(trackedObject)
+    cell_summary = ", ".join(str(c) for c in axials)
     return HTMLResponse(interactor_template.format(
         info=f"""
-        <h2>Selected cell: {selectedAxial}</h2>
-        <h3>Object Name: {trackedObject.oid}</h3>
+        <h2>Object Defined</h2>
+        <h3>Name: {trackedObject.oid}</h3>
+        <p><small>Cells ({len(axials)}): <code>{cell_summary}</code></small></p>
         """,
         actions=f"""
         <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
@@ -994,14 +1083,15 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
 def deleteObject(request: Request, viewId: str):
     if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
         return Response("Forbidden", status_code=403)
+    cc = _get_cc()
     cm = _get_cm()
     selected = SESSIONS[viewId].selection
+    # Find by constituent cells first, fall back to single-cell coord match.
     mem = None
-    for m in cm.memory:
-        mem_axial = cm.cc.changeSetToAxialCoord(m)
-        if mem_axial == selected.firstCell:
-            mem = m
-            break
+    first = selected.firstCell
+    if first is not None:
+        obj, _origin = _find_object_for_axial(first)
+        mem = obj
     if mem:
         cm.memory.remove(mem)
     SESSIONS[viewId].selection = CellSelection()
@@ -1016,20 +1106,42 @@ def deleteObject(request: Request, viewId: str):
 def moveObjectDefinition(request: Request, oid: str, viewId: str):
     if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
         return Response("Forbidden", status_code=403)
+    cc = _get_cc()
     cm = _get_cm()
     try:
         session = SESSIONS[viewId]
         selected = session.selection
-        firstCell = selected.firstCell
-        secondCell = selected.additionalCells[0]
+        # firstCell is the origin of the object being moved (set by selectPixel).
+        # The first additionalCell is the destination.
+        originCell = selected.firstCell
+        destCell = selected.additionalCells[0]
     except Exception as e:
         return Response("500", status_code=500)
 
     if oid not in session.moveable:
         return Response("403", status_code=403)
 
-    trackedObject = cm.cc.define_object_from_axial(oid, *secondCell)
-    existing = cm.cc.define_object_from_axial(oid, *firstCell)
+    # Find the object and compute its constituent cells.
+    existing = cm.findObject(oid)
+    if existing is None:
+        return Response(f"{oid} not found", status_code=404)
+
+    constituent = _get_constituent_axials(existing, cc)
+    if not constituent:
+        constituent = [originCell]
+    obj_origin = constituent[0]
+
+    # Translate all constituent cells by the move delta.
+    dq = destCell[0] - originCell[0]
+    dr = destCell[1] - originCell[1]
+    new_axials = [(q + dq, r + dr) for (q, r) in constituent]
+
+    # Build the moved object.
+    if len(new_axials) == 1:
+        trackedObject = cc.define_object_from_axial(oid, *new_axials[0])
+    else:
+        trackedObject = cc.define_object_from_axials(oid, new_axials)
+
     with DATA_LOCK:
         cm.memory.remove(existing)
         cm.commitChanges(trackedObject)
@@ -1077,18 +1189,125 @@ async def selectPixel(request: Request):
 
     print(f"viewId {viewId} || Received: Pixel {pixel} on Cam {cam} || Translated to Axial: {axial_coord}")
     print(f"INTERNAL SESSIONS ID: {id(SESSIONS)}")
+    # Find all objects at *axial_coord* to support cycling.
+    all_at_cell = _find_objects_for_axial(axial_coord)
+    snapped_first = all_at_cell[0][1] if all_at_cell else None
+    
     with DATA_LOCK:
-        existing = SESSIONS.get(viewId, SessionConfig()).selection
-        if existing.firstCell:
+        session = SESSIONS.get(viewId, SessionConfig())
+        existing = session.selection
+        
+        # Determine if we should CYCLE through objects at the same cell.
+        # Cycling occurs if:
+        # 1. We have multiple objects at the clicked cell.
+        # 2. This cell was ALREADY the first selected cell.
+        # 3. No additional cells (second cell) are currently selected (or we maintain object context).
+        should_cycle = (len(all_at_cell) > 1 and existing.firstCell == axial_coord)
+        
+        if should_cycle:
+            oids = [o[0].oid for o in all_at_cell]
+            try:
+                current_idx = oids.index(session.selected_oid)
+                next_idx = (current_idx + 1) % len(oids)
+            except (ValueError, TypeError):
+                next_idx = 0
+            
+            chosen_obj, origin_cell = all_at_cell[next_idx]
+            session.selected_oid = chosen_obj.oid
+            session.selection.firstCell = origin_cell
+            axial_coord = origin_cell # snap for consistency
+            
+        elif all_at_cell and not existing.firstCell:
+            # First click on an object cell — select the first one in the list.
+            chosen_obj, origin_cell = all_at_cell[0]
+            session.selected_oid = chosen_obj.oid
+            session.selection.firstCell = origin_cell
+            axial_coord = origin_cell 
+        elif existing.firstCell:
             if existing.secondCell is None:
-                SESSIONS[viewId].selection.additionalCells = [axial_coord]
-            elif appendPixel and axial_coord not in SESSIONS[viewId].selection.additionalCells:
-                SESSIONS[viewId].selection.additionalCells.insert(0, axial_coord)
+                session.selection.additionalCells = [axial_coord]
+            elif appendPixel and axial_coord not in session.selection.additionalCells:
+                session.selection.additionalCells.insert(0, axial_coord)
         else:
-            SESSIONS[viewId].selection = CellSelection(firstCell=axial_coord)
+            session.selection = CellSelection(firstCell=axial_coord)
+            session.selected_oid = None # new single cell click, no object implied yet
+            
+        # Ensure selected_oid is synced with what we find at the finally chosen firstCell
+        if not all_at_cell and not session.selection.firstCell:
+            session.selected_oid = None
+        elif not should_cycle and session.selection.firstCell == axial_coord and all_at_cell:
+            # We just selected the cell for the first time, or clicked into it.
+            session.selected_oid = all_at_cell[0][0].oid
 
-    q, r = axial_coord
-    selected = SESSIONS[viewId].selection
+    SESSIONS[viewId] = session
+
+    return await render_interactor(request, viewId, axial_coord)
+
+
+@harmony.post('/toggle_selection/{viewId}')
+async def toggleSelection(request: Request, viewId: str):
+    """
+    Cycles to the next object at the currently selected firstCell.
+    This logic mimics clicking the same cell again in selectPixel.
+    """
+    session = SESSIONS.get(viewId)
+    if not session or not session.selection.firstCell:
+        return HTMLResponse("")
+    
+    axial_coord = session.selection.firstCell
+    all_at_cell = _find_objects_for_axial(axial_coord)
+    
+    if len(all_at_cell) > 1:
+        oids = [o[0].oid for o in all_at_cell]
+        try:
+            current_idx = oids.index(session.selected_oid)
+            next_idx = (current_idx + 1) % len(oids)
+        except (ValueError, TypeError):
+            next_idx = 0
+        
+        chosen_obj, origin_cell = all_at_cell[next_idx]
+        session.selected_oid = chosen_obj.oid
+        session.selection.firstCell = origin_cell
+    
+    # We reuse the selectPixel interactor rendering by manually constructing what a selectPixel 
+    # call would return, but since we don't have a 'form' with 'selectedPixel', 
+    # we just call a helper or re-run the relevant parts.
+    # For now, I'll just have toggleSelection return a redirect or 
+    # I'll extract the interactor-rendering logic to a helper.
+    # Actually, I'll just redirect to a GET version of select_pixel if I had one, 
+    # but I don't. I'll just duplicate the rendering logic or call the main logic.
+    
+    # Let's extract the rendering logic to a helper called 'render_interactor'.
+    return await render_interactor(request, viewId, axial_coord)
+
+
+@harmony.post('/select_unit/{oid}/{viewId}')
+async def selectUnitInTable(request: Request, oid: str, viewId: str):
+    """Selects an object by its OID and focuses the interactor on its origin."""
+    cm = _get_cm()
+    cc = _get_cc()
+    target = next((obj for obj in cm.memory if obj.oid == oid), None)
+    if not target:
+        return HTMLResponse("Object not found", status_code=404)
+    
+    # Find origin cell
+    axials = _get_constituent_axials(target, cc)
+    origin_cell = axials[0] if axials else cc.hex.changeSetToAxialCoord(target)
+    
+    with DATA_LOCK:
+        session = SESSIONS.get(viewId, SessionConfig())
+        session.selection = CellSelection(firstCell=origin_cell)
+        session.selected_oid = oid
+        SESSIONS[viewId] = session
+        
+    return await render_interactor(request, viewId, origin_cell)
+
+
+async def render_interactor(request, viewId, axial_coord):
+    """Refactored core rendering logic for the interactor panel."""
+    cm = _get_cm()
+    session = SESSIONS.get(viewId, SessionConfig())
+    selected = session.selection
     first = selected.firstCell
 
     if not first:
@@ -1104,15 +1323,32 @@ async def selectPixel(request: Request):
         if oid in session.terrain: return "Terrain"
         return "Selectable"
 
-    def find_object_at(cell):
-        for mem in cm.memory:
-            if cm.cc.changeSetToAxialCoord(mem) == cell:
-                return mem
-        return None
+    # Find ALL objects at the first selected cell to display "Object X of Y"
+    all_at_first = _find_objects_for_axial(first)
+    
+    # Identify the specific object we are showing (the one in session.selected_oid)
+    first_obj = None
+    if session.selected_oid:
+        for obj, origin in all_at_first:
+            if obj.oid == session.selected_oid:
+                first_obj = obj
+                break
+    
+    # Fallback to first object if not specifically selected or found
+    if not first_obj and all_at_first:
+        first_obj = all_at_first[0][0]
+        session.selected_oid = first_obj.oid
 
     info_html = f"<h2>Selected First Cell: {first}</h2>"
 
-    first_obj = find_object_at(first)
+    if all_at_first:
+        obj_count = len(all_at_first)
+        if obj_count > 1:
+            # Find current index
+            oids = [o[0].oid for o in all_at_first]
+            curr_idx = oids.index(session.selected_oid) if session.selected_oid in oids else 0
+            info_html += f"<div class='alert alert-info py-1 px-2 mb-2'><small>Unit {curr_idx+1} of {obj_count} at this cell</small></div>"
+
     if first_obj:
         o_type = get_object_type(first_obj.oid, viewId)
         info_html += f"<h3>Object: {first_obj.oid} <br><small>Type: {o_type}</small></h3>"
@@ -1123,11 +1359,14 @@ async def selectPixel(request: Request):
             if i > 0:
                 info_html += "<hr style='margin: 10px 0; border-top: 1px dashed #ccc;'>"
             dist = cm.cc.axial_distance(first, cell)
-            cell_obj = find_object_at(cell)
+            
+            # Find ALL objects at this additional cell
+            cell_objs = _find_objects_for_axial(cell)
             obj_str = ""
-            if cell_obj:
-                o_type = get_object_type(cell_obj.oid, viewId)
-                obj_str = f" <br>-> Object: {cell_obj.oid} ({o_type})"
+            for (obj, _origin) in cell_objs:
+                o_type = get_object_type(obj.oid, viewId)
+                obj_str += f" <br>-> Object: {obj.oid} ({o_type})"
+            
             style = "border: 2px solid cyan; padding: 5px; margin: 2px;" if i == 0 else "padding: 5px; margin: 2px;"
             label = "Latest Selection" if i == 0 else f"Selection {i+1}"
             info_html += f"<div style='{style}'><b>{label}: {cell}</b><br>Dist to First: {dist} cells{obj_str}</div>"
@@ -1135,17 +1374,27 @@ async def selectPixel(request: Request):
     actions_html = ""
 
     if first_obj:
-        if selected.additionalCells:
-            target = selected.additionalCells[0]
-            is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
-            session = SESSIONS.get(viewId)
-            is_moveable = session and first_obj.oid in session.moveable
-            if is_admin or is_moveable:
+        # Toggling/Cycling button for multiple units at SAME cell
+        if len(all_at_first) > 1:
+            actions_html += f"""
+                <input type="button" class="btn btn-secondary mb-2" value="Cycle Selection (Next)" 
+                       hx-post="/harmony/toggle_selection/{viewId}" hx-target="#interactor">
+                <br>
+            """
+
+        # Move button logic: user must have "Moveable" permission or be an administrator
+        is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
+        is_moveable = first_obj.oid in session.moveable
+        
+        if is_admin or is_moveable:
+            if selected.additionalCells:
                 actions_html += f"""
                     <input type="button" class="btn btn-info" value="Move {first_obj.oid} Here" hx-get="/harmony/request_move/{first_obj.oid}/{viewId}" hx-target="#interactor">
                 """
-        else:
-            if request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html":
+        
+        if is_admin:
+            # Delete button is typically an admin action
+            if not selected.additionalCells:
                 actions_html += f"""
                    <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="/harmony/object_factory/{viewId}" hx-target="#interactor">
                 """

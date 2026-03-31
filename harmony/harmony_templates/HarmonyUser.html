@@ -78,6 +78,75 @@
             </div>
         </div>
     </div>
+
+    <!-- Rename Unit Modal — lives outside the polled container so it never reloads -->
+    <div class="modal fade" id="renameUnitModal" tabindex="-1" aria-labelledby="renameUnitModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="renameUnitModalLabel">Rename Unit</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">New name for <strong id="renameModalCurrentName"></strong>:</p>
+                    <input type="text" id="renameModalInput" class="form-control" placeholder="Unit name" required>
+                    <div id="renameModalError" class="text-danger mt-1" hidden></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-warning" id="renameModalSubmit">Rename</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        (function () {
+            var _oid = null;
+            var _modal = null;
+
+            window.openRenameModal = function (oid) {
+                _oid = oid;
+                document.getElementById('renameModalCurrentName').textContent = oid;
+                var input = document.getElementById('renameModalInput');
+                input.value = oid;
+                document.getElementById('renameModalError').hidden = true;
+                if (!_modal) {
+                    _modal = new bootstrap.Modal(document.getElementById('renameUnitModal'));
+                }
+                _modal.show();
+                document.getElementById('renameUnitModal').addEventListener('shown.bs.modal', function () {
+                    input.focus();
+                    input.select();
+                }, { once: true });
+            };
+
+            function doRename() {
+                var newName = document.getElementById('renameModalInput').value.trim();
+                var errEl = document.getElementById('renameModalError');
+                if (!newName || !_oid) return;
+                var fd = new FormData();
+                fd.append('objectName', newName);
+                fetch('/harmony/objects/' + encodeURIComponent(_oid), { method: 'POST', body: fd })
+                    .then(function (resp) {
+                        if (resp.ok) {
+                            _modal.hide();
+                            htmx.ajax('GET', '/harmony/objects?viewId=' + document.getElementById('viewId').value,
+                                { target: '#objectFilterRetriever' });
+                        } else {
+                            resp.text().then(function (t) {
+                                errEl.textContent = t;
+                                errEl.hidden = false;
+                            });
+                        }
+                    });
+            }
+
+            document.getElementById('renameModalSubmit').addEventListener('click', doRename);
+            document.getElementById('renameModalInput').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') doRename();
+            });
+        })();
+    </script>
 </body>
 
 </html>

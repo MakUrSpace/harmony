@@ -350,14 +350,14 @@ function handlePixelSelection(event, camNameOverride) {
     }
 
     const selectPixelForm = document.getElementById(`selectPixelForm`)
-    
+
     // Temporarily set the selectedCamera form field to the clicked camera
     const selectedCameraInput = document.getElementById('selectedCamera');
     selectedCameraInput.value = camName;
-    
+
     pixelField.value = JSON.stringify([~~image_x, ~~image_y])
     selectPixelForm.requestSubmit()
-    
+
     // Restore if needed
     if (camNameOverride) {
         selectedCameraInput.value = 'All';
@@ -406,7 +406,7 @@ function gameWorldClick(camNum) {
 
         const btns = Array.from(document.querySelectorAll('input[type="button"][value^="Camera "], input[type="button"][value="Virtual Map"]'));
         const camNames = btns.map(b => b.value.replace('Camera ', '').replace('Virtual Map', 'VirtualMap'));
-        
+
         let html = '<div style="display: flex; flex-wrap: wrap; justify-content: center;">';
         camNames.forEach(c => {
             html += `<div style="flex: 1 1 45%; margin: 10px; text-align: center; max-width: 48%; min-width: 300px;">
@@ -426,7 +426,7 @@ function gameWorldClick(camNum) {
                 camNames.forEach(c => {
                     const img = document.getElementById(`GameWorld_${c}`);
                     if (img) {
-                        const editor = initCanvasEditor(`GameWorldOverlay_${c}`, window.harmonyCanvasData, null, 
+                        const editor = initCanvasEditor(`GameWorldOverlay_${c}`, window.harmonyCanvasData, null,
                             function (clickEvent) { handlePixelSelection(clickEvent, c); }, c);
                         window.harmonyEditors.push(editor);
                     }
@@ -439,7 +439,7 @@ function gameWorldClick(camNum) {
                                    <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: ${showObjects ? 'block' : 'none'};"></canvas>`;
             if (window.harmonyCanvasData) {
                 setTimeout(() => {
-                    window.harmonyEditor = initCanvasEditor("GameWorldOverlay", window.harmonyCanvasData, 
+                    window.harmonyEditor = initCanvasEditor("GameWorldOverlay", window.harmonyCanvasData,
                         function (updatedData) { console.log("Data updated", updatedData); },
                         function (clickEvent) { handlePixelSelection(clickEvent); }
                     );

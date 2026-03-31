@@ -798,7 +798,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                 lastChange = None,
             )
 
-        return TrackedObject(oid=oid, changeSet=changeSet)
+        obj = TrackedObject(oid=oid, changeSet=changeSet)
+        obj.constituent_axials = [(q, r)]
+        return obj
 
     def define_object_from_axials(self, oid: str, axials: list[tuple[int]]):
         if self.rsc is None:
@@ -862,7 +864,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                 lastChange=None,
             )
 
-        return TrackedObject(oid=oid, changeSet=changeSet)
+        obj = TrackedObject(oid=oid, changeSet=changeSet)
+        obj.constituent_axials = list(axials)
+        return obj
 
 
 if __name__ == "__main__":
