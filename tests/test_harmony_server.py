@@ -127,8 +127,9 @@ class TestHarmonyServer(unittest.TestCase):
         mock_mem.oid = "TargetObject"
         harmonyServer._cm.memory = [mock_mem]
 
-        # Mock cc to match coordinates
-        harmonyServer._cc.changeSetToAxialCoord = mock.MagicMock(return_value=(0, 0))
+        # Mock changeSetToAxialCoord for VirtualMap
+        harmonyServer._cm.cc.changeSetToAxialCoord.return_value = (0, 0)
+        harmonyServer._cc.changeSetToAxialCoord.return_value = (0, 0) # Ensure both are mocked to return tuples
         # Ensure _cm.cc matches the mocked _cc so the delete lookup works
         harmonyServer._cm.cc = harmonyServer._cc
 
@@ -207,7 +208,7 @@ class TestHarmonyServer(unittest.TestCase):
         harmonyServer._cm.memory = [mock_c, mock_b, mock_a]
 
         with mock.patch.object(harmonyServer, 'captureToChangeRow') as mock_row:
-            mock_row.side_effect = lambda x, color=None: x.oid
+            mock_row.side_effect = lambda x, color=None, is_moveable=False, viewId=None: x.oid
             output = harmonyServer.buildObjectTable(view_id)
 
         self.assertIn("<h4>Moveable</h4>", output)

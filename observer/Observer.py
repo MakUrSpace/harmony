@@ -21,7 +21,7 @@ from time import sleep, time
 from datetime import datetime
 import requests
 import aiohttp
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from traceback import format_exc
 from uuid import uuid4
 from typing import Optional
@@ -721,6 +721,10 @@ class ChangeSet:
 class TrackedObject(ChangeSet):
     oid: str = None
     expectedChange: ChangeSet | None = None
+    # Ordered list of axial (q, r) cells that constitute this object.
+    # constituent_axials[0] is the anchor/origin cell used as the move reference.
+    # Empty for legacy objects; treated as single-cell via getattr fallback.
+    constituent_axials: list = field(default_factory=list)
 
     def __eq__(self, other):
         return super().__eq__(other)
@@ -742,7 +746,9 @@ class TrackedObject(ChangeSet):
         return f"TrackedObject({changeSet})"
 
     def previousVersion(self):
-        return type(self)({camName: change.lastChange if change is not None else None for camName, change in self.changeSet.items()})
+        prev = type(self)({camName: change.lastChange if change is not None else None for camName, change in self.changeSet.items()})
+        prev.constituent_axials = list(self.constituent_axials)
+        return prev
 
     @property
     def isNewObject(self):
@@ -753,6 +759,8 @@ class TrackedObject(ChangeSet):
 
     def update(self, changeSet, overwrite=True):
         super().update(changeSet, overwrite)
+        if hasattr(changeSet, "constituent_axials") and changeSet.constituent_axials:
+            self.constituent_axials = list(changeSet.constituent_axials)
         self.icon = sorted([cs.after for cs in self.changeSet.values()
                             if cs is not None and cs.changeType != "delete"],
                            key=lambda x: x.size if x is not None else 0)[0]

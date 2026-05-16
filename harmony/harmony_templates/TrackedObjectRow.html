@@ -1,8 +1,13 @@
 <hr class="mt-2 mb-3"/>
-<div class="row mb-1 border {borderType}">
+<div class="row mb-1 border {borderType}" id="unit-row-{safeObjectName}" 
+     hx-post="/harmony/select_unit/{objectName}/{viewId}" hx-target="#interactor" 
+     hx-trigger="click" style="cursor: pointer;">
     <div class="col">
-        <div class="row border border-info border-1">
-            <h5>{objectName}</h5>
+        <div class="row border border-info border-1 align-items-center">
+            <div class="col">
+                <h5 class="mb-0">{objectName}</h5>
+            </div>
+            {moveableActions}
         </div>
         <div class="row">
             <div class="col">
@@ -12,11 +17,6 @@
                 <p>Last Distance:<br>{moveDistance}</p>
             </div>
         </div>
-        <!-- <div class="row">
-            {actions}
-            {movement}
-            {edit}
-        </div> -->
     </div>
     <div class="col">
         <img class="img-fluid border border-info border-2" alt="Capture Image" src="data:image/jpg;base64,{encodedBA}" style="border-radius: 10px; width:100%; max-height:100px; object-fit:contain;">

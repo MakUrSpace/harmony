@@ -48,6 +48,7 @@ def app():
         
         # Mock changeSetToAxialCoord for VirtualMap
         harmonyServer._cm.cc.changeSetToAxialCoord.return_value = (0, 0)
+        harmonyServer._cc.changeSetToAxialCoord.return_value = (0, 0)
         
         # Mock realSpaceBoundingBox
         harmonyServer._cm.cc.realSpaceBoundingBox.return_value = (0, 0, 800, 800)
