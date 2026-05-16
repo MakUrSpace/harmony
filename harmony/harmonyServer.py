@@ -529,11 +529,19 @@ def getCanvasData(viewId: str):
         else:
             vm_pts = []
 
+        cam_objs = {}
+        for camName in cc.cameras.keys():
+            points = obj.changeSet[camName].changePoints
+            if len(points) > 0:
+                hull = cv2.convexHull(np.array(points, dtype=np.float32)).reshape(-1, 2)
+                cam_pts = [scale_point_new((float(pt[0]), float(pt[1])), get_conversion_params(camName)) for pt in hull]
+            else:
+                cam_pts = []
+            cam_objs[camName] = cam_pts
+
         objects[obj.oid] = {
             "VirtualMap": vm_pts,
-            **{
-                camName: [scale_point_new((pt[0], pt[1]), get_conversion_params(camName)) for pt in obj.changeSet[camName].changePoints]
-                for camName in cc.cameras.keys()}
+            **cam_objs
         }
 
     session_config = SESSIONS.get(viewId, SessionConfig())

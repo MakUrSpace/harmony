@@ -7,7 +7,7 @@
 import math
 import numpy as np
 import cv2
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 
 # In[2]:
@@ -27,6 +27,7 @@ class HexGridConfiguration:
     anchor_xy: tuple = (-12, -19)
     width: int = 1600
     height: int = 1600
+    hex_nudges: dict = field(default_factory=dict)
 
     def __post_init__(self):
         self.anchor_xy = (-int((self.size / 2.86) + 0.25), -int(self.size / 2))
@@ -165,8 +166,18 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
     def camCoordToAxial(self, cam, cam_coord: tuple[float]):
         real_coord = self.rsc.camCoordToRealSpace(cam, cam_coord)
-        axial = self.pixel_to_axial(*real_coord, apply_affine=False)
-        return axial
+        q0, r0 = self.pixel_to_axial(*real_coord, apply_affine=False)
+        
+        if self.hex and hasattr(self.hex, 'hex_nudges') and cam in self.hex.hex_nudges:
+            for q in range(q0-2, q0+3):
+                for r in range(r0-2, r0+3):
+                    nudge_key = f"{q},{r}"
+                    if nudge_key in self.hex.hex_nudges[cam]:
+                        poly = self.cam_hex_at_axial(cam, q, r)
+                        if cv2.pointPolygonTest(poly, cam_coord, False) >= 0:
+                            return (q, r)
+                            
+        return (q0, r0)
 
     def axialToCamCoord(self, cam, axial_coord: tuple[float]):
         real_coord = self.axial_to_pixel(*axial_coord)
@@ -354,12 +365,18 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         w, h = self.cameras[cam].mostRecentFrame.shape[:2]
         grid_poly = self.hex_at_axial(q, r, apply_affine=False)
 
+        dx, dy = 0, 0
+        if self.hex and hasattr(self.hex, 'hex_nudges') and cam in self.hex.hex_nudges:
+            nudge_key = f"{q},{r}"
+            if nudge_key in self.hex.hex_nudges[cam]:
+                dx, dy = self.hex.hex_nudges[cam][nudge_key]
+
         cam_poly = []
         for pt in grid_poly:    
             x, y = pt[0]
             converter = self.rsc.closestConverterToRealCoord(str(cam), (x, y))
             cx, cy = converter.convertRealToCameraSpace((x, y))
-            cam_poly.append([int(round(cx)), int(round(cy))])
+            cam_poly.append([int(round(cx + dx)), int(round(cy + dy))])
         cam_poly = np.array(cam_poly, dtype=np.int32).reshape((-1, 1, 2))
 
         return cam_poly
@@ -393,8 +410,16 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                             
                         # Convert Camera -> Real Space
                         try:
-                            converter = rsc.closestConverterToCamCoord(cam_name, (float(x), float(y)))
-                            real_pt = converter.convertCameraToRealSpace((float(x), float(y)))
+                            cx, cy = float(x), float(y)
+                            q, r = self.camCoordToAxial(cam_name, (cx, cy))
+                            dx, dy = 0, 0
+                            if self.hex and hasattr(self.hex, 'hex_nudges') and cam_name in self.hex.hex_nudges:
+                                nudge_key = f"{q},{r}"
+                                if nudge_key in self.hex.hex_nudges[cam_name]:
+                                    dx, dy = self.hex.hex_nudges[cam_name][nudge_key]
+
+                            converter = rsc.closestConverterToCamCoord(cam_name, (cx, cy))
+                            real_pt = converter.convertCameraToRealSpace((cx - dx, cy - dy))
                             all_points_real.append(real_pt)
                         except Exception:
                             continue

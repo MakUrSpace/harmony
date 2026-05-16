@@ -55,6 +55,7 @@ def buildConfigurator(request: Request):
                     </span>
                     <!-- AZ controls below -->
                 </div>
+                <div id="nudgeUI_{cam.camName}"></div>
                 
                 <div class="mt-3" id="activeCalibTableContainer_{cam.camName}" style="display:none; max-width: 600px; margin: auto;">
                     <h5>Calibration Points (Editable)</h5>
@@ -550,6 +551,88 @@ async def configureGrid(request: Request, size: float = Form(...)):
         <label class="form-check-label" for="size">Size</label><br>
         <input type="submit" class="btn btn-primary bg-secondary" value="Submit Grid Configuration">""")
 
+
+@configurator.get('/nudge_select/{camName}')
+async def nudgeSelect(request: Request, camName: str, px: float, py: float):
+    cc = request.app.state.cc
+    try:
+        cam = cc.cameras[camName]
+        h, w = cam.mostRecentFrame.shape[:2]
+        img_x = int(px * w)
+        img_y = int(py * h)
+        q, r = cc.camCoordToAxial(camName, (img_x, img_y))
+        
+        nudge_key = f"{q},{r}"
+        curr_nudge = [0, 0]
+        if hasattr(cc.hex, 'hex_nudges') and camName in cc.hex.hex_nudges:
+            curr_nudge = cc.hex.hex_nudges[camName].get(nudge_key, [0, 0])
+        
+        html = f"""
+        <div class="card p-2 mt-2 bg-dark text-white border-warning">
+            <h5>Nudge Hex (Q:{q}, R:{r})</h5>
+            <div class="text-center mb-2 text-muted small">Current Nudge: {curr_nudge}</div>
+            <div class="d-flex justify-content-center mb-2">
+                <button class="btn btn-outline-warning" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&dx=0&dy=-5" hx-target="#nudgeUI_{camName}">Up</button>
+            </div>
+            <div class="d-flex justify-content-center mb-2 gap-2">
+                <button class="btn btn-outline-warning" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&dx=-5&dy=0" hx-target="#nudgeUI_{camName}">Left</button>
+                <button class="btn btn-outline-warning" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&dx=5&dy=0" hx-target="#nudgeUI_{camName}">Right</button>
+            </div>
+            <div class="d-flex justify-content-center mb-2">
+                <button class="btn btn-outline-warning" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&dx=0&dy=5" hx-target="#nudgeUI_{camName}">Down</button>
+            </div>
+            <div class="d-flex justify-content-center">
+                <button class="btn btn-sm btn-danger" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&reset=true" hx-target="#nudgeUI_{camName}">Reset Nudge</button>
+            </div>
+        </div>
+        """
+        return HTMLResponse(html)
+    except Exception as e:
+        return HTMLResponse(f"<div class='text-danger'>Error: {str(e)}</div>")
+
+@configurator.post('/nudge/{camName}')
+async def nudgeHex(request: Request, camName: str, q: int, r: int, dx: int = 0, dy: int = 0, reset: bool = False):
+    cc = request.app.state.cc
+    try:
+        if not hasattr(cc.hex, 'hex_nudges'):
+            cc.hex.hex_nudges = {}
+        if camName not in cc.hex.hex_nudges:
+            cc.hex.hex_nudges[camName] = {}
+            
+        nudge_key = f"{q},{r}"
+        if reset:
+            if nudge_key in cc.hex.hex_nudges[camName]:
+                del cc.hex.hex_nudges[camName][nudge_key]
+        else:
+            curr_dx, curr_dy = cc.hex.hex_nudges[camName].get(nudge_key, [0, 0])
+            cc.hex.hex_nudges[camName][nudge_key] = [curr_dx + dx, curr_dy + dy]
+            
+        cc.saveConfiguration()
+        # Clear grid overlay cache
+        if hasattr(cc, '_grid_cache'):
+            cc._grid_cache.clear()
+        html = f"""
+        <div class="card p-2 mt-2 bg-dark text-white border-warning">
+            <h5>Nudge Hex (Q:{q}, R:{r})</h5>
+            <div class="text-center mb-2 text-muted small">Current Nudge: {cc.hex.hex_nudges[camName].get(nudge_key, [0, 0]) if not reset else [0, 0]}</div>
+            <div class="d-flex justify-content-center mb-2">
+                <button class="btn btn-outline-warning" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&dx=0&dy=-5" hx-target="#nudgeUI_{camName}">Up</button>
+            </div>
+            <div class="d-flex justify-content-center mb-2 gap-2">
+                <button class="btn btn-outline-warning" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&dx=-5&dy=0" hx-target="#nudgeUI_{camName}">Left</button>
+                <button class="btn btn-outline-warning" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&dx=5&dy=0" hx-target="#nudgeUI_{camName}">Right</button>
+            </div>
+            <div class="d-flex justify-content-center mb-2">
+                <button class="btn btn-outline-warning" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&dx=0&dy=5" hx-target="#nudgeUI_{camName}">Down</button>
+            </div>
+            <div class="d-flex justify-content-center">
+                <button class="btn btn-sm btn-danger" hx-post="/configurator/nudge/{camName}?q={q}&r={r}&reset=true" hx-target="#nudgeUI_{camName}">Reset Nudge</button>
+            </div>
+        </div>
+        """
+        return HTMLResponse(html)
+    except Exception as e:
+        return HTMLResponse(f"<div class='text-danger'>Error: {str(e)}</div>")
 
 
 if __name__ == "__main__":

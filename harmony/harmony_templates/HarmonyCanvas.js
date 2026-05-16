@@ -105,24 +105,30 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         // moveable (interactive edit mode, vivid purple): RGB(170, 80, 255)
         // selection (highest priority, unmistakable gold): RGB(255, 210, 70)
 
-        if (data.moveable) {
-            drawGroup(data.moveable, 170, 80, 255, drawnSet);
+        const showObjectsElem = document.getElementById('showObjectsHarmony');
+        const showObjects = showObjectsElem ? showObjectsElem.checked : true;
+
+        if (showObjects) {
+            if (data.moveable) {
+                drawGroup(data.moveable, 170, 80, 255, drawnSet);
+            }
+            if (data.allies) {
+                drawGroup(data.allies, 0, 210, 120, drawnSet);
+            }
+            if (data.enemies) {
+                drawGroup(data.enemies, 230, 60, 70, drawnSet);
+            }
+            if (data.targetable) {
+                drawGroup(data.targetable, 0, 200, 255, drawnSet);
+            }
+            if (data.terrain) {
+                drawGroup(data.terrain, 210, 105, 30, drawnSet);
+            }
+            if (data.selectable) {
+                drawGroup(data.selectable, 255, 105, 180, drawnSet);
+            }
         }
-        if (data.allies) {
-            drawGroup(data.allies, 0, 210, 120, drawnSet);
-        }
-        if (data.enemies) {
-            drawGroup(data.enemies, 230, 60, 70, drawnSet);
-        }
-        if (data.targetable) {
-            drawGroup(data.targetable, 0, 200, 255, drawnSet);
-        }
-        if (data.terrain) {
-            drawGroup(data.terrain, 210, 105, 30, drawnSet);
-        }
-        if (data.selectable) {
-            drawGroup(data.selectable, 255, 105, 180, drawnSet);
-        }
+
         if (data.selection) {
             let firstCenter = null;
             if (data.selection.firstCell) {
@@ -413,7 +419,7 @@ function gameWorldClick(camNum) {
                        <h5>${c}</h5>
                        <div style="position: relative; display: inline-block; width: 100%;">
                          <img class="img-responsive border border-3 border-info" src="/harmony/camWithChanges/${c}/${view_id}" style="border-radius:20px; width:100%;" id="GameWorld_${c}">
-                         <canvas id="GameWorldOverlay_${c}" style="position:absolute; left:0; top:0; pointer-events:auto; display: ${showObjects ? 'block' : 'none'};"></canvas>
+                         <canvas id="GameWorldOverlay_${c}" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>
                        </div>
                      </div>`;
         });
@@ -436,7 +442,7 @@ function gameWorldClick(camNum) {
     } else {
         if (!document.getElementById('GameWorld')) {
             container.innerHTML = `<img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="/harmony/camWithChanges/${camNum}/${view_id}" style="border-radius: 40px; max-width: 90%;">
-                                   <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: ${showObjects ? 'block' : 'none'};"></canvas>`;
+                                   <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>`;
             if (window.harmonyCanvasData) {
                 setTimeout(() => {
                     window.harmonyEditor = initCanvasEditor("GameWorldOverlay", window.harmonyCanvasData,

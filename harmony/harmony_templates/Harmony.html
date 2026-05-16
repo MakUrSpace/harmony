@@ -78,16 +78,10 @@
                         formData.append('show_objects', showObjects);
                         fetch('{harmonyURL}set_overlays', { method: 'POST', body: formData });
                         
-                        // Hide/show the frontend canvas depending on showObjects flag
-                        const overlay = document.getElementById('GameWorldOverlay');
-                        if (overlay) {
-                            overlay.style.display = showObjects ? 'block' : 'none';
-                        }
-                        
-                        // Handle multiple overlays in All Views mode
-                        document.querySelectorAll('canvas[id^="GameWorldOverlay_"]').forEach(c => {
-                            c.style.display = showObjects ? 'block' : 'none';
-                        });
+                        // Instead of hiding the canvas, re-render it so that
+                        // the selection cell is still drawn.
+                        if (window.harmonyEditor) window.harmonyEditor.render();
+                        if (window.harmonyEditors) window.harmonyEditors.forEach(ed => ed.render());
                     }
                 </script>
             </div>

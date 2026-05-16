@@ -25,9 +25,13 @@
                     <button type="button" class="btn btn-success" onclick="submitShape()">Submit Shape</button>
                     <button type="button" class="btn btn-secondary" onclick="toggleEditMode()">Toggle Edit/Draw</button>
                 </div>
-                <div class="form-check form-switch d-inline-block ms-3">
-                    <input class="form-check-input" type="checkbox" id="modeSwitch" onchange="toggleMode()">
-                    <label class="form-check-label" for="modeSwitch">Calibration Mode</label>
+                <div class="d-inline-block ms-3">
+                    <label for="modeSelect" class="form-label mb-0 fw-bold">Tool Mode:</label>
+                    <select id="modeSelect" class="form-select form-select-sm d-inline-block w-auto" onchange="toggleMode()">
+                        <option value="az">Active Zone</option>
+                        <option value="calibration">Calibration</option>
+                        <option value="nudge">Nudge Hexes</option>
+                    </select>
                 </div>
                 <div class="form-check form-switch d-inline-block ms-3">
                     <input class="form-check-input" type="checkbox" id="showGridConfig" checked
@@ -171,6 +175,13 @@
         var y = pos.y;
         var w = canvas.clientWidth;
         var h = canvas.clientHeight;
+
+        var mode = document.getElementById('modeSelect') ? document.getElementById('modeSelect').value : 'calibration';
+
+        if (mode === 'nudge') {
+            htmx.ajax('GET', '{configuratorURL}nudge_select/' + camName + '?px=' + (x/w) + '&py=' + (y/h), {target: '#nudgeUI_' + camName, swap: 'innerHTML'});
+            return;
+        }
 
         // Ensure array exists and is valid
         if (!manualPoints[camName]) manualPoints[camName] = [];
@@ -440,12 +451,17 @@
     // For now, I will prioritize Calibration as requested.
 
     function toggleMode() {
-        var isCalibration = document.getElementById('modeSwitch').checked;
+        var mode = document.getElementById('modeSelect') ? document.getElementById('modeSelect').value : 'calibration';
+        var isActive = (mode === 'calibration' || mode === 'nudge');
         cameraNames.forEach(function (camName) {
             var canvas = document.getElementById('overlayCanvas_' + camName);
             if (canvas) {
-                canvas.style.pointerEvents = isCalibration ? 'auto' : 'none';
-                canvas.style.opacity = isCalibration ? '1' : '0.5'; // Dim canvas in AZ mode to indicate pass-through?
+                canvas.style.pointerEvents = isActive ? 'auto' : 'none';
+                canvas.style.opacity = isActive ? '1' : '0.5'; 
+            }
+            var nudgeUI = document.getElementById('nudgeUI_' + camName);
+            if (nudgeUI) {
+                nudgeUI.style.display = (mode === 'nudge') ? 'block' : 'none';
             }
         });
     }
