@@ -2,7 +2,7 @@
 # coding: utf-8
 
 # # Observer
-# 
+#
 # This Observer notebook monitors USB cameras for changes on the DMA playing field.
 
 # In[1]:
@@ -37,7 +37,7 @@ nest_asyncio.apply()
 
 
 def distanceFormula(pt0, pt1):
-    return sum([(pt1[i] - pt0[i])**2 for i in range(len(pt0))]) ** 0.5
+    return sum([(pt1[i] - pt0[i]) ** 2 for i in range(len(pt0))]) ** 0.5
 
 
 def capture_camera(cam_num):
@@ -46,7 +46,7 @@ def capture_camera(cam_num):
         retval, image = cam.read()
     finally:
         cam.release()
-    retval, buff = cv2.imencode('.jpg', image)
+    retval, buff = cv2.imencode(".jpg", image)
     return buff
 
 
@@ -67,45 +67,46 @@ def identify_usb_cameras(device_numbers=list(range(MAX_CAM_ID))):
 def hStackImages(images):
     if len(images) == 0:
         return np.zeros((1, 1), dtype="uint8")
-    images = [image if image is not None else np.zeros((10, 10, 3), np.uint8) for image in images]
+    images = [
+        image if image is not None else np.zeros((10, 10, 3), np.uint8)
+        for image in images
+    ]
     baseIm = None
     maxHeight = max([im.shape[0] for im in images])
-    for im in images:    
+    for im in images:
         if im.shape[0] < maxHeight:
             addition = np.zeros((maxHeight - im.shape[0], im.shape[1], 3), np.uint8)
             im = np.vstack((im, addition))
         if baseIm is None:
             baseIm = im
         else:
-            baseIm = np.hstack((
-                baseIm,
-                np.zeros((maxHeight, 10, 3), np.uint8),
-                im))
+            baseIm = np.hstack((baseIm, np.zeros((maxHeight, 10, 3), np.uint8), im))
     return baseIm
 
 
 def vStackImages(images):
     if len(images) == 0:
         return np.zeros((1, 1), dtype="uint8")
-    images = [image if image is not None else np.zeros((10, 10, 3), np.uint8) for image in images]
+    images = [
+        image if image is not None else np.zeros((10, 10, 3), np.uint8)
+        for image in images
+    ]
     baseIm = None
     maxWidth = max([im.shape[1] for im in images])
-    for im in images:    
+    for im in images:
         if im.shape[0] < maxWidth:
             addition = np.zeros((im.shape[0], maxWidth - im.shape[1], 3), np.uint8)
             im = np.hstack((im, addition))
         if baseIm is None:
             baseIm = im
         else:
-            baseIm = np.vstack((
-                baseIm,
-                np.zeros((10, maxWidth, 3), np.uint8),
-                im))
+            baseIm = np.vstack((baseIm, np.zeros((10, maxWidth, 3), np.uint8), im))
     return baseIm
+
 
 def clipImage(image, clipBox):
     x, y, w, h = clipBox
-    return image[int(y):int(y + h), int(x):int(x + w)]
+    return image[int(y) : int(y + h), int(x) : int(x + w)]
 
 
 # In[4]:
@@ -132,7 +133,9 @@ class CameraChange:
             self.after = None
         else:
             self.area = max([cv2.contourArea(c) for c in self.changeContours])
-            self.changePoints = [pt.tolist() for c in self.changeContours for d in c for pt in d]
+            self.changePoints = [
+                pt.tolist() for c in self.changeContours for d in c for pt in d
+            ]
             xS = [pt[0] for pt in self.changePoints]
             yS = [pt[1] for pt in self.changePoints]
             minX = max(min(xS) - 5, 0)
@@ -141,7 +144,10 @@ class CameraChange:
             self.width = min(max(xS) - minX + 5, 1920)
             self.height = min(max(yS) - minY + 5, 1080)
             self.clipBox = [int(i) for i in (minX, minY, self.width, self.height)]
-            self.center = [min(xS) + int(self.width / 2), min(yS) + int(self.height / 2)]
+            self.center = [
+                min(xS) + int(self.width / 2),
+                min(yS) + int(self.height / 2),
+            ]
 
             beforeHeight, beforeWidth, *_ = self.before.shape
             if beforeHeight > self.height and beforeWidth > self.width:
@@ -154,7 +160,9 @@ class CameraChange:
     def overrideChangeContours(self, newContours):
         self.changeContours = newContours
         self.area = max([cv2.contourArea(c) for c in self.changeContours])
-        self.changePoints = [pt.tolist() for c in self.changeContours for d in c for pt in d]
+        self.changePoints = [
+            pt.tolist() for c in self.changeContours for d in c for pt in d
+        ]
         xS = [pt[0] for pt in self.changePoints]
         yS = [pt[1] for pt in self.changePoints]
         minX = max(min(xS) - 5, 0)
@@ -165,7 +173,7 @@ class CameraChange:
         self.clipBox = [int(i) for i in (minX, minY, self.width, self.height)]
         self.center = [min(xS) + int(self.width / 2), min(yS) + int(self.height / 2)]
 
-    def classify(self, changeType: str, lastChange: object=None):
+    def classify(self, changeType: str, lastChange: object = None):
         assert self.changeType is not None, "Unable to classify null ChangeType"
         assert changeType in self.ChangeTypes
         self.lastChange = lastChange
@@ -179,7 +187,9 @@ class CameraChange:
         otherIm = cv2.drawContours(zeros.copy(), change.changeContours, -1, 255, -1)
         overlap = cv2.bitwise_and(changeIm, otherIm)
         if overlap.any():
-            contours = cv2.findContours(overlap, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+            contours = cv2.findContours(
+                overlap, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )[0]
             largestArea = max([cv2.contourArea(c) for c in contours])
             overlapRatio = largestArea / self.area
             if 0.5 < overlapRatio < 2.0:
@@ -189,14 +199,16 @@ class CameraChange:
         return False
 
     def __eq__(self, other):
-        if self.changeType in [None, 'delete']:
-            return other is None or other.changeType in [None, 'delete']
-        elif other is not None and other.changeType not in [None, 'delete']:
-            return \
-            (other.center[0] - 20 < self.center[0] < other.center[0] + 20) and \
-            (other.center[1] - 20 < self.center[1] < other.center[1] + 20) and \
-            (other.width - 20 < self.width < other.width + 20) and \
-            (other.height - 20 < self.height < other.height + 20) and self.changeOverlap(other)
+        if self.changeType in [None, "delete"]:
+            return other is None or other.changeType in [None, "delete"]
+        elif other is not None and other.changeType not in [None, "delete"]:
+            return (
+                (other.center[0] - 20 < self.center[0] < other.center[0] + 20)
+                and (other.center[1] - 20 < self.center[1] < other.center[1] + 20)
+                and (other.width - 20 < self.width < other.width + 20)
+                and (other.height - 20 < self.height < other.height + 20)
+                and self.changeOverlap(other)
+            )
         else:
             return False
 
@@ -234,7 +246,11 @@ class Camera:
         return self.imageBuffer[0]
 
     def setReferenceFrame(self):
-        self.referenceFrame = self.imageBuffer[1] if self.imageBuffer[1] is not None else self.imageBuffer[0]
+        self.referenceFrame = (
+            self.imageBuffer[1]
+            if self.imageBuffer[1] is not None
+            else self.imageBuffer[0]
+        )
 
     def getActiveZoneBoundingBox(self):
         if self.activeZone is None or len(self.activeZone) == 0:
@@ -272,13 +288,21 @@ class Camera:
         if im0 is None or im1 is None:
             return []
         img_height = im0.shape[0]
-        diff = cv2.absdiff(cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY),
-                           cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY))
+        diff = cv2.absdiff(
+            cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY), cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
+        )
 
-        thresh = cv2.threshold(cv2.GaussianBlur(diff, (15, 25), 0), self.CHANGE_THRESHOLD, 255,cv2.THRESH_BINARY)[1]
-        kernel = np.ones((3, 3), np.uint8) 
+        thresh = cv2.threshold(
+            cv2.GaussianBlur(diff, (15, 25), 0),
+            self.CHANGE_THRESHOLD,
+            255,
+            cv2.THRESH_BINARY,
+        )[1]
+        kernel = np.ones((3, 3), np.uint8)
         dilate = cv2.dilate(thresh, kernel, iterations=2)
-        return cv2.findContours(dilate.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+        return cv2.findContours(
+            dilate.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )[0]
 
     def changeBetween(self, changeFrame, referenceFrame):
         maskedRefFrame = self.maskFrameToActiveZone(referenceFrame)
@@ -301,7 +325,9 @@ class Camera:
                 filteredContours.append(contour)
         if len(filteredContours) > 0:
             # Create Before/After clips
-            return CameraChange(self.camName, filteredContours, oldIm, newIm, changeType="unclassified")
+            return CameraChange(
+                self.camName, filteredContours, oldIm, newIm, changeType="unclassified"
+            )
         else:
             return CameraChange(self.camName, None, None, None, changeType=None)
 
@@ -312,7 +338,7 @@ class Camera:
     def swapBox(srcIm, dstIm, box):
         swapped = dstIm.copy()
         x, y, w, h = box
-        swapped[y:y+h, x:x+w] = srcIm
+        swapped[y : y + h, x : x + w] = srcIm
         return swapped
 
     def changePatchDelta(self, change: CameraChange):
@@ -332,7 +358,9 @@ class Camera:
     def drawActiveZone(self, image):
         pts = np.int32(self.activeZone)
         azOverlaidImage = image.copy()
-        return cv2.polylines(azOverlaidImage, [pts], isClosed=True, color=(0,255,0), thickness=5)
+        return cv2.polylines(
+            azOverlaidImage, [pts], isClosed=True, color=(0, 255, 0), thickness=5
+        )
 
     def maskFrameToActiveZone(self, frame=None):
         frame = self.mostRecentFrame if frame is None else frame
@@ -347,14 +375,28 @@ class Camera:
         return cv2.bitwise_and(frame, frame, mask=masked)
 
     @classmethod
-    def drawBoxesOnImage(cls, image, boxes, color=(0,0,255)):
+    def drawBoxesOnImage(cls, image, boxes, color=(0, 0, 255)):
         imageWithBoxes = image.copy()
         for x, y, w, h in boxes:
-            cv2.rectangle(imageWithBoxes, (x, y), (x+w, y+h), color, 2)
-            presumedBasePoint = [x + int(w/2), y + int(h/2)]
-            cv2.circle(imageWithBoxes, presumedBasePoint, radius=4, thickness=4, color=(0,255,255))
-            cv2.putText(imageWithBoxes, f'{w*h}p-[{x}-{x+w}, {y}-{y+w}]', (x, y), cv2.FONT_HERSHEY_SIMPLEX, 
-                   1, (255, 0, 0), 2, cv2.LINE_AA)
+            cv2.rectangle(imageWithBoxes, (x, y), (x + w, y + h), color, 2)
+            presumedBasePoint = [x + int(w / 2), y + int(h / 2)]
+            cv2.circle(
+                imageWithBoxes,
+                presumedBasePoint,
+                radius=4,
+                thickness=4,
+                color=(0, 255, 255),
+            )
+            cv2.putText(
+                imageWithBoxes,
+                f"{w * h}p-[{x}-{x + w}, {y}-{y + w}]",
+                (x, y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 0, 0),
+                2,
+                cv2.LINE_AA,
+            )
         return imageWithBoxes
 
 
@@ -372,7 +414,7 @@ class RemoteCamera(Camera):
             for i in range(retries):
                 resp_kwargs = {"url": self.address, "stream": True}
                 if self.auth is not None:
-                    resp_kwargs['auth'] = tuple(self.auth)
+                    resp_kwargs["auth"] = tuple(self.auth)
                 resp = requests.get(**resp_kwargs).raw
                 image = np.asarray(bytearray(resp.read()), dtype="uint8")
                 image = cv2.imdecode(image, cv2.IMREAD_COLOR)
@@ -381,7 +423,9 @@ class RemoteCamera(Camera):
                     image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
                 if image is not None:
                     break
-            assert image is not None, f"Failed to collect image for Camera {self.camName} with {retries} attempts"
+            assert image is not None, (
+                f"Failed to collect image for Camera {self.camName} with {retries} attempts"
+            )
 
             self.imageBuffer.insert(0, image)
             self.imageBuffer.pop()
@@ -389,11 +433,17 @@ class RemoteCamera(Camera):
             print(f"Failed to capture Camera: {e}")
         return image
 
-    async def asyncCollectImage(self, retries: int = 5, timeout_s: float = 8.0,
-                                session: aiohttp.ClientSession | None = None) -> np.ndarray | None:
+    async def asyncCollectImage(
+        self,
+        retries: int = 5,
+        timeout_s: float = 8.0,
+        session: aiohttp.ClientSession | None = None,
+    ) -> np.ndarray | None:
         image = None
         owns_session = session is None
-        auth_obj = aiohttp.BasicAuth(*self.auth) if getattr(self, "auth", None) else None
+        auth_obj = (
+            aiohttp.BasicAuth(*self.auth) if getattr(self, "auth", None) else None
+        )
         timeout = aiohttp.ClientTimeout(total=timeout_s)
 
         try:
@@ -420,12 +470,16 @@ class RemoteCamera(Camera):
                     break  # success
 
                 except Exception as inner_exc:
-                    print(f"[{self.camName}] attempt {attempt+1}/{retries} failed: {inner_exc}")
+                    print(
+                        f"[{self.camName}] attempt {attempt + 1}/{retries} failed: {inner_exc}"
+                    )
                     if attempt < retries - 1:
                         # exponential backoff: 0.2s, 0.4s, 0.8s, ...
-                        await asyncio.sleep(0.2 * (2 ** attempt))
+                        await asyncio.sleep(0.2 * (2**attempt))
                         continue
-                    raise Exception(f"Failed to collect image for Camera {self.camName} with {retries} attempts") from inner_exc # bubble up on final failure
+                    raise Exception(
+                        f"Failed to collect image for Camera {self.camName} with {retries} attempts"
+                    ) from inner_exc  # bubble up on final failure
 
             # Update buffer like original
             self.imageBuffer.insert(0, image)
@@ -607,7 +661,9 @@ class RTSPCamera(RemoteCamera):
 
         raise TimeoutError(f"Timed out reading RTSP frame: {last_err}")
 
-    async def asyncCollectImage(self, retries: int = 1, timeout_s: float = 5) -> np.ndarray | None:
+    async def asyncCollectImage(
+        self, retries: int = 1, timeout_s: float = 5
+    ) -> np.ndarray | None:
         """
         Async API: waits for next frame from the background thread.
         Starts the capture thread on first use (must be called inside event loop).
@@ -637,9 +693,11 @@ class RTSPCamera(RemoteCamera):
                     break
 
                 except Exception as inner_exc:
-                    print(f"[{self.camName}] attempt {attempt+1}/{retries} failed: {inner_exc}")
+                    print(
+                        f"[{self.camName}] attempt {attempt + 1}/{retries} failed: {inner_exc}"
+                    )
                     if attempt < retries - 1:
-                        await asyncio.sleep(0.2 * (2 ** attempt))
+                        await asyncio.sleep(0.2 * (2**attempt))
                         continue
                     raise Exception(
                         f"Failed to collect image for Camera {self.camName} with {retries} attempts"
@@ -681,18 +739,28 @@ class ChangeSet:
 
     @property
     def numCamerasChanged(self):
-        return sum([change.changeType is not None for change in self.changeSet.values()])
+        return sum(
+            [change.changeType is not None for change in self.changeSet.values()]
+        )
 
     @property
     def empty(self):
-        return sum([change.changeType is None for change in self.changeSet.values()]) == len(self.changeSet)
+        return sum(
+            [change.changeType is None for change in self.changeSet.values()]
+        ) == len(self.changeSet)
 
     @property
     def changeType(self):
-        changeTypes = [change.changeType for change in self.changeSet.values() if change.changeType is not None]
+        changeTypes = [
+            change.changeType
+            for change in self.changeSet.values()
+            if change.changeType is not None
+        ]
         if sum([c == "delete" for c in changeTypes]) == len(changeTypes):
             return "delete"
-        elif "move" in changeTypes or ("add" in changeTypes and "delete" in changeTypes):
+        elif "move" in changeTypes or (
+            "add" in changeTypes and "delete" in changeTypes
+        ):
             return "move"
         elif sum([c == "add" for c in changeTypes]) == len(changeTypes):
             return "add"
@@ -702,11 +770,23 @@ class ChangeSet:
     def __eq__(self, other):
         if other is None:
             return False
-        notNoneChanges = {camName: change for camName, change in self.changeSet.items() if change.changeType != None}
+        notNoneChanges = {
+            camName: change
+            for camName, change in self.changeSet.items()
+            if change.changeType != None
+        }
         if len(notNoneChanges) == 0:
             return False
-        return \
-            sum([notNoneChanges[camName] == other.changeSet[camName] for camName in notNoneChanges.keys()]) / len(notNoneChanges) >= 0.3
+        return (
+            sum(
+                [
+                    notNoneChanges[camName] == other.changeSet[camName]
+                    for camName in notNoneChanges.keys()
+                ]
+            )
+            / len(notNoneChanges)
+            >= 0.3
+        )
 
     def update(self, changeSet, overwrite=True):
         if overwrite:
@@ -734,26 +814,40 @@ class TrackedObject(ChangeSet):
             self.oid = str(uuid4())
 
         try:
-            self.icon = sorted([cs.after for cs in self.changeSet.values()
-                                if cs is not None and cs.changeType != "delete"],
-                               key=lambda x: x.size if x is not None else 0)[0]
+            self.icon = sorted(
+                [
+                    cs.after
+                    for cs in self.changeSet.values()
+                    if cs is not None and cs.changeType != "delete"
+                ],
+                key=lambda x: x.size if x is not None else 0,
+            )[0]
         except:
             print("Failed to build TrackedObject icon")
             self.icon = np.zeros([100, 100], dtype="uint8")
 
     def __repr__(self):
-        changeSet = {camName: cS for camName, cS in self.changeSet.items() if cS is not None and cS.changeType not in [None, 'delete']}
+        changeSet = {
+            camName: cS
+            for camName, cS in self.changeSet.items()
+            if cS is not None and cS.changeType not in [None, "delete"]
+        }
         return f"TrackedObject({changeSet})"
 
     def previousVersion(self):
-        prev = type(self)({camName: change.lastChange if change is not None else None for camName, change in self.changeSet.items()})
+        prev = type(self)(
+            {
+                camName: change.lastChange if change is not None else None
+                for camName, change in self.changeSet.items()
+            }
+        )
         prev.constituent_axials = list(self.constituent_axials)
         return prev
 
     @property
     def isNewObject(self):
         for camName, cS in self.changeSet.items():
-            if cS is not None and cS.changeType not in ['add', None]:
+            if cS is not None and cS.changeType not in ["add", None]:
                 return False
         return True
 
@@ -761,10 +855,14 @@ class TrackedObject(ChangeSet):
         super().update(changeSet, overwrite)
         if hasattr(changeSet, "constituent_axials") and changeSet.constituent_axials:
             self.constituent_axials = list(changeSet.constituent_axials)
-        self.icon = sorted([cs.after for cs in self.changeSet.values()
-                            if cs is not None and cs.changeType != "delete"],
-                           key=lambda x: x.size if x is not None else 0)[0]
-
+        self.icon = sorted(
+            [
+                cs.after
+                for cs in self.changeSet.values()
+                if cs is not None and cs.changeType != "delete"
+            ],
+            key=lambda x: x.size if x is not None else 0,
+        )[0]
 
 
 # In[9]:
@@ -802,22 +900,28 @@ class CaptureConfiguration:
         for camName, camDef in config.items():
             if str(camName) == "pov":
                 global pov
-                addr = camDef['addr']
-                rot = camDef['rot']
-                pov = RemoteCamera(address=addr, rotate=rot, activeZone=[], camName="pov")
+                addr = camDef["addr"]
+                rot = camDef["rot"]
+                pov = RemoteCamera(
+                    address=addr, rotate=rot, activeZone=[], camName="pov"
+                )
             elif "RTSPCamera" in str(camName):
                 name = camName.replace("RTSPCamera", "")
-                addr = camDef['addr']
-                rot = camDef['rot']
+                addr = camDef["addr"]
+                rot = camDef["rot"]
                 auth = camDef.get("auth", None)
-                az = np.float32(json.loads(camDef['az']))
-                cameras[name] = RTSPCamera(address=addr, activeZone=az, camName=name, auth=auth)
-            elif str(camName) not in ['rsc', 'calibrationPlan', 'hex']:
-                addr = camDef['addr']
-                rot = camDef['rot']
+                az = np.float32(json.loads(camDef["az"]))
+                cameras[name] = RTSPCamera(
+                    address=addr, activeZone=az, camName=name, auth=auth
+                )
+            elif str(camName) not in ["rsc", "calibrationPlan", "hex"]:
+                addr = camDef["addr"]
+                rot = camDef["rot"]
                 auth = camDef.get("auth", None)
-                az = np.float32(json.loads(camDef['az']))
-                cameras[camName] = RemoteCamera(address=addr, activeZone=az, camName=camName, auth=auth)
+                az = np.float32(json.loads(camDef["az"]))
+                cameras[camName] = RemoteCamera(
+                    address=addr, activeZone=az, camName=camName, auth=auth
+                )
         self.cameras = cameras
 
         self.capture()
@@ -842,8 +946,10 @@ class CaptureConfiguration:
                 "addr": cam.address,
                 "rot": cam.rotate,
                 "az": json.dumps(cam.activeZone.tolist()),
-                "auth": cam.auth}
-            for camName, cam in self.cameras.items()}
+                "auth": cam.auth,
+            }
+            for camName, cam in self.cameras.items()
+        }
 
     def saveConfiguration(self, path="observerConfiguration.json"):
         with open(path, "w") as f:
@@ -879,7 +985,8 @@ class Transition:
 
 
 class Observer:
-    """ Object to observe the state of its cameras and record changes """
+    """Object to observe the state of its cameras and record changes"""
+
     states = ["idle", "unstable", "classify"]
     modes = ["passive", "track"]
     observationThreshold = 3
@@ -902,26 +1009,32 @@ class Observer:
         self.cc.setReference()
 
     def interactionDetection(self):
-        detections = {cam.camName: cam.interactionDetection(cam.mostRecentFrame) for cam in cameras.values()}
+        detections = {
+            cam.camName: cam.interactionDetection(cam.mostRecentFrame)
+            for cam in cameras.values()
+        }
         return sum(detections.values()) > 0
 
     def updateReference(self):
         self.cc.setReference()
 
     def referenceFrameDeltas(self):
-        return ChangeSet({
-            camName: cam.referenceFrameDelta() 
-                if self.mode != "passive" else
-                CameraChange(camName, None, None, None, changeType=None)
-            for camName, cam in cameras.items()})
+        return ChangeSet(
+            {
+                camName: cam.referenceFrameDelta()
+                if self.mode != "passive"
+                else CameraChange(camName, None, None, None, changeType=None)
+                for camName, cam in cameras.items()
+            }
+        )
 
     def memoriesInChangeOrder(self):
         changeOrderMemories = []
         if not self.transitions:
             return changeOrderMemories
         for transition in self.transitions[::-1]:
-            if transition['obj'] not in changeOrderMemories:
-                changeOrderMemories.append(transition['obj'])
+            if transition["obj"] not in changeOrderMemories:
+                changeOrderMemories.append(transition["obj"])
                 if len(changeOrderMemories) == len(self.memory):
                     return changeOrderMemories
         raise Exception("Failed to reconstruct memories in change order")
@@ -930,7 +1043,11 @@ class Observer:
         changes = [m.changeSet[camera.camName] for m in self.memory]
         overlaps = []
         for eC in changes:
-            if eC.changeType is not None and eC.changeOverlap(change) and eC not in overlaps:
+            if (
+                eC.changeType is not None
+                and eC.changeOverlap(change)
+                and eC not in overlaps
+            ):
                 overlaps.append(eC)
         return overlaps
 
@@ -945,9 +1062,13 @@ class Observer:
         elif len(overlaps) == 1:  # Move or Deletion
             cPD = camera.changePatchDelta(overlaps[0])
             if cPD.changeType is not None:  # Move
-                patchedOverlaps = [o for o in self.changeOverlaps(camera, cPD) if o != overlaps[0]]
+                patchedOverlaps = [
+                    o for o in self.changeOverlaps(camera, cPD) if o != overlaps[0]
+                ]
                 if len(patchedOverlaps) != 0:
-                    raise Exception(f"Unable to classify change: {change} interacting with {overlaps[0]} (patch has overlaps: {patchedOverlaps}")
+                    raise Exception(
+                        f"Unable to classify change: {change} interacting with {overlaps[0]} (patch has overlaps: {patchedOverlaps}"
+                    )
                 cPD.classify("move", overlaps[0])
                 return cPD
             else:  # cPD == [], Deletion
@@ -967,21 +1088,29 @@ class Observer:
 
     def camCommitChange(self, classifiedChange):
         overlaps = self.changeOverlaps(classifiedChange)
-        assert classifiedChange.changeType != "unclassified", "Unable to commit unclassified changes"
+        assert classifiedChange.changeType != "unclassified", (
+            "Unable to commit unclassified changes"
+        )
         if classifiedChange.changeType == None:
             print(f"Cam {self.camName} - Nothing to commit")
         elif classifiedChange.changeType == "add":
             print(f"Cam {self.camName} - Adding {classifiedChange}")
             self.changes.insert(0, classifiedChange)
         elif classifiedChange.changeType == "move":
-            print(f"Cam {self.camName} - Moving {classifiedChange.lastChange} to {classifiedChange}")
+            print(
+                f"Cam {self.camName} - Moving {classifiedChange.lastChange} to {classifiedChange}"
+            )
             self.changes.remove(classifiedChange.lastChange)
             self.changes.insert(0, classifiedChange)
         elif classifiedChange.changeType == "delete":
-            print(f"Cam {self.camName} - Deleting {classifiedChange.lastChange} with {classifiedChange}")
+            print(
+                f"Cam {self.camName} - Deleting {classifiedChange.lastChange} with {classifiedChange}"
+            )
             self.changes.remove(classifiedChange.lastChange)
         else:
-            raise Exception(f"Cam {self.camName} - Unrecognzed changeType: {classifiedChange}")
+            raise Exception(
+                f"Cam {self.camName} - Unrecognzed changeType: {classifiedChange}"
+            )
 
     def commitChanges(self, objDef, overwrite=True):
         try:
@@ -994,11 +1123,16 @@ class Observer:
             existingIndex = len(self.memory) - 1
         self.lastMemory = objDef
 
-        self.transitions.append(Transition(
-            objDef,
-            self.cycleCounter,
-            {camName: {"ref": cam.referenceFrame, "fin": cam.mostRecentFrame}
-             for camName, cam in cameras.items()}))
+        self.transitions.append(
+            Transition(
+                objDef,
+                self.cycleCounter,
+                {
+                    camName: {"ref": cam.referenceFrame, "fin": cam.mostRecentFrame}
+                    for camName, cam in cameras.items()
+                },
+            )
+        )
         return self.memory[existingIndex]
 
     def undoLastChange(self):
@@ -1034,11 +1168,18 @@ class Observer:
         else:
             raise Exception(f"Unrecognized object: {oid}")
 
-        self.transitions.append(Transition(
-            cap,
-            self.cycleCounter,
-            {camName: CameraChange(None, None, None, "delete", cap.changeSet[camName])
-             for camName, cam in cameras.items()}))
+        self.transitions.append(
+            Transition(
+                cap,
+                self.cycleCounter,
+                {
+                    camName: CameraChange(
+                        None, None, None, "delete", cap.changeSet[camName]
+                    )
+                    for camName, cam in cameras.items()
+                },
+            )
+        )
 
         self.lastMemory = {"deletedObject": oid}
         self.passiveMode()
@@ -1058,10 +1199,13 @@ class Observer:
                 self.cc.setReference()
             else:
                 nextState = "unstable"
-                if changes == self.lastChanges:  
+                if changes == self.lastChanges:
                     nextState = "classify"
                     classification = self.classifyChanges(changes)
-                    if self.state == "classify" and classification == self.lastClassification:
+                    if (
+                        self.state == "classify"
+                        and classification == self.lastClassification
+                    ):
                         try:
                             nextState = "idle"
                             self.commitChanges(classification)
@@ -1072,7 +1216,9 @@ class Observer:
                             classification = None
                     else:
                         cycleEnd = datetime.utcnow()
-                        if (cycleTime := (cycleEnd - cycleStart).total_seconds()) < self.minimumClassificationTime:
+                        if (
+                            cycleTime := (cycleEnd - cycleStart).total_seconds()
+                        ) < self.minimumClassificationTime:
                             sleep(self.minimumClassificationTime - cycleTime)
 
             self.state = nextState
@@ -1082,6 +1228,7 @@ class Observer:
             return None
         except:
             from traceback import format_exc
+
             print("CYCLE FAILURE!!!")
             print(format_exc())
             self.passiveMode()
@@ -1117,21 +1264,42 @@ class Observer:
 
             # Paint known objects blue
             for memObj in self.memory:
-                if memObj.changeSet[camName].changeType not in ['delete', None]:
-                    memContour = np.array([memObj.changeSet[camName].changePoints], dtype=np.int32)
-                    camImage = cv2.drawContours(camImage, memContour, -1, (255, 0, 0), -1)
+                if memObj.changeSet[camName].changeType not in ["delete", None]:
+                    memContour = np.array(
+                        [memObj.changeSet[camName].changePoints], dtype=np.int32
+                    )
+                    camImage = cv2.drawContours(
+                        camImage, memContour, -1, (255, 0, 0), -1
+                    )
             # Paint last changes red
             if self.lastChanges is not None and not self.lastChanges.empty:
                 lastChange = self.lastChanges.changeSet[camName]
-                if lastChange is not None and lastChange.changeType not in ['delete', None]:
-                    lastChangeContour = np.array([lastChange.changePoints], dtype=np.int32)
-                    camImage = cv2.drawContours(camImage, lastChangeContour, -1 , (0, 0, 255), -1)
+                if lastChange is not None and lastChange.changeType not in [
+                    "delete",
+                    None,
+                ]:
+                    lastChangeContour = np.array(
+                        [lastChange.changePoints], dtype=np.int32
+                    )
+                    camImage = cv2.drawContours(
+                        camImage, lastChangeContour, -1, (0, 0, 255), -1
+                    )
             # Paint classification green
-            if self.lastClassification is not None and not self.lastClassification.empty:
+            if (
+                self.lastClassification is not None
+                and not self.lastClassification.empty
+            ):
                 lastClass = self.lastClassification.changeSet[camName]
-                if lastClass is not None and lastClass.changeType not in ['delete', None]:
-                    lastClassContour = np.array([lastClass.changePoints], dtype=np.int32)
-                    camImage = cv2.drawContours(camImage, lastClassContour, -1 , (0, 255, 0), -1)
+                if lastClass is not None and lastClass.changeType not in [
+                    "delete",
+                    None,
+                ]:
+                    lastClassContour = np.array(
+                        [lastClass.changePoints], dtype=np.int32
+                    )
+                    camImage = cv2.drawContours(
+                        camImage, lastClassContour, -1, (0, 255, 0), -1
+                    )
             camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
             images[camName] = camImage
         return images
@@ -1139,56 +1307,84 @@ class Observer:
     def __repr__(self):
         return f"CapMac -- {self.mode} {str(len(self.calibrationPts)) + ' ' if self.mode == 'calibrate' else ''}{self.state}"
 
-    def object_visual(self, changeSet: ChangeSet, color=(255, 0, 0), withContours=True, margin=0):
+    def object_visual(
+        self, changeSet: ChangeSet, color=(255, 0, 0), withContours=True, margin=0
+    ):
         cameras = self.cc.cameras
-        images = [change.after for change in changeSet.changeSet.values() if change.changeType not in ["delete", None]]
-        maxHeight =  max([im.shape[0] + margin * 2 for im in images])
+        images = [
+            change.after
+            for change in changeSet.changeSet.values()
+            if change.changeType not in ["delete", None]
+        ]
+        maxHeight = max([im.shape[0] + margin * 2 for im in images])
         filler = np.zeros((maxHeight, 50, 3), np.uint8)
 
         margins = [-margin, -margin, margin * 2, margin * 2]
 
         if withContours:
-            images = [clipImage(
-                cv2.addWeighted(
-                    cameras[camName].mostRecentFrame.copy(),
-                    0.5,
-                    cv2.drawContours(
+            images = [
+                clipImage(
+                    cv2.addWeighted(
                         cameras[camName].mostRecentFrame.copy(),
-                        change.changeContours, 
-                        -1,
-                        color,
-                        -1
+                        0.5,
+                        cv2.drawContours(
+                            cameras[camName].mostRecentFrame.copy(),
+                            change.changeContours,
+                            -1,
+                            color,
+                            -1,
+                        ),
+                        0.5,
+                        0,
                     ),
-                    0.5,
-                    0
-                ),
-                [dim + m for dim, m in zip(change.clipBox, margins)]
-            ) if change.changeType != "delete" else filler for camName, change in changeSet.changeSet.items()]
+                    [dim + m for dim, m in zip(change.clipBox, margins)],
+                )
+                if change.changeType != "delete"
+                else filler
+                for camName, change in changeSet.changeSet.items()
+            ]
         else:
-            images = [clipImage(cameras[camName].mostRecentFrame.copy(), [dim + m for dim, m in zip(change.clipBox, margins)])
-                      if change.changeType != "delete" else filler
-                      for camName, change in changeSet.changeSet.items()]
+            images = [
+                clipImage(
+                    cameras[camName].mostRecentFrame.copy(),
+                    [dim + m for dim, m in zip(change.clipBox, margins)],
+                )
+                if change.changeType != "delete"
+                else filler
+                for camName, change in changeSet.changeSet.items()
+            ]
 
-        maxHeight =  max([im.shape[0] for im in images])
+        maxHeight = max([im.shape[0] for im in images])
         filler = np.zeros((maxHeight, 50, 3), np.uint8)
         if not changeSet.empty:
             return hStackImages(images)
         else:
             return np.zeros([10, 10], dtype="float32")
 
-    def expectObjectMovement(self, trackedObject: TrackedObject, expectedFinalLocation: tuple[int, int]):
+    def expectObjectMovement(
+        self, trackedObject: TrackedObject, expectedFinalLocation: tuple[int, int]
+    ):
         # Pass convert expectedFinalLocation to camera coords
-        finalCamCoords = {cN: self.cc.rsc.realSpaceToCamCoord(expectedFinalLocation, cN) for cN in self.cc.cameras.keys()}
+        finalCamCoords = {
+            cN: self.cc.rsc.realSpaceToCamCoord(expectedFinalLocation, cN)
+            for cN in self.cc.cameras.keys()
+        }
         # Determine the expected camera change
-        trackedObject.expectedChange = ChangeSet(changeSet={cN: 
-            CameraChange(
-                camName=cN,
-                changeContours=[self.circle_to_contour(finalCamCoords[cN], radius=10)],
-                before=np.zeros([100, 100, 3], dtype="uint8"),
-                after=np.zeros([100, 100, 3], dtype="uint8"),
-                changeType="Add",
-                lastChange=None
-            ) for cN in self.cc.cameras.keys()})
+        trackedObject.expectedChange = ChangeSet(
+            changeSet={
+                cN: CameraChange(
+                    camName=cN,
+                    changeContours=[
+                        self.circle_to_contour(finalCamCoords[cN], radius=10)
+                    ],
+                    before=np.zeros([100, 100, 3], dtype="uint8"),
+                    after=np.zeros([100, 100, 3], dtype="uint8"),
+                    changeType="Add",
+                    lastChange=None,
+                )
+                for cN in self.cc.cameras.keys()
+            }
+        )
         trackedObject.expectedChange.lastChange = trackedObject
 
     def clearExpectedMovement(self, trackedObject: TrackedObject):
@@ -1197,7 +1393,10 @@ class Observer:
     def overlappingChangeSets(self, obj0: ChangeSet, obj1: ChangeSet):
         for camName, obj0_cameraChange in obj0.changeSet.items():
             obj1_cameraChange = obj1.changeSet[camName]
-            if obj0_cameraChange.changeType in ["delete", None] or obj1_cameraChange.changeType in ["delete", None]:
+            if obj0_cameraChange.changeType in [
+                "delete",
+                None,
+            ] or obj1_cameraChange.changeType in ["delete", None]:
                 continue
             if not obj0_cameraChange.changeOverlap(obj1_cameraChange):
                 return False
@@ -1211,7 +1410,7 @@ class Observer:
 if __name__ == "__main__":
     o = Observer(cc)
     o.cycle()
-    plt.imshow(cameras['0'].mostRecentFrame)
+    plt.imshow(cameras["0"].mostRecentFrame)
 
 
 # In[15]:
@@ -1223,17 +1422,13 @@ if __name__ == "__main__" and False:
     for i in range(3):
         o.cycle()
 
-    plt.imshow(o.getCameraImagesWithChanges()['0'])
+    plt.imshow(o.getCameraImagesWithChanges()["0"])
     plt.show()
     o.undoLastChange()
-    plt.imshow(o.getCameraImagesWithChanges()['0'])
+    plt.imshow(o.getCameraImagesWithChanges()["0"])
     plt.show()
     o.undoLastChange()
-    plt.imshow(o.getCameraImagesWithChanges()['0'])
+    plt.imshow(o.getCameraImagesWithChanges()["0"])
 
 
 # In[ ]:
-
-
-
-

@@ -13,7 +13,13 @@ from dataclasses import dataclass, asdict, field
 # In[2]:
 
 
-from observer.CalibratedObserver import CalibratedCaptureConfiguration, CalibratedObserver, MiniMapObject, TrackedObject, CameraChange
+from observer.CalibratedObserver import (
+    CalibratedCaptureConfiguration,
+    CalibratedObserver,
+    MiniMapObject,
+    TrackedObject,
+    CameraChange,
+)
 
 
 # In[3]:
@@ -50,28 +56,36 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def buildConfiguration(self):
         config = super().buildConfiguration()
         if self.hex is not None:
-            config['hex'] = asdict(self.hex)
+            config["hex"] = asdict(self.hex)
         return config
 
     def realSpaceBoundingBox(self):
         true_real_contours = []
         try:
             for cam_name, cam in self.cameras.items():
-                az = getattr(cam, 'activeZone', None)
+                az = getattr(cam, "activeZone", None)
                 if az is None:
-                    az = getattr(cam, 'activeZonePolygon', None)
+                    az = getattr(cam, "activeZonePolygon", None)
                 if az is not None and len(az) > 0:
-                    if hasattr(self, 'rsc') and self.rsc is not None and cam_name in self.rsc.converters:
+                    if (
+                        hasattr(self, "rsc")
+                        and self.rsc is not None
+                        and cam_name in self.rsc.converters
+                    ):
                         real_pts = []
                         rsc = self.rsc
                         for pt in az:
                             x, y = 0, 0
                             is_nested = False
-                            if hasattr(pt, 'shape'):
-                                 if len(pt.shape) > 1:
-                                     is_nested = True
-                            elif hasattr(pt, '__len__') and len(pt) == 1 and hasattr(pt[0], '__len__'):
-                                 is_nested = True
+                            if hasattr(pt, "shape"):
+                                if len(pt.shape) > 1:
+                                    is_nested = True
+                            elif (
+                                hasattr(pt, "__len__")
+                                and len(pt) == 1
+                                and hasattr(pt[0], "__len__")
+                            ):
+                                is_nested = True
                             if is_nested:
                                 x = float(pt[0][0])
                                 y = float(pt[0][1])
@@ -85,7 +99,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
             if true_real_contours:
                 all_pts = np.vstack(true_real_contours)
-                if hasattr(self, 'apply_affine_pts'):
+                if hasattr(self, "apply_affine_pts"):
                     all_pts = self.apply_affine_pts(all_pts)
                 min_x = float(np.min(all_pts[:, 0]))
                 max_x = float(np.max(all_pts[:, 0]))
@@ -143,9 +157,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         return q, r
 
     def pixel_to_axial(
-        self,
-        px: float, py: float,
-        apply_affine=True
+        self, px: float, py: float, apply_affine=True
     ) -> tuple[int, int]:
         """
         Image pixel → axial hex (q, r)
@@ -167,16 +179,16 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def camCoordToAxial(self, cam, cam_coord: tuple[float]):
         real_coord = self.rsc.camCoordToRealSpace(cam, cam_coord)
         q0, r0 = self.pixel_to_axial(*real_coord, apply_affine=False)
-        
-        if self.hex and hasattr(self.hex, 'hex_nudges') and cam in self.hex.hex_nudges:
-            for q in range(q0-2, q0+3):
-                for r in range(r0-2, r0+3):
+
+        if self.hex and hasattr(self.hex, "hex_nudges") and cam in self.hex.hex_nudges:
+            for q in range(q0 - 2, q0 + 3):
+                for r in range(r0 - 2, r0 + 3):
                     nudge_key = f"{q},{r}"
                     if nudge_key in self.hex.hex_nudges[cam]:
                         poly = self.cam_hex_at_axial(cam, q, r)
                         if cv2.pointPolygonTest(poly, cam_coord, False) >= 0:
                             return (q, r)
-                            
+
         return (q0, r0)
 
     def axialToCamCoord(self, cam, axial_coord: tuple[float]):
@@ -191,9 +203,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def axial_distance(a: tuple[int, int], b: tuple[int, int] = (0, 0)) -> int:
         q1, r1 = a
         q2, r2 = b
-        return (abs(q1 - q2)
-              + abs(q1 + r1 - q2 - r2)
-              + abs(r1 - r2)) // 2
+        return (abs(q1 - q2) + abs(q1 + r1 - q2 - r2) + abs(r1 - r2)) // 2
 
     def trackedObjectLastDistance(self, trackedObject):
         if trackedObject.isNewObject:
@@ -219,8 +229,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         b1 = ax + tx - (a11 * ax + a12 * ay)
         b2 = ay + ty - (a21 * ax + a22 * ay)
 
-        return np.array([[a11, a12, b1],
-                         [a21, a22, b2]], dtype=np.float32)
+        return np.array([[a11, a12, b1], [a21, a22, b2]], dtype=np.float32)
 
     def apply_affine_pts(self, pts_xy: np.ndarray) -> np.ndarray:
         """
@@ -243,16 +252,19 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         for k in range(6):
             ang = math.radians(60 * k - 30)  # pointy-top
             offs.append([self.hex.size * math.cos(ang), self.hex.size * math.sin(ang)])
-        return np.array(offs, dtype=np.float32),
+        return (np.array(offs, dtype=np.float32),)
 
     def draw_hex_grid_overlay(
         self,
         base_img: np.ndarray,
-        x0: int, y0: int, w: int, h: int,
+        x0: int,
+        y0: int,
+        w: int,
+        h: int,
         *,
         color: tuple[int, int, int] = (255, 255, 255),
         thickness: int = 3,
-        alpha: float = 1.0
+        alpha: float = 1.0,
     ) -> np.ndarray:
         """
         Draw a pointy-top hex grid over bbox [x0:x0+w, y0:y0+h] with
@@ -262,19 +274,24 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
         # Blend only inside bbox
         out = base_img.copy()
-        roi = out[y0:y0+h, x0:x0+w]
-        roi_overlay = overlay[y0:y0+h, x0:x0+w]
+        roi = out[y0 : y0 + h, x0 : x0 + w]
+        roi_overlay = overlay[y0 : y0 + h, x0 : x0 + w]
         cv2.addWeighted(roi_overlay, alpha, roi, 1.0 - alpha, 0.0, dst=roi)
-        out[y0:y0+h, x0:x0+w] = roi
+        out[y0 : y0 + h, x0 : x0 + w] = roi
         return out
 
-    def draw_grid(
-        self,
-        color: tuple[int, int, int] = (80, 80, 80),
-        thickness: int = 3
-    ):
-        params = (self.hex.width, self.hex.height, self.hex.size, self.hex.offset_xy, self.hex.anchor_xy, self.hex.rotation_deg, color, thickness)
-        if hasattr(self, '_cached_grid_params') and self._cached_grid_params == params:
+    def draw_grid(self, color: tuple[int, int, int] = (80, 80, 80), thickness: int = 3):
+        params = (
+            self.hex.width,
+            self.hex.height,
+            self.hex.size,
+            self.hex.offset_xy,
+            self.hex.anchor_xy,
+            self.hex.rotation_deg,
+            color,
+            thickness,
+        )
+        if hasattr(self, "_cached_grid_params") and self._cached_grid_params == params:
             return self._cached_grid_overlay.copy()
 
         self._cached_grid_params = params
@@ -287,49 +304,49 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             (0, 0),
             (self.hex.width, 0),
             (self.hex.width, self.hex.height),
-            (0, self.hex.height)
+            (0, self.hex.height),
         ]
-        
+
         qs, rs = [], []
-        for (px, py) in corners_screen:
+        for px, py in corners_screen:
             q, r = self.pixel_to_axial(px, py)
             qs.append(q)
             rs.append(r)
-            
+
         min_q, max_q = min(qs), max(qs)
         min_r, max_r = min(rs), max(rs)
-        
+
         # Add padding to ensure smooth edges
         pad = 2
-        
+
         for q in range(min_q - pad, max_q + pad + 1):
             for r in range(min_r - pad, max_r + pad + 1):
                 poly_i = self.hex_at_axial(q, r)
-                
+
                 # Check bounds loosely so we don't draw far outside
                 minx, miny = poly_i.min(axis=0)[0]
                 maxx, maxy = poly_i.max(axis=0)[0]
-                if maxx < -5 or maxy < -5 or minx > self.hex.width + 5 or miny > self.hex.height + 5:
+                if (
+                    maxx < -5
+                    or maxy < -5
+                    or minx > self.hex.width + 5
+                    or miny > self.hex.height + 5
+                ):
                     continue
-                    
+
                 cv2.polylines(
                     overlay,
                     [poly_i],
                     isClosed=True,
                     color=color,
                     thickness=thickness,
-                    lineType=cv2.LINE_8
+                    lineType=cv2.LINE_8,
                 )
 
         self._cached_grid_overlay = overlay.copy()
         return overlay
 
-    def hex_at_axial(
-        self,
-        q: int,
-        r: int,
-        apply_affine: bool = True
-    ):
+    def hex_at_axial(self, q: int, r: int, apply_affine: bool = True):
         """
         Fill a single pointy-top hex at axial coordinate (q, r) and return polygon points in grid coordinates.
 
@@ -349,10 +366,12 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         corners = []
         for k in range(6):
             ang = math.radians(60 * k - 30)
-            corners.append([
-                cx + self.hex.size * math.cos(ang),
-                cy + self.hex.size * math.sin(ang),
-            ])
+            corners.append(
+                [
+                    cx + self.hex.size * math.cos(ang),
+                    cy + self.hex.size * math.sin(ang),
+                ]
+            )
 
         poly = np.array(corners, dtype=np.float32)
         if apply_affine:
@@ -362,27 +381,29 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         return poly_i
 
     def get_vertex_nudge(self, cam: str, q: int, r: int, vertex_index: int):
-        if not (self.hex and hasattr(self.hex, 'hex_nudges') and cam in self.hex.hex_nudges):
+        if not (
+            self.hex and hasattr(self.hex, "hex_nudges") and cam in self.hex.hex_nudges
+        ):
             return 0.0, 0.0
-            
+
         nudges = self.hex.hex_nudges[cam]
-        
+
         # Determine the 3 hexes that share this vertex
         neighbors_map = {
-            0: [(q+1, r-1), (q+1, r)],
-            1: [(q, r-1), (q+1, r-1)],
-            2: [(q-1, r), (q, r-1)],
-            3: [(q-1, r+1), (q-1, r)],
-            4: [(q, r+1), (q-1, r+1)],
-            5: [(q+1, r), (q, r+1)],
+            0: [(q + 1, r - 1), (q + 1, r)],
+            1: [(q, r - 1), (q + 1, r - 1)],
+            2: [(q - 1, r), (q, r - 1)],
+            3: [(q - 1, r + 1), (q - 1, r)],
+            4: [(q, r + 1), (q - 1, r + 1)],
+            5: [(q + 1, r), (q, r + 1)],
         }
-        
+
         hexes_to_check = [(q, r)] + neighbors_map[vertex_index]
-        
+
         dx_sum = 0.0
         dy_sum = 0.0
         count = 0
-        
+
         for hq, hr in hexes_to_check:
             key = f"{hq},{hr}"
             if key in nudges:
@@ -390,7 +411,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                 dx_sum += dx
                 dy_sum += dy
                 count += 1
-                
+
         if count == 0:
             return 0.0, 0.0
         return dx_sum / count, dy_sum / count
@@ -399,33 +420,45 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         grid_poly = self.hex_at_axial(q, r, apply_affine=False)
 
         cam_poly = []
-        for i, pt in enumerate(grid_poly):    
+        for i, pt in enumerate(grid_poly):
             x, y = pt[0]
             converter = self.rsc.closestConverterToRealCoord(str(cam), (x, y))
             cx, cy = converter.convertRealToCameraSpace((x, y))
-            
+
             dx, dy = self.get_vertex_nudge(cam, q, r, i)
             cam_poly.append([int(round(cx + dx)), int(round(cy + dy))])
-            
+
         cam_poly = np.array(cam_poly, dtype=np.int32).reshape((-1, 1, 2))
         return cam_poly
 
     def _get_cameras_cache_key(self):
         key_parts = []
-        if hasattr(self, 'cameras') and self.cameras:
+        if hasattr(self, "cameras") and self.cameras:
             for cam_name, cam in sorted(self.cameras.items()):
-                az = getattr(cam, 'activeZone', None)
+                az = getattr(cam, "activeZone", None)
                 if az is None:
-                    az = getattr(cam, 'activeZonePolygon', None)
+                    az = getattr(cam, "activeZonePolygon", None)
                 if az is not None:
-                    key_parts.append((cam_name, az.tobytes() if hasattr(az, 'tobytes') else tuple(map(tuple, az))))
+                    key_parts.append(
+                        (
+                            cam_name,
+                            az.tobytes()
+                            if hasattr(az, "tobytes")
+                            else tuple(map(tuple, az)),
+                        )
+                    )
         return tuple(key_parts)
 
     def _get_base_minimap_cache_key(self):
         cameras_key = self._get_cameras_cache_key()
-        rsc_id = id(self.rsc) if getattr(self, 'rsc', None) is not None else None
-        hex_key = (self.hex.size, self.hex.rotation_deg, self.hex.anchor_xy) if getattr(self, 'hex', None) is not None else None
-        return (cameras_key, rsc_id, hex_key)
+        rsc_id = id(self.rsc) if getattr(self, "rsc", None) is not None else None
+        hex_key = (
+            (self.hex.size, self.hex.rotation_deg, self.hex.anchor_xy)
+            if getattr(self, "hex", None) is not None
+            else None
+        )
+        show_grid = getattr(self, "show_grid", True)
+        return (cameras_key, rsc_id, hex_key, show_grid)
 
     def objectToHull(self, obj):
         """
@@ -434,56 +467,56 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         contiguous concave hull. Falls back to camera contour convex hull for legacy objects.
         """
         cache_key = None
-        has_hex = getattr(self, 'hex', None) is not None
+        has_hex = getattr(self, "hex", None) is not None
         hex_size = self.hex.size if has_hex else None
         hex_rot = self.hex.rotation_deg if has_hex else None
         hex_offset = self.hex.offset_xy if has_hex else None
         hex_anchor = self.hex.anchor_xy if has_hex else None
 
-        if hasattr(obj, 'constituent_axials') and obj.constituent_axials:
+        if hasattr(obj, "constituent_axials") and obj.constituent_axials:
             cache_key = (
-                getattr(obj, 'oid', None),
+                getattr(obj, "oid", None),
                 "axial",
                 tuple(sorted(obj.constituent_axials)),
                 hex_size,
                 hex_rot,
                 hex_offset,
-                hex_anchor
+                hex_anchor,
             )
         else:
-            change_set = getattr(obj, 'changeSet', None)
+            change_set = getattr(obj, "changeSet", None)
             if change_set:
                 contours_info = []
                 for cam_name, change in sorted(change_set.items()):
-                    if change is not None and getattr(change, 'changeContours', None):
+                    if change is not None and getattr(change, "changeContours", None):
                         cnt_hashes = tuple(len(c) for c in change.changeContours)
                         contours_info.append((cam_name, cnt_hashes))
                 cache_key = (
-                    getattr(obj, 'oid', None),
+                    getattr(obj, "oid", None),
                     "legacy",
                     tuple(contours_info),
                     hex_size,
                     hex_rot,
                     hex_offset,
-                    hex_anchor
+                    hex_anchor,
                 )
 
         if cache_key is not None:
-            if not hasattr(self, '_object_hull_cache'):
+            if not hasattr(self, "_object_hull_cache"):
                 self._object_hull_cache = {}
             if cache_key in self._object_hull_cache:
                 return self._object_hull_cache[cache_key]
 
         # Actual calculation:
         hull = None
-        if hasattr(obj, 'constituent_axials') and obj.constituent_axials:
+        if hasattr(obj, "constituent_axials") and obj.constituent_axials:
             try:
                 # Generate exact map-space hex polygons for each constituent cell
                 polys = []
                 for q, r in obj.constituent_axials:
                     poly = self.hex_at_axial(q, r, apply_affine=True)
                     polys.append(np.round(poly).astype(np.int32).reshape((-1, 1, 2)))
-                
+
                 if not polys:
                     hull = np.array([], dtype=np.int32)
                 else:
@@ -491,9 +524,11 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                     dims = self.realspaceDimensions()
                     mask = np.zeros((dims[1], dims[0]), dtype=np.uint8)
                     cv2.fillPoly(mask, polys, 255)
-                    
+
                     # Extract the merged outer boundary
-                    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    contours, _ = cv2.findContours(
+                        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                    )
                     if contours:
                         # Return the largest contour (should be single unified shape)
                         hull = max(contours, key=cv2.contourArea)
@@ -505,15 +540,19 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         else:
             # Legacy fallback: use camera contours and Convex Hull
             all_points_real = []
-            rsc = getattr(self, 'rsc', None)
+            rsc = getattr(self, "rsc", None)
             try:
-                change_set = getattr(obj, 'changeSet', None)
+                change_set = getattr(obj, "changeSet", None)
                 if change_set:
                     for cam_name, change in sorted(change_set.items()):
-                        if rsc is None or cam_name not in rsc.converters or change is None:
+                        if (
+                            rsc is None
+                            or cam_name not in rsc.converters
+                            or change is None
+                        ):
                             continue
-                            
-                        change_contours = getattr(change, 'changeContours', None)
+
+                        change_contours = getattr(change, "changeContours", None)
                         if change_contours:
                             for contour in change_contours:
                                 for pt in contour:
@@ -521,34 +560,47 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                                         x, y = pt[0]
                                     else:
                                         x, y = pt
-                                        
+
                                     try:
                                         cx, cy = float(x), float(y)
                                         q, r = self.camCoordToAxial(cam_name, (cx, cy))
                                         dx, dy = 0, 0
-                                        if self.hex and hasattr(self.hex, 'hex_nudges') and cam_name in self.hex.hex_nudges:
+                                        if (
+                                            self.hex
+                                            and hasattr(self.hex, "hex_nudges")
+                                            and cam_name in self.hex.hex_nudges
+                                        ):
                                             nudge_key = f"{q},{r}"
-                                            if nudge_key in self.hex.hex_nudges[cam_name]:
-                                                dx, dy = self.hex.hex_nudges[cam_name][nudge_key]
+                                            if (
+                                                nudge_key
+                                                in self.hex.hex_nudges[cam_name]
+                                            ):
+                                                dx, dy = self.hex.hex_nudges[cam_name][
+                                                    nudge_key
+                                                ]
 
-                                        converter = rsc.closestConverterToCamCoord(cam_name, (cx, cy))
-                                        real_pt = converter.convertCameraToRealSpace((cx - dx, cy - dy))
+                                        converter = rsc.closestConverterToCamCoord(
+                                            cam_name, (cx, cy)
+                                        )
+                                        real_pt = converter.convertCameraToRealSpace(
+                                            (cx - dx, cy - dy)
+                                        )
                                         all_points_real.append(real_pt)
                                     except Exception:
                                         continue
-                            
+
                 if not all_points_real:
                     hull = np.array([], dtype=np.int32)
                 else:
                     pts_real = np.array(all_points_real, dtype=np.float32)
-                    if hasattr(self, 'apply_affine_pts'):
+                    if hasattr(self, "apply_affine_pts"):
                         pts_map = self.apply_affine_pts(pts_real)
                     else:
-                        pts_map = pts_real 
-                        
+                        pts_map = pts_real
+
                     pts_map_i = np.round(pts_map).astype(np.int32)
                     hull = cv2.convexHull(pts_map_i)
-                
+
             except Exception as e:
                 print(f"Error in legacy patched_objectToHull: {e}")
                 hull = np.array([], dtype=np.int32)
@@ -560,11 +612,11 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def realspaceDimensions(self):
         width = 1600
         height = 1600
-        if hasattr(self, 'hex') and self.hex:
+        if hasattr(self, "hex") and self.hex:
             width = self.hex.width
             height = self.hex.height
         return width, height
-    
+
     def buildCameraRealspaceContours(self):
         cameras = self.cameras
         true_real_contours = []
@@ -572,10 +624,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         width, height = self.realspaceDimensions()
         for cam_name, cam in cameras.items():
             az = cam.activeZone
-            
+
             if az is not None and len(az) > 0:
                 # These are in Camera Coordinates. Transform to Real Space.
-                if hasattr(self, 'rsc') and self.rsc is not None and cam_name in self.rsc.converters:
+                if (
+                    hasattr(self, "rsc")
+                    and self.rsc is not None
+                    and cam_name in self.rsc.converters
+                ):
                     # Convert polygon points
                     real_pts = []
                     rsc = self.rsc
@@ -584,12 +640,16 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                         x, y = 0, 0
                         try:
                             is_nested = False
-                            if hasattr(pt, 'shape'):
-                                 if len(pt.shape) > 1:
-                                     is_nested = True
-                            elif hasattr(pt, '__len__') and len(pt) == 1 and hasattr(pt[0], '__len__'):
-                                 is_nested = True
-                            
+                            if hasattr(pt, "shape"):
+                                if len(pt.shape) > 1:
+                                    is_nested = True
+                            elif (
+                                hasattr(pt, "__len__")
+                                and len(pt) == 1
+                                and hasattr(pt[0], "__len__")
+                            ):
+                                is_nested = True
+
                             if is_nested:
                                 x = float(pt[0][0])
                                 y = float(pt[0][1])
@@ -603,7 +663,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                         converter = rsc.closestConverterToCamCoord(cam_name, (x, y))
                         r_pt = converter.convertCameraToRealSpace((x, y))
                         real_pts.append(r_pt)
-                    
+
                     true_real_contours.append(np.array(real_pts, dtype=np.float32))
 
         # Calculate Global Bounding Box from these TRUE contours
@@ -612,37 +672,42 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
             # Use an un-offset affine matrix to determine raw mapped bounds safely
             M_no_offset = self.make_affine_2x3()
-            if hasattr(self, 'hex') and self.hex:
+            if hasattr(self, "hex") and self.hex:
                 M_no_offset[0, 2] -= self.hex.offset_xy[0]
                 M_no_offset[1, 2] -= self.hex.offset_xy[1]
-                
+
             x = all_pts[:, 0]
             y = all_pts[:, 1]
-            map_pts = np.stack([
-                M_no_offset[0, 0] * x + M_no_offset[0, 1] * y + M_no_offset[0, 2],
-                M_no_offset[1, 0] * x + M_no_offset[1, 1] * y + M_no_offset[1, 2]
-            ], axis=1)
-                
+            map_pts = np.stack(
+                [
+                    M_no_offset[0, 0] * x + M_no_offset[0, 1] * y + M_no_offset[0, 2],
+                    M_no_offset[1, 0] * x + M_no_offset[1, 1] * y + M_no_offset[1, 2],
+                ],
+                axis=1,
+            )
+
             min_x = float(np.min(map_pts[:, 0]))
             max_x = float(np.max(map_pts[:, 0]))
             min_y = float(np.min(map_pts[:, 1]))
             max_y = float(np.max(map_pts[:, 1]))
-            
+
             # Recalculate Shift & Dimensions based on map bounds
             shift_x = 0.0
             shift_y = 0.0
-            if min_x < 0: shift_x = -min_x
-            if min_y < 0: shift_y = -min_y
-            
+            if min_x < 0:
+                shift_x = -min_x
+            if min_y < 0:
+                shift_y = -min_y
+
             req_w = int(max_x - min_x) if min_x < 0 else int(max_x)
             req_h = int(max_y - min_y) if min_y < 0 else int(max_y)
 
             # Expand canvas dynamically but allow shrinking
             width = max(1600, req_w + 50)
             height = max(1600, req_h + 50)
-            
+
             # Update hex config (Critical for grid alignment)
-            if hasattr(self, 'hex') and self.hex:
+            if hasattr(self, "hex") and self.hex:
                 self.hex.width = width
                 self.hex.height = height
                 self.hex.offset_xy = (shift_x, shift_y)
@@ -656,14 +721,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             # Draw the Transformed Contours
             transformed_contours = []
             for pts_real in true_real_contours:
-                if hasattr(self, 'apply_affine_pts'):
+                if hasattr(self, "apply_affine_pts"):
                     pts_map = self.apply_affine_pts(pts_real)
                 else:
                     pts_map = pts_real
                     print("ERROR: apply_affine_pts not found!")
 
                 # Do NOT apply the shift again, apply_affine_pts inherently applies self.hex.offset_xy
-                    
+
                 cnt_map = np.round(pts_map).astype(np.int32).reshape(-1, 1, 2)
                 transformed_contours.append(cnt_map)
 
@@ -674,84 +739,103 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         # Draw Unified Boundary
 
         width, height = self.realspaceDimensions()
-        
+
         if len(transformed_contours) > 0:
             # Create a mask for the union of all active zones
             union_mask = np.zeros((height, width), dtype=np.uint8)
-            
+
             # Fill all contours on the mask
             cv2.drawContours(union_mask, transformed_contours, -1, 255, -1)
-            
+
             # Find the outer contour of the union
             # OpenCV 4.x returns (contours, hierarchy)
             # OpenCV 3.x returns (image, contours, hierarchy)
-            cnts_res = cv2.findContours(union_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
+            cnts_res = cv2.findContours(
+                union_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+
             if len(cnts_res) == 2:
                 union_cnts = cnts_res[0]
             else:
                 union_cnts = cnts_res[1]
-    
+
         return union_cnts
-        
-    
-    def buildMiniMap(self, objectsAndColors: list["MiniMapObject"] = None, hex_cfg = None):
+
+    def buildMiniMap(
+        self, objectsAndColors: list["MiniMapObject"] = None, hex_cfg=None
+    ):
         """
         Uses dynamic canvas size from HexGridConfiguration instead of hardcoded 1200.
         """
         if objectsAndColors is None:
             objectsAndColors = []
-            
+
         # Get base minimap cache key
         cache_key = self._get_base_minimap_cache_key()
-        
-        if (not hasattr(self, '_base_minimap_cache') or 
-            getattr(self, '_base_minimap_cache_key', None) != cache_key or 
-            self._base_minimap_cache is None):
-            
+
+        if (
+            not hasattr(self, "_base_minimap_cache")
+            or getattr(self, "_base_minimap_cache_key", None) != cache_key
+            or self._base_minimap_cache is None
+        ):
             # Recalculate camera contours and union
             dynamic_camera_contours = self.buildCameraRealspaceContours()
-            dynamic_union_contours = self.buildCameraRealspaceUnionContours(dynamic_camera_contours)
-            
+            dynamic_union_contours = self.buildCameraRealspaceUnionContours(
+                dynamic_camera_contours
+            )
+
             # Refresh width, height after bounds are recalculated
             width, height = self.realspaceDimensions()
-            
+
             # Generate base image with the grid overlay
-            base_image = self.draw_hex_grid_overlay(
-                np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
+            show_grid = getattr(self, "show_grid", True)
+            if show_grid:
+                base_image = self.draw_hex_grid_overlay(
+                    np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
+                )
+            else:
+                base_image = np.zeros([height, width, 3], dtype="uint8")
+
+            cv2.drawContours(
+                base_image, dynamic_camera_contours, -1, (125, 125, 125), 6
             )
-            
-            cv2.drawContours(base_image, dynamic_camera_contours, -1, (125, 125, 125), 6)
             cv2.drawContours(base_image, dynamic_union_contours, -1, (255, 255, 255), 4)
-            
+
             self._base_minimap_cache = base_image
             self._base_minimap_cache_key = cache_key
-            
+
         image = self._base_minimap_cache.copy()
-        
+
         drawnObjs = []
         # print(f"MiniMap: Rendering {len(objectsAndColors)} objects")
-        
+
         # We need shift_x and shift_y to shift object hulls
-        shift_x, shift_y = self.hex.offset_xy if (getattr(self, 'hex', None) is not None and hasattr(self.hex, 'offset_xy')) else (0, 0)
-        
+        shift_x, shift_y = (
+            self.hex.offset_xy
+            if (
+                getattr(self, "hex", None) is not None
+                and hasattr(self.hex, "offset_xy")
+            )
+            else (0, 0)
+        )
+
         for objAndColor in objectsAndColors[::-1]:
             obj = objAndColor.object
             color = objAndColor.color
             if obj in drawnObjs:
                 continue
             drawnObjs.append(obj)
-            
+
             try:
                 hull = self.objectToHull(obj)
                 if hull is not None and len(hull) > 0:
                     # Make a copy of the hull to avoid mutating the cached hull!
                     hull_shifted = hull.copy()
-                    
+
                     # Shift hull points
                     hull_shifted[:, 0, 0] += int(shift_x)
                     hull_shifted[:, 0, 1] += int(shift_y)
-                    
+
                     image = cv2.drawContours(image, [hull_shifted], -1, color, -1)
                 else:
                     print(f"MiniMap: Zero-area/Empty hull for object {obj}")
@@ -771,25 +855,24 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         """
         rsc = self.rsc
         if rsc is None:
-             print(f"DynamicGrid: RSC is None for {cam}")
-             return None
+            print(f"DynamicGrid: RSC is None for {cam}")
+            return None
 
         # Get camera frame size
         if cam not in self.cameras:
             print(f"DynamicGrid: Camera {cam} not found")
             return None
 
-            
         height, width = self.cameras[cam].mostRecentFrame.shape[:2]
         overlay = np.zeros((height, width, 3), dtype=np.uint8)
-        
+
         # Get converter for this camera
         if str(cam) not in rsc.converters:
             return None
-            
+
         # Define 4 corners of the camera frame
         corners_cam = [(0, 0), (width, 0), (width, height), (0, height)]
-        
+
         # Project to Real Space
         corners_real = []
         for p in corners_cam:
@@ -799,7 +882,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                 corners_real.append(rp)
             except Exception:
                 continue
-                
+
         if not corners_real:
             return None
 
@@ -810,14 +893,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             q, r = self.pixel_to_axial(cr[0], cr[1])
             qs.append(q)
             rs.append(r)
-            
+
         min_q, max_q = min(qs), max(qs)
         min_r, max_r = min(rs), max(rs)
-        
+
         # Add padding to ensure smooth edges
         pad = 2
         grid_color = (255, 255, 255)
-        
+
         # Iterate Q, R within bounds
         poly_count = 0
         for q in range(min_q - pad, max_q + pad + 1):
@@ -827,13 +910,13 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                     # cam_hex_at_axial(self, cam, q, r)
                     # This method maps real space hex (q,r) back to camera space using convertRealToCameraSpace
                     poly_cam = self.cam_hex_at_axial(cam, q, r)
-                    
+
                     # Draw
                     cv2.polylines(overlay, [poly_cam], True, grid_color, 3, cv2.LINE_AA)
                     poly_count += 1
                 except Exception:
                     continue
-                    
+
         if poly_count == 0:
             print(f"DynamicGrid: No polygons drawn for {cam}")
         else:
@@ -846,7 +929,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         overlays = getattr(self, "grid_overlays", {})
         if overlays:
             return overlays
-        self.grid_overlays = {cam: self.build_camera_grid_overlay(cam) for cam in self.cameras.keys()}
+        self.grid_overlays = {
+            cam: self.build_camera_grid_overlay(cam) for cam in self.cameras.keys()
+        }
         return self.grid_overlays
 
     def cameraGriddle(self, cam, objectsAndColors=None):
@@ -864,7 +949,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         # If no objects, use the dynamic grid for better quality/coverage
         if not objectsAndColors:
             return self.dynamicGrid[cam]
-        
+
         # Legacy/Object path (clipped to 1200x1200mm usually)
         # This path is still used if objects need to be drawn
         rsc = self.rsc
@@ -875,7 +960,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                 for converter in rsc.converters[cam]:
                     M = converter.M
                     Minv = np.linalg.inv(M)
-    
+
                     w_part = cv2.warpPerspective(
                         minimap,
                         Minv,
@@ -898,7 +983,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             return {}
 
         for cam in self.cameras.keys():
-            cameraChanges = self.cameras[cam].cropToActiveZone(self.cameras[cam].mostRecentFrame.copy())
+            cameraChanges = self.cameras[cam].cropToActiveZone(
+                self.cameras[cam].mostRecentFrame.copy()
+            )
             w, h = cameraChanges.shape[:2]
             warped = np.zeros((h, w, 3), dtype="uint8")
             for converter in self.rsc.converters[cam]:
@@ -915,7 +1002,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                     borderValue=(0, 0, 0),
                 )
                 warped = np.maximum(warped, w_part)
-            blended[cam] = self.cameras[cam].cropToActiveZone(cv2.addWeighted(warped[:w, :h], alpha, cameraChanges, 1.0 - alpha, 0.0))
+            blended[cam] = self.cameras[cam].cropToActiveZone(
+                cv2.addWeighted(warped[:w, :h], alpha, cameraChanges, 1.0 - alpha, 0.0)
+            )
         return blended
 
     def axialDistanceBetweenObjects(self, changeSetA, changeSetB):
@@ -936,14 +1025,20 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         for cam in self.cameras.keys():
             center_real = self.axial_to_pixel(q, r)
             converter = rsc.closestConverterToRealCoord(cam, center_real)
-            cam_poly = np.array([[int(d) for d in converter.convertRealToCameraSpace(p[0])] for p in realSpacePoly], dtype="int32")
+            cam_poly = np.array(
+                [
+                    [int(d) for d in converter.convertRealToCameraSpace(p[0])]
+                    for p in realSpacePoly
+                ],
+                dtype="int32",
+            )
             changeSet[cam] = CameraChange(
                 camName=cam,
                 changeContours=[cam_poly.reshape((-1, 1, 2))],
                 before=self.cameras[cam].mostRecentFrame,
                 after=self.cameras[cam].mostRecentFrame,
-                changeType = "add",
-                lastChange = None,
+                changeType="add",
+                lastChange=None,
             )
 
         obj = TrackedObject(oid=oid, changeSet=changeSet)
@@ -969,15 +1064,21 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             mask = np.zeros((H, W), dtype=np.uint8)
 
             # 1) Project each axial hex to camera space and fill it into the mask
-            for (q, r) in axials:
-                real_hex = self.hex_at_axial(q, r, apply_affine=False)  # iterable of points, often (6,1,2) or (6,2)
-                
+            for q, r in axials:
+                real_hex = self.hex_at_axial(
+                    q, r, apply_affine=False
+                )  # iterable of points, often (6,1,2) or (6,2)
+
                 center_real = self.axial_to_pixel(q, r)
                 conv = rsc.closestConverterToRealCoord(cam, center_real)
 
                 cam_pts = []
                 for p in real_hex:
-                    p = p[0] if (hasattr(p, "__len__") and len(p) == 1 and len(p[0]) == 2) else p
+                    p = (
+                        p[0]
+                        if (hasattr(p, "__len__") and len(p) == 1 and len(p[0]) == 2)
+                        else p
+                    )
                     px, py = conv.convertRealToCameraSpace((p[0], p[1]))
                     cam_pts.append([int(round(px)), int(round(py))])
 
@@ -986,7 +1087,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
             # 2) Extract contours with hierarchy so holes are preserved
             # RETR_CCOMP gives a two-level hierarchy: outer contours + hole contours.
-            contours, hierarchy = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+            contours, hierarchy = cv2.findContours(
+                mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
+            )
 
             if not contours:
                 # No pixels filled (maybe all projected off-frame)
@@ -1018,14 +1121,21 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
 
 
 if __name__ == "__main__":
-    import matplotlib.pyplot as plt 
+    import matplotlib.pyplot as plt
+
     hc = HexCaptureConfiguration()
     hc.hex = HexGridConfiguration()
     co = CalibratedObserver(hc)
     co.cycle()
-    plt.imshow(co.buildMiniMap(objectsAndColors=[MiniMapObject(mem, (255, 0, 0)) for mem in co.memory]))
+    plt.imshow(
+        co.buildMiniMap(
+            objectsAndColors=[MiniMapObject(mem, (255, 0, 0)) for mem in co.memory]
+        )
+    )
     plt.show()
-    img = hc.griddleCameras(objectsAndColors=[MiniMapObject(mem, (255, 0, 0)) for mem in co.memory])['0']
+    img = hc.griddleCameras(
+        objectsAndColors=[MiniMapObject(mem, (255, 0, 0)) for mem in co.memory]
+    )["0"]
     plt.imshow(img)
 
     try:
@@ -1035,7 +1145,3 @@ if __name__ == "__main__":
 
 
 # In[ ]:
-
-
-
-

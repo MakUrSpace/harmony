@@ -22,7 +22,18 @@ import cv2
 # In[3]:
 
 
-from observer.Observer import Observer, CaptureConfiguration, CameraChange, Camera, hStackImages, vStackImages, ChangeSet, TrackedObject, Transition, clipImage
+from observer.Observer import (
+    Observer,
+    CaptureConfiguration,
+    CameraChange,
+    Camera,
+    hStackImages,
+    vStackImages,
+    ChangeSet,
+    TrackedObject,
+    Transition,
+    clipImage,
+)
 
 
 # In[4]:
@@ -30,8 +41,10 @@ from observer.Observer import Observer, CaptureConfiguration, CameraChange, Came
 
 def distanceFormula(pt0, pt1):
     if len(pt0) != len(pt1):
-        raise Exception(f"Cannot compute distance for dimensions: {len(pt0)} vs. {len(pt1)}")
-    return sum([(pt1[i] - pt0[i])**2 for i in range(len(pt0))]) ** 0.5
+        raise Exception(
+            f"Cannot compute distance for dimensions: {len(pt0)} vs. {len(pt1)}"
+        )
+    return sum([(pt1[i] - pt0[i]) ** 2 for i in range(len(pt0))]) ** 0.5
 
 
 def scale_contour(contour, scale_factor):
@@ -70,6 +83,7 @@ def order_points_clockwise(camPts, realPts):
     order = np.argsort(angles)
     return camPts[order], realPts[order]
 
+
 # In[5]:
 
 
@@ -83,7 +97,7 @@ class CameraRealSpaceConverter:
     def __post_init__(self):
         self.camTriPts = np.array(self.camTriPts)
         self.realTriPts = np.array(self.realTriPts)
-        
+
         if len(self.camTriPts) == 3:
             self.camRect = self.triangleToSquare(self.camTriPts)
             self.realRect = self.triangleToSquare(self.realTriPts)
@@ -94,7 +108,7 @@ class CameraRealSpaceConverter:
             self.camRect = np.float32(camPts)
             self.realRect = np.float32(realPts)
             self.tuneToCalibrationBox(self.camRect, self.realRect)
-        else: # >= 5 points
+        else:  # >= 5 points
             camPts, realPts = order_points_clockwise(self.camTriPts, self.realTriPts)
             self.camRect = np.float32(camPts)
             self.realRect = np.float32(realPts)
@@ -119,7 +133,7 @@ class CameraRealSpaceConverter:
         duv = u[0] * v[0] + u[1] * v[1]
         mu = (u[0] ** 2 + u[1] ** 2) ** 0.5
         mv = (v[0] ** 2 + v[1] ** 2) ** 0.5
-        return degrees(acos( duv / (mu * mv) ))
+        return degrees(acos(duv / (mu * mv)))
 
     @classmethod
     def triangleToSquare(cls, triPts):
@@ -135,12 +149,29 @@ class CameraRealSpaceConverter:
                 raise
             angles[idx] = cls.getAngle(pt, *otherPts)
 
-        ptA_ninety = triPts[sorted([(key, abs(90 - angle)) for key, angle in angles.items()], key=lambda x: x[1])[0][0]]
-        ptB_sixty = triPts[sorted([(key, abs(60 - angle)) for key, angle in angles.items()], key=lambda x: x[1])[0][0]]
-        ptD_thirty = triPts[sorted([(key, abs(30 - angle)) for key, angle in angles.items()], key=lambda x: x[1])[0][0]]
+        ptA_ninety = triPts[
+            sorted(
+                [(key, abs(90 - angle)) for key, angle in angles.items()],
+                key=lambda x: x[1],
+            )[0][0]
+        ]
+        ptB_sixty = triPts[
+            sorted(
+                [(key, abs(60 - angle)) for key, angle in angles.items()],
+                key=lambda x: x[1],
+            )[0][0]
+        ]
+        ptD_thirty = triPts[
+            sorted(
+                [(key, abs(30 - angle)) for key, angle in angles.items()],
+                key=lambda x: x[1],
+            )[0][0]
+        ]
 
         ninetyThirtyDiff = [d1 - d0 for d1, d0 in zip(ptD_thirty, ptA_ninety)]
-        ptC_projected = np.float32([pt + d for pt, d in zip(ptB_sixty, ninetyThirtyDiff)])
+        ptC_projected = np.float32(
+            [pt + d for pt, d in zip(ptB_sixty, ninetyThirtyDiff)]
+        )
 
         squarePts = np.float32([ptA_ninety, ptB_sixty, ptC_projected, ptD_thirty])
         return squarePts
@@ -149,24 +180,38 @@ class CameraRealSpaceConverter:
         self.M = cv2.getPerspectiveTransform(cameraRectangle, realRectangle)
 
     def convertCameraToRealSpace(self, p):
-        assert not (self.M is None), "Must calibrate camera before converting coordinates"
+        assert not (self.M is None), (
+            "Must calibrate camera before converting coordinates"
+        )
         M = self.M
-        px = (M[0][0]*p[0] + M[0][1]*p[1] + M[0][2]) / ((M[2][0]*p[0] + M[2][1]*p[1] + M[2][2]))
-        py = (M[1][0]*p[0] + M[1][1]*p[1] + M[1][2]) / ((M[2][0]*p[0] + M[2][1]*p[1] + M[2][2]))
+        px = (M[0][0] * p[0] + M[0][1] * p[1] + M[0][2]) / (
+            M[2][0] * p[0] + M[2][1] * p[1] + M[2][2]
+        )
+        py = (M[1][0] * p[0] + M[1][1] * p[1] + M[1][2]) / (
+            M[2][0] * p[0] + M[2][1] * p[1] + M[2][2]
+        )
         return (px, py)
 
     def convertRealToCameraSpace(self, p):
-        assert not (self.M is None), "Must calibrate camera before converting coordinates"
+        assert not (self.M is None), (
+            "Must calibrate camera before converting coordinates"
+        )
         # Compute the inverse of the perspective transform matrix
         M_inv = np.linalg.inv(self.M)
 
         # Apply the transformation
-        px = (M_inv[0][0] * p[0] + M_inv[0][1] * p[1] + M_inv[0][2]) / (M_inv[2][0] * p[0] + M_inv[2][1] * p[1] + M_inv[2][2])
-        py = (M_inv[1][0] * p[0] + M_inv[1][1] * p[1] + M_inv[1][2]) / (M_inv[2][0] * p[0] + M_inv[2][1] * p[1] + M_inv[2][2])
-        return (px, py)   
+        px = (M_inv[0][0] * p[0] + M_inv[0][1] * p[1] + M_inv[0][2]) / (
+            M_inv[2][0] * p[0] + M_inv[2][1] * p[1] + M_inv[2][2]
+        )
+        py = (M_inv[1][0] * p[0] + M_inv[1][1] * p[1] + M_inv[1][2]) / (
+            M_inv[2][0] * p[0] + M_inv[2][1] * p[1] + M_inv[2][2]
+        )
+        return (px, py)
 
     def showUnwarpedImage(self, cam):
-        warp = cv2.warpPerspective(cam.cropToActiveZone(cam.mostRecentFrame), self.M, (1200, 1200))
+        warp = cv2.warpPerspective(
+            cam.cropToActiveZone(cam.mostRecentFrame), self.M, (1200, 1200)
+        )
         return warp
 
 
@@ -174,13 +219,15 @@ class CameraRealSpaceConverter:
 
 
 class RealSpaceConverter:
-    def __init__(self,  realCamSpacePairs: dict):
+    def __init__(self, realCamSpacePairs: dict):
         self.realCamSpacePairs = realCamSpacePairs
         #  {camName: [[camSpaceTriPts, realSpaceTriPts], ...], ...}
         self.converters = defaultdict(list)
         for camName, coordPairs in self.realCamSpacePairs:
             camSpaceTriPts, realSpaceTriPts = coordPairs[:2]
-            converter = CameraRealSpaceConverter(camName, camSpaceTriPts, realSpaceTriPts)
+            converter = CameraRealSpaceConverter(
+                camName, camSpaceTriPts, realSpaceTriPts
+            )
             self.converters[camName].append(converter)
 
     def closestConverterToCamCoord(self, camName, camCoord):
@@ -214,9 +261,11 @@ class RealSpaceConverter:
         return closest.convertRealToCameraSpace(realCoord)
 
     def changeSetCenterPoints(self, changeSet: ChangeSet):
-        return {cN: self.camCoordToRealSpace(cN, change.center)
-                for cN, change in changeSet.changeSet.items()
-                if change is not None and change.changeType not in ["delete", None]}
+        return {
+            cN: self.camCoordToRealSpace(cN, change.center)
+            for cN, change in changeSet.changeSet.items()
+            if change is not None and change.changeType not in ["delete", None]
+        }
 
     def changeSetToRealCenter(self, changeSet: ChangeSet):
         centerPoints = list(self.changeSetCenterPoints(changeSet).values())
@@ -224,6 +273,7 @@ class RealSpaceConverter:
             xS, yS = zip(*centerPoints)
         except Exception:
             from traceback import format_exc
+
             print(f"Failed to find Real Center for: {changeSet}")
             print(format_exc())
             raise
@@ -233,10 +283,14 @@ class RealSpaceConverter:
 
         medDists = []
         for idx, ctrPt in enumerate(centerPoints):
-            distances = [distanceFormula(ctrPt, centerPoints[i]) for i in range(len(centerPoints)) if i != idx]
+            distances = [
+                distanceFormula(ctrPt, centerPoints[i])
+                for i in range(len(centerPoints))
+                if i != idx
+            ]
             medDists.append(sorted(distances)[int(len(distances) / 2)])
 
-        weights = [1/max(1, md) for md in medDists]
+        weights = [1 / max(1, md) for md in medDists]
         avgX = sum([x * w for x, w in zip(xS, weights)]) / sum(weights)
         avgY = sum([y * w for y, w in zip(yS, weights)]) / sum(weights)
         return avgX, avgY
@@ -244,8 +298,10 @@ class RealSpaceConverter:
     def changeSetCenterDeltas(self, changeSet: ChangeSet):
         centerPoints = self.changeSetCenterPoints(changeSet)
         center = self.changeSetToRealCenter(changeSet)
-        return {cN: [d0 - d1 for d0, d1 in zip(center, camCenter)]
-                for cN, camCenter in centerPoints.items()}
+        return {
+            cN: [d0 - d1 for d0, d1 in zip(center, camCenter)]
+            for cN, camCenter in centerPoints.items()
+        }
 
     def changeSetWithinSameRealSpace(self, changeSet: ChangeSet, tolerance=30):
         centerDeltas = self.changeSetCenterDeltas(changeSet)
@@ -274,12 +330,16 @@ class RealSpaceConverter:
         for camName, camConverters in self.converters.items():
             cam = cameras[camName]
             for converter in camConverters:
-                warp = cv2.warpPerspective(cam.cropToActiveZone(cam.mostRecentFrame), converter.M, (1200, 1200))
+                warp = cv2.warpPerspective(
+                    cam.cropToActiveZone(cam.mostRecentFrame), converter.M, (1200, 1200)
+                )
                 warp = cv2.cvtColor(warp, cv2.COLOR_BGR2GRAY)
                 warps.append(warp)
         avg_im = sum([warp * (1 / len(warps)) for warp in warps]).astype("uint8")
         avg_im = cv2.threshold(avg_im, 64, 255, cv2.THRESH_BINARY)[1]
-        realSpaceContour = cv2.findContours(avg_im, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+        realSpaceContour = cv2.findContours(
+            avg_im, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )[0]
         return realSpaceContour
 
     def cameraRealSpaceOverlap(self, cameras, out_size=(1200, 1200)):
@@ -301,11 +361,7 @@ class RealSpaceConverter:
             cv2.fillPoly(frame, [pts], 255)
 
             for converter in camConverters:
-                warp = cv2.warpPerspective(
-                    frame,
-                    converter.M,
-                    out_size
-                )
+                warp = cv2.warpPerspective(frame, converter.M, out_size)
                 warps.append(warp)
 
         if not warps:
@@ -313,30 +369,26 @@ class RealSpaceConverter:
 
         # --- max-sum union of warped masks ---
         # sum first (uint16 to avoid overflow), then clamp
-        summed = np.sum(
-            np.stack(warps, axis=0).astype(np.uint16),
-            axis=0
-        )
+        summed = np.sum(np.stack(warps, axis=0).astype(np.uint16), axis=0)
         union = np.clip(summed, 0, 255).astype(np.uint8)
 
         # --- binarize + extract contour ---
         _, union = cv2.threshold(union, 1, 255, cv2.THRESH_BINARY)
 
         contours, _ = cv2.findContours(
-            union,
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE
+            union, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
         return contours
-
 
     def unwarpedOverlaidCameras(self, cameras):
         im = None
         for camName, camConverters in self.converters.items():
             cam = cameras[camName]
             for converter in camConverters:
-                warp = cv2.warpPerspective(cam.cropToActiveZone(cam.mostRecentFrame), converter.M, (1200, 1200))
+                warp = cv2.warpPerspective(
+                    cam.cropToActiveZone(cam.mostRecentFrame), converter.M, (1200, 1200)
+                )
                 im = warp if im is None else cv2.addWeighted(im, 0.6, warp, 0.3, 0)
         return im
 
@@ -361,7 +413,10 @@ class CalibrationObserver(Observer):
         expectedCams = list(self.cc.cameras.keys())
 
         transition = self.first_triangle
-        self.next_triangle = [[d0 + d1 for d0, d1 in zip(tri, trans)] for tri, trans in zip(self.next_triangle, transition)]
+        self.next_triangle = [
+            [d0 + d1 for d0, d1 in zip(tri, trans)]
+            for tri, trans in zip(self.next_triangle, transition)
+        ]
         realTriPts = self.next_triangle
 
         calibTriPts = {}
@@ -369,17 +424,25 @@ class CalibrationObserver(Observer):
             if camName not in expectedCams:
                 continue
             calibContour = change.changeContours[0]
-            polyPoints = cv2.approxPolyDP(calibContour, 0.053 * cv2.arcLength(calibContour, True), True)
-            assert len(polyPoints) == 3, f"Failed to find triangle for {camName} at CalibPt {calibPtLoc}. Found {len(polyPoints)} points"
+            polyPoints = cv2.approxPolyDP(
+                calibContour, 0.053 * cv2.arcLength(calibContour, True), True
+            )
+            assert len(polyPoints) == 3, (
+                f"Failed to find triangle for {camName} at CalibPt {calibPtLoc}. Found {len(polyPoints)} points"
+            )
             calibTriPts[camName] = [[pt[0] for pt in polyPoints], realTriPts]
         print(f"Storing calibration point {calibPtLoc}")
         calibObj.calibTriPts = calibTriPts
         self.calibrationPts.append(calibTriPts)
 
     def buildRealSpaceConverter(self):
-        self.cc.rsc = RealSpaceConverter([cNCoordPair 
-                                          for cPtGrp in self.calibrationPts
-                                          for cNCoordPair in list(cPtGrp.items())])
+        self.cc.rsc = RealSpaceConverter(
+            [
+                cNCoordPair
+                for cPtGrp in self.calibrationPts
+                for cNCoordPair in list(cPtGrp.items())
+            ]
+        )
 
 
 @dataclass
@@ -392,21 +455,25 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
     def buildConfiguration(self):
         config = super().buildConfiguration()
         if self.rsc is not None:
+
             def sanitize_recursive(obj):
                 if isinstance(obj, np.ndarray):
                     return sanitize_recursive(obj.tolist())
                 if isinstance(obj, (list, tuple)):
                     return [sanitize_recursive(x) for x in obj]
-                if hasattr(obj, 'item'):
+                if hasattr(obj, "item"):
                     return obj.item()
                 return obj
 
-            config['rsc'] = []
+            config["rsc"] = []
             for cN, coordList in self.rsc.realCamSpacePairs:
-                entry = [sanitize_recursive(coordList[0]), sanitize_recursive(coordList[1])]
+                entry = [
+                    sanitize_recursive(coordList[0]),
+                    sanitize_recursive(coordList[1]),
+                ]
                 if len(coordList) > 2:
                     entry.append(sanitize_recursive(coordList[2]))
-                config['rsc'].append([cN, entry])
+                config["rsc"].append([cN, entry])
         return config
 
     def loadConfiguration(self, path="observerConfiguration.json"):
@@ -419,14 +486,15 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
         if self.rsc is not None:
             self.rsc = [
                 [cN, [[np.array(pt, dtype="int32") for pt in cL] for cL in coordList]]
-                for cN, coordList in self.rsc]
+                for cN, coordList in self.rsc
+            ]
             self.rsc = RealSpaceConverter(self.rsc)
             self.realSpaceContours = self.rsc.cameraRealSpaceOverlap(self.cameras)
-            
+
             # Calculate _realSpaceBoundingBox once
             x, y, w, h = 1200, 1200, 1, 1
             if not self.realSpaceContours:
-                 self._realSpaceBoundingBox = (0, 0, 1200, 1200)
+                self._realSpaceBoundingBox = (0, 0, 1200, 1200)
             else:
                 for contour in self.realSpaceContours:
                     cbX, cbY, cbW, cbH = cv2.boundingRect(contour)
@@ -445,13 +513,17 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
         assert self.rsc is not None, "Calibration information needed"
         newContour = {}
         for camName, cS in obj.changeSet.items():
-            if cS.changeType not in ['add', 'move']:
+            if cS.changeType not in ["add", "move"]:
                 continue
             for cnt in cS.changeContours:
-                realSpaceConverter = self.rsc.closestConverterToCamCoord(camName, cnt[0][0])
+                realSpaceConverter = self.rsc.closestConverterToCamCoord(
+                    camName, cnt[0][0]
+                )
                 converted = []
                 for pt in cnt:
-                    converted.append([realSpaceConverter.convertCameraToRealSpace(pt[0])])
+                    converted.append(
+                        [realSpaceConverter.convertCameraToRealSpace(pt[0])]
+                    )
             newContour[camName] = np.array([converted], dtype="int32")
 
         contourBase = np.zeros([1200, 1200], dtype="uint8")
@@ -466,8 +538,12 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
                 if contourOverlap is None:
                     contourOverlap = shiftedFilledContour
                 else:
-                    contourOverlap = cv2.bitwise_or(contourOverlap, shiftedFilledContour)
-        contours, _ = cv2.findContours(contourOverlap, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    contourOverlap = cv2.bitwise_or(
+                        contourOverlap, shiftedFilledContour
+                    )
+        contours, _ = cv2.findContours(
+            contourOverlap, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
         return contours[-1]
 
     def realSpaceBoundingBox(self):
@@ -482,9 +558,9 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
         cv2.drawContours(image, self.realSpaceContours, -1, (125, 125, 125), 2)
 
         if len(objectsAndColors) == 0:
-            return image[y:y+h, x:x+w]
+            return image[y : y + h, x : x + w]
         drawnObjs = []
-        
+
         for objAndColor in objectsAndColors[::-1]:
             obj = objAndColor.object
             color = objAndColor.color
@@ -493,10 +569,15 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
             drawnObjs.append(obj)
             hull = self.objectToHull(obj)
             image = cv2.drawContours(image, [hull], -1, color, -1)
-        return image[y:y+h, x:x+w]
+        return image[y : y + h, x : x + w]
 
-    def line_of_sight(self, objectA: TrackedObject, objectB: TrackedObject, allObjects: list[TrackedObject]):
-        """ Determines if there is a clear line of sight between objectA and objectB. """
+    def line_of_sight(
+        self,
+        objectA: TrackedObject,
+        objectB: TrackedObject,
+        allObjects: list[TrackedObject],
+    ):
+        """Determines if there is a clear line of sight between objectA and objectB."""
         # 1) Compute the convex hull containing both objects
         points = []
 
@@ -516,7 +597,9 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
                 continue  # Skip the two main objects
             hull = self.objectToHull(obj)
             hull = scale_contour(hull, 1.2)
-            mask = cv2.drawContours(mask, [hull], -1, 0, thickness=-1)  # Subtract objects by filling them black
+            mask = cv2.drawContours(
+                mask, [hull], -1, 0, thickness=-1
+            )  # Subtract objects by filling them black
 
         # 3) Count the remaining objects within the hull
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -530,18 +613,26 @@ class CalibratedObserver(Observer):
         super().__init__(config)
 
     def distinct_colors(self, n=15, new=False):
-        """ Generate n distinct colors that stand out against brown. """
+        """Generate n distinct colors that stand out against brown."""
         if not new and n > 0 and len(getattr(self, "_colors", {n: []})[n]) == n:
             return self._colors[n]
         colors = set()
         contrast_colors = [(139, 69, 19), (204, 100, 2), (0, 255, 0)]
-        calc_contrast = lambda r, g, b, bg: abs(r - bg[0]) + abs(g - bg[1]) + abs(b - bg[2])
+        calc_contrast = (
+            lambda r, g, b, bg: abs(r - bg[0]) + abs(g - bg[1]) + abs(b - bg[2])
+        )
         while len(colors) < n:
             color = None
             for i in range(100):
-                r, g, b = (random.randint(50, 230) for _ in range(3))  # Exclude near black/white
-                contrasts = [calc_contrast(r, g, b, c) for c in contrast_colors + list(colors)]
-                if sum([contrast > 200 for contrast in contrasts]) >= len(contrast_colors + list(colors)):  # Ensure high contrast
+                r, g, b = (
+                    random.randint(50, 230) for _ in range(3)
+                )  # Exclude near black/white
+                contrasts = [
+                    calc_contrast(r, g, b, c) for c in contrast_colors + list(colors)
+                ]
+                if sum([contrast > 200 for contrast in contrasts]) >= len(
+                    contrast_colors + list(colors)
+                ):  # Ensure high contrast
                     color = (r, g, b)
                     break
             if color is None:
@@ -553,12 +644,11 @@ class CalibratedObserver(Observer):
 
     @property
     def objectsAndColors(self):
-        memColors = {mem.oid: color for mem, color in zip(self.memory, self.distinct_colors(len(self.memory)))}
-        return [
-            MiniMapObject(
-                mem,
-                memColors[mem.oid]
-            ) for mem in self.memory]
+        memColors = {
+            mem.oid: color
+            for mem, color in zip(self.memory, self.distinct_colors(len(self.memory)))
+        }
+        return [MiniMapObject(mem, memColors[mem.oid]) for mem in self.memory]
 
     def buildMiniMap(self, objectsAndColors=None):
         return self.cc.buildMiniMap(objectsAndColors=objectsAndColors or [])
@@ -568,7 +658,11 @@ class CalibratedObserver(Observer):
         if changeSet.empty:
             return np.zeros([10, 10], dtype="float32")
 
-        images = {cam: change.after for cam, change in changeSet.changeSet.items() if change.changeType not in ["delete", None]}
+        images = {
+            cam: change.after
+            for cam, change in changeSet.changeSet.items()
+            if change.changeType not in ["delete", None]
+        }
         # # Add snippet of object from MiniMap
         # miniMap = self.buildMiniMap()
         # hull = self.cc.objectToHull(changeSet)
@@ -576,7 +670,7 @@ class CalibratedObserver(Observer):
 
         # images['minimap'] = miniMap[mmcb_y: mmcb_y + mmcb_h, mmcb_x: mmcb_x + mmcb_w]
 
-        maxHeight =  max([im.shape[0] + margin * 2 for im in images.values()])
+        maxHeight = max([im.shape[0] + margin * 2 for im in images.values()])
         filler = np.zeros((maxHeight, 50, 3), np.uint8)
 
         margins = [-margin, -margin, margin * 2, margin * 2]
@@ -586,23 +680,27 @@ class CalibratedObserver(Observer):
                 images[camName] = filler
             else:
                 if withContours:
-                    images[camName] = clipImage(cv2.addWeighted(
+                    images[camName] = clipImage(
+                        cv2.addWeighted(
                             cameras[camName].mostRecentFrame.copy(),
                             0.6,
                             cv2.drawContours(
                                 cameras[camName].mostRecentFrame.copy(),
-                                change.changeContours, 
+                                change.changeContours,
                                 -1,
                                 (255, 0, 0),
-                                -1
+                                -1,
                             ),
                             0.4,
-                            0
+                            0,
                         ),
-                        [dim + m for dim, m in zip(change.clipBox, margins)]
+                        [dim + m for dim, m in zip(change.clipBox, margins)],
                     )
                 else:
-                    images[camName] = clipImage(self.cc.cameras[camName].mostRecentFrame.copy(), [dim + m for dim, m in zip(change.clipBox, margins)])
+                    images[camName] = clipImage(
+                        self.cc.cameras[camName].mostRecentFrame.copy(),
+                        [dim + m for dim, m in zip(change.clipBox, margins)],
+                    )
 
         return hStackImages(images.values())
 
@@ -617,10 +715,15 @@ class CalibratedObserver(Observer):
         :return: OpenCV contour (NumPy array of shape (N, 1, 2)).
         """
         x, y = center
-        angles = np.linspace(0, 2 * np.pi, num_points, endpoint=False)  # Evenly spaced angles
-        contour = np.array([[
-            [int(x + radius * np.cos(theta)), int(y + radius * np.sin(theta))]
-        ] for theta in angles], dtype=np.int32)
+        angles = np.linspace(
+            0, 2 * np.pi, num_points, endpoint=False
+        )  # Evenly spaced angles
+        contour = np.array(
+            [
+                [[int(x + radius * np.cos(theta)), int(y + radius * np.sin(theta))]]
+                for theta in angles
+            ],
+            dtype=np.int32,
+        )
 
         return contour
-

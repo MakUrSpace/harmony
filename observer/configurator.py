@@ -8,14 +8,23 @@ from typing import Optional
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Request, Response, Form, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse, JSONResponse
+from fastapi.responses import (
+    HTMLResponse,
+    StreamingResponse,
+    RedirectResponse,
+    JSONResponse,
+)
 
 from observer.Observer import RemoteCamera, RTSPCamera
-from observer.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver, distanceFormula
+from observer.CalibratedObserver import (
+    CalibratedCaptureConfiguration,
+    CalibrationObserver,
+    distanceFormula,
+)
 from observer.HexObserver import HexGridConfiguration
 
 
-configurator = APIRouter(prefix='/configurator', tags=['configurator'])
+configurator = APIRouter(prefix="/configurator", tags=["configurator"])
 
 
 def buildConfigurator(request: Request):
@@ -25,7 +34,7 @@ def buildConfigurator(request: Request):
     # Inject camera names for JS
     cameraNames = list(cc.cameras.keys())
     cameraNamesJson = json.dumps(cameraNames)
-    
+
     for cam in cc.cameras.values():
         if cam is None:
             continue
@@ -95,8 +104,8 @@ def buildConfigurator(request: Request):
     # Fix for Table Population on Load:
     # app.cm.calibrationPts isn't persisted, but app.cc.rsc is.
     # If table is empty but we have calibration, reconstruct it for display.
-    calibrationPts = getattr(cm, 'calibrationPts', [])
-    if not calibrationPts and hasattr(cc, 'rsc') and cc.rsc is not None:
+    calibrationPts = getattr(cm, "calibrationPts", [])
+    if not calibrationPts and hasattr(cc, "rsc") and cc.rsc is not None:
         reconstructed = []
         try:
             # cc.rsc.realCamSpacePairs is [(camName, coordList), ...]
@@ -107,16 +116,19 @@ def buildConfigurator(request: Request):
                         return to_list_recursive(obj.tolist())
                     if isinstance(obj, (list, tuple)):
                         return [to_list_recursive(x) for x in obj]
-                    if hasattr(obj, 'item'):
+                    if hasattr(obj, "item"):
                         return obj.item()
                     return obj
 
-                rec_entry_coords = [to_list_recursive(coordList[0]), to_list_recursive(coordList[1])]
+                rec_entry_coords = [
+                    to_list_recursive(coordList[0]),
+                    to_list_recursive(coordList[1]),
+                ]
                 if len(coordList) > 2:
                     rec_entry_coords.append(to_list_recursive(coordList[2]))
                 rec_entry = {cN: rec_entry_coords}
                 reconstructed.append(rec_entry)
-            
+
             cm.calibrationPts = reconstructed
             calibrationPts = cm.calibrationPts
         except Exception as e:
@@ -125,37 +137,41 @@ def buildConfigurator(request: Request):
     calibrationPtsJson = json.dumps(calibrationPts)
 
     hex_nudges = {}
-    if hasattr(cc, 'hex') and hasattr(cc.hex, 'hex_nudges') and isinstance(cc.hex.hex_nudges, dict):
+    if (
+        hasattr(cc, "hex")
+        and hasattr(cc.hex, "hex_nudges")
+        and isinstance(cc.hex.hex_nudges, dict)
+    ):
         hex_nudges = cc.hex.hex_nudges
     hex_nudges_json = json.dumps(hex_nudges)
 
     with open(f"{os.path.dirname(__file__)}/templates/Configurator.html") as f:
         template = f.read()
-    
-    showGridChecked = "checked" if getattr(cc, 'show_grid', True) else ""
-    showObjectsChecked = "checked" if getattr(cc, 'show_objects', True) else ""
 
-    return template.replace(
-        "{configuratorURL}", "/configurator/").replace(
-        "{cameraConfigRows}", "\n".join(cameraConfigRows)).replace(
-        "{size}", str(cc.hex.size)).replace(
-        "__CAMERA_NAMES_JSON__", cameraNamesJson).replace(
-        "__CALIBRATION_PTS_JSON__", calibrationPtsJson).replace(
-        "__NUDGES_JSON__", hex_nudges_json).replace(
-        "{calibratorURL}", "/configurator/").replace(
-        "{showGridChecked}", showGridChecked).replace(
-        "{showObjectsChecked}", showObjectsChecked)
+    showGridChecked = "checked" if getattr(cc, "show_grid", True) else ""
+    showObjectsChecked = "checked" if getattr(cc, "show_objects", True) else ""
+
+    return (
+        template.replace("{configuratorURL}", "/configurator/")
+        .replace("{cameraConfigRows}", "\n".join(cameraConfigRows))
+        .replace("{size}", str(cc.hex.size))
+        .replace("__CAMERA_NAMES_JSON__", cameraNamesJson)
+        .replace("__CALIBRATION_PTS_JSON__", calibrationPtsJson)
+        .replace("__NUDGES_JSON__", hex_nudges_json)
+        .replace("{calibratorURL}", "/configurator/")
+        .replace("{showGridChecked}", showGridChecked)
+        .replace("{showObjectsChecked}", showObjectsChecked)
+    )
 
 
-    
-@configurator.get('/')
-@configurator.get('')
+@configurator.get("/")
+@configurator.get("")
 async def config(request: Request):
     return HTMLResponse(buildConfigurator(request))
 
 
-@configurator.post('/')
-@configurator.post('')
+@configurator.post("/")
+@configurator.post("")
 async def updateConfig(request: Request):
     cc = request.app.state.cc
     cc.saveConfiguration()
@@ -164,61 +180,64 @@ async def updateConfig(request: Request):
 
 def draw_dynamic_grid(cc, camName):
     try:
-        rsc = getattr(cc, 'rsc', None)
-        hex_grid = getattr(cc, 'hex', None)
+        rsc = getattr(cc, "rsc", None)
+        hex_grid = getattr(cc, "hex", None)
         if rsc is None or hex_grid is None:
             return None
-            
+
         from unittest.mock import Mock
+
         if isinstance(cc, Mock) or isinstance(hex_grid, Mock) or isinstance(rsc, Mock):
             return None
-            
+
         cam = cc.cameras[str(camName)]
         if cam.mostRecentFrame is None:
             return None
         h, w = cam.mostRecentFrame.shape[:2]
-        
+
         # Caching logic
-        if not hasattr(cc, '_grid_cache'):
+        if not hasattr(cc, "_grid_cache"):
             cc._grid_cache = {}
-        
+
         cache_key = (camName, id(rsc), hex_grid.size, w, h)
         if cache_key in cc._grid_cache:
             return cc._grid_cache[cache_key]
 
         overlay = np.zeros((h, w, 3), dtype=np.uint8)
-        
+
         # Define 4 corners of the camera frame
         corners_cam = [(0, 0), (w, 0), (w, h), (0, h)]
-        
+
         # Project to Real Space using the converter closest to each corner
         corners_real = []
         for p in corners_cam:
             converter = rsc.closestConverterToCamCoord(str(camName), p)
             rp = converter.convertCameraToRealSpace(p)
             corners_real.append(rp)
-            
+
         # Convert to Axial to find range
-        
+
         # Collect base bounding box from calibrated coordinates to prevent mapping
         # the camera corners across a perspective vanishing line which inflates hex ranges
-        cm = getattr(cc, 'cm', None) # We might not have cm directly in cc, but wait it's passed? No, cc has no cm.
+        cm = getattr(
+            cc, "cm", None
+        )  # We might not have cm directly in cc, but wait it's passed? No, cc has no cm.
         # draw_dynamic_grid doesn't get cm. It gets cc and camName.
         # However, cm is available if imported or we can look inside cc.rsc
         qs = []
         rs = []
-        
+
         # Read the RealSpaceConverter configuration to gather mapped axial coordinates
-        if hasattr(cc, 'rsc') and cc.rsc and hasattr(cc.rsc, 'realCamSpacePairs'):
+        if hasattr(cc, "rsc") and cc.rsc and hasattr(cc.rsc, "realCamSpacePairs"):
             for cName, coordPairs in cc.rsc.realCamSpacePairs:
                 if cName == camName:
                     if len(coordPairs) > 2:
                         axials = coordPairs[2]
                         for pt in axials:
-                            if hasattr(pt, '__iter__') and len(pt) >= 2:
+                            if hasattr(pt, "__iter__") and len(pt) >= 2:
                                 qs.append(int(pt[0]))
                                 rs.append(int(pt[1]))
-        
+
         if qs and rs:
             min_q, max_q = int(min(qs)) - 15, int(max(qs)) + 15
             min_r, max_r = int(min(rs)) - 10, int(max(rs)) + 10
@@ -231,7 +250,7 @@ def draw_dynamic_grid(cc, camName):
                     rs.append(r)
                 except (TypeError, ValueError, AttributeError, KeyError):
                     pass
-            
+
             if qs and rs:
                 try:
                     min_q, max_q = int(min(qs)), int(max(qs))
@@ -242,30 +261,32 @@ def draw_dynamic_grid(cc, camName):
             else:
                 min_q, max_q = -5, 5
                 min_r, max_r = -5, 5
-        
+
         # Add padding to ensure coverage
         pad = 2
-        
+
         # Safety bounds to prevent infinite loops or extreme memory usage
         if (max_q - min_q) > 200 or (max_r - min_r) > 200:
-            print(f"Grid range too large: {max_q-min_q}x{max_r-min_r}. Check calibration.")
+            print(
+                f"Grid range too large: {max_q - min_q}x{max_r - min_r}. Check calibration."
+            )
             return None
 
         # Iterate and draw
         # Use white color for grid lines, typical for overlay
         grid_color = (255, 255, 255)
-        
+
         for q in range(min_q - pad, max_q + pad + 1):
             for r in range(min_r - pad, max_r + pad + 1):
                 poly_cam = cc.cam_hex_at_axial(str(camName), q, r)
-                
+
                 # Draw
                 cv2.polylines(overlay, [poly_cam], True, grid_color, 1, cv2.LINE_AA)
-        
+
         # Cache the result
         cc._grid_cache[cache_key] = overlay
         return overlay
-        
+
     except Exception as e:
         print(f"Error drawing dynamic grid: {e}")
         # import traceback
@@ -280,58 +301,80 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
             img = cam.drawActiveZone(cam.mostRecentFrame)
 
             # Overlay Hex Grid if configured and calibration exists
-            if hasattr(cc, 'rsc') and cc.rsc is not None:
-                if getattr(cc, 'show_grid', True):
+            if hasattr(cc, "rsc") and cc.rsc is not None:
+                if getattr(cc, "show_grid", True):
                     try:
                         grid_overlay = draw_dynamic_grid(cc, camName)
-                        
+
                         if grid_overlay is not None:
                             if grid_overlay.shape[:2] == img.shape[:2]:
-                                cv2.addWeighted(grid_overlay, 0.5, img, 1.0, 0.0, dst=img)
+                                cv2.addWeighted(
+                                    grid_overlay, 0.5, img, 1.0, 0.0, dst=img
+                                )
                     except Exception as e:
                         print(f"Grid overlay error: {e}")
 
             # Overlay Calibration Objects
-            if getattr(cc, 'show_objects', True) and hasattr(cm, 'calibrationPts') and cm.calibrationPts:
+            if (
+                getattr(cc, "show_objects", True)
+                and hasattr(cm, "calibrationPts")
+                and cm.calibrationPts
+            ):
                 for idx, calibObj in enumerate(cm.calibrationPts):
                     if camName in calibObj:
                         pts = calibObj[camName][0]  # pixelPoints
                         if pts and len(pts) > 0:
                             poly_cam = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
-                            cv2.polylines(img, [poly_cam], True, (0, 255, 0), 2, cv2.LINE_AA)
+                            cv2.polylines(
+                                img, [poly_cam], True, (0, 255, 0), 2, cv2.LINE_AA
+                            )
                             for i, p in enumerate(pts):
                                 x, y = int(p[0]), int(p[1])
                                 cv2.circle(img, (x, y), 5, (0, 255, 0), -1)
-                                cv2.putText(img, str(i + 1), (x + 8, y + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
-            ret, img = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpg\r\n\r\n' + img.tobytes() + b'\r\n')
-            
+                                cv2.putText(
+                                    img,
+                                    str(i + 1),
+                                    (x + 8, y + 8),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.7,
+                                    (0, 255, 0),
+                                    2,
+                                )
+
+            ret, img = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            yield (
+                b"--frame\r\nContent-Type: image/jpg\r\n\r\n" + img.tobytes() + b"\r\n"
+            )
+
             # Rate limiting: ~2 FPS is plenty for configurator preview and avoids tunnel saturation
             time.sleep(0.5)
         except Exception as e:
             print(f"Failed genCameraFullViewWithActiveZone for {camName} -- {e}")
-            yield (b'--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n')
-            time.sleep(1.0) # Back off on error
-    
+            yield (b"--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n")
+            time.sleep(1.0)  # Back off on error
 
-@configurator.post('/set_overlays')
-async def setConfiguratorOverlays(request: Request, show_grid: bool = Form(...), show_objects: bool = Form(...)):
+
+@configurator.post("/set_overlays")
+async def setConfiguratorOverlays(
+    request: Request, show_grid: bool = Form(...), show_objects: bool = Form(...)
+):
     cc = request.app.state.cc
     cc.show_grid = show_grid
     cc.show_objects = show_objects
     return Response("Success")
-    
-    
-@configurator.get('/camera/{camName}')
+
+
+@configurator.get("/camera/{camName}")
 async def cameraActiveZoneWithObjects(request: Request, camName: str):
     cc = request.app.state.cc
     cm = request.app.state.cm
-    return StreamingResponse(genCameraFullViewWithActiveZone(cc, cm, str(camName)), media_type='multipart/x-mixed-replace; boundary=frame')
+    return StreamingResponse(
+        genCameraFullViewWithActiveZone(cc, cm, str(camName)),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
-@configurator.post('/cam{camName}_activezone')
+@configurator.post("/cam{camName}_activezone")
 async def updateCamActiveZone(request: Request, camName: str, az: str = Form(...)):
     cc = request.app.state.cc
     print(f"Received update Active Zone request for {camName}")
@@ -344,33 +387,33 @@ async def updateCamActiveZone(request: Request, camName: str, az: str = Form(...
     return Response("success")
 
 
-@configurator.post('/cam{camName}_type')
+@configurator.post("/cam{camName}_type")
 async def updateCamType(request: Request, camName: str, camType: str = Form(...)):
     cc = request.app.state.cc
     print(f"Received update Camera Type request for {camName}")
     try:
         cam = cc.cameras[camName]
-        cam.camType = camType 
+        cam.camType = camType
     except Exception as e:
         print(f"Unrecognized data: {camName} - {camType} - {e}")
     return Response("success")
 
 
-@configurator.get('/new_camera')
+@configurator.get("/new_camera")
 async def getNewCameraForm(request: Request):
     with open(f"{os.path.dirname(__file__)}/templates/NewCamera.html", "r") as f:
         template = f.read()
     return HTMLResponse(template.replace("{configuratorURL}", "/configurator/"))
 
 
-@configurator.post('/new_camera')
+@configurator.post("/new_camera")
 async def addNewCamera(
     request: Request,
     camName: str = Form(...),
     camRot: str = Form(...),
     rtspCam: Optional[str] = Form(None),
     camAddr: str = Form(...),
-    camAuth: Optional[str] = Form(None)
+    camAuth: Optional[str] = Form(None),
 ):
     cc = request.app.state.cc
     try:
@@ -385,7 +428,21 @@ async def addNewCamera(
         auth = None
 
     builder = RTSPCamera if rtspCam else RemoteCamera
-    cc.cameras[camName] = builder(address=camAddr, activeZone=[[0, 0], [0, 1], [1, 1,], [1, 0]], camName=camName, rotate=camRot, auth=auth)
+    cc.cameras[camName] = builder(
+        address=camAddr,
+        activeZone=[
+            [0, 0],
+            [0, 1],
+            [
+                1,
+                1,
+            ],
+            [1, 0],
+        ],
+        camName=camName,
+        rotate=camRot,
+        auth=auth,
+    )
     cc.rsc = None
     cc.saveConfiguration()
     cc.capture()
@@ -408,7 +465,7 @@ def order_points_clockwise(calibPts: list[CalibrationPoint]):
     return [calibPts[i] for i in order]
 
 
-@configurator.post('/manual_calibration')
+@configurator.post("/manual_calibration")
 async def manualCalibration(request: Request):
     cc = request.app.state.cc
     cm = request.app.state.cm
@@ -417,21 +474,25 @@ async def manualCalibration(request: Request):
     print(f"Received manual calibration data: {data}")
     if not data:
         return Response("No data received", status_code=400)
-        
+
     added_count = 0
     new_calib_entry = {}
 
     cm.calibrationPts = []
     for camName, payload in data.items():
-        if not isinstance(payload, dict) or 'pixel' not in payload or 'axial' not in payload:
+        if (
+            not isinstance(payload, dict)
+            or "pixel" not in payload
+            or "axial" not in payload
+        ):
             continue
-            
-        pixel_data = payload['pixel']
-        axial_data = payload['axial']
-        
+
+        pixel_data = payload["pixel"]
+        axial_data = payload["axial"]
+
         if len(pixel_data) < 3 or len(axial_data) < 3:
             continue
-            
+
         if camName not in cc.cameras:
             continue
 
@@ -440,8 +501,8 @@ async def manualCalibration(request: Request):
         try:
             h, w = cam.mostRecentFrame.shape[:2]
         except AttributeError:
-             print(f"Camera {camName} has no frame.")
-             continue
+            print(f"Camera {camName} has no frame.")
+            continue
 
         unique_pts = {}
         for pixel, axial in zip(pixel_data, axial_data):
@@ -459,9 +520,9 @@ async def manualCalibration(request: Request):
             if calib_pt.axial[1] not in calib_pt_columns:
                 calib_pt_columns[calib_pt.axial[1]] = []
             calib_pt_columns[calib_pt.axial[1]].append(calib_pt)
-        
+
         col_values = sorted(list(calib_pt_columns.keys()))
-        
+
         # Sort each column's points by row coordinate q (axial[0])
         for r_val in col_values:
             calib_pt_columns[r_val].sort(key=lambda pt: pt.axial[0])
@@ -477,7 +538,7 @@ async def manualCalibration(request: Request):
             for idx in range(max_idx):
                 calib_pt = col_pts[idx]
                 next_same_r = col_pts[idx + 1]
-                next_q = next_col_pts[idx:idx + 2]
+                next_q = next_col_pts[idx : idx + 2]
 
                 if len(next_q) < 2:
                     continue  # Safety guard — should not occur given max_idx, but be explicit
@@ -494,43 +555,47 @@ async def manualCalibration(request: Request):
             pixel_chunk = [p.pixel for p in block]
             axial_chunk = [p.axial for p in block]
             real_chunk = [p.real for p in block]
-                
+
             def sanitize_native(obj):
                 if isinstance(obj, np.ndarray):
                     return sanitize_native(obj.tolist())
                 if isinstance(obj, (list, tuple)):
                     return [sanitize_native(x) for x in obj]
-                if hasattr(obj, 'item'):
+                if hasattr(obj, "item"):
                     return obj.item()
                 if isinstance(obj, float):
                     return float(obj)
                 if isinstance(obj, int):
                     return int(obj)
                 return obj
-            
+
             p_chunk = sanitize_native(pixel_chunk)
             r_chunk = sanitize_native(real_chunk)
             a_chunk = sanitize_native(axial_chunk)
-                
+
             cm.calibrationPts.append({camName: [p_chunk, r_chunk, a_chunk]})
             added_count += 1
-        
+
     if added_count > 0:
-        if hasattr(cm, 'buildRealSpaceConverter'):
+        if hasattr(cm, "buildRealSpaceConverter"):
             cm.buildRealSpaceConverter()
         else:
             from observer.CalibratedObserver import RealSpaceConverter
-            cc.rsc = RealSpaceConverter([cNCoordPair 
-                                               for cPtGrp in cm.calibrationPts
-                                               for cNCoordPair in list(cPtGrp.items())])
+
+            cc.rsc = RealSpaceConverter(
+                [
+                    cNCoordPair
+                    for cPtGrp in cm.calibrationPts
+                    for cNCoordPair in list(cPtGrp.items())
+                ]
+            )
         cc.saveConfiguration()
         return Response(f"Added manual calibration for {added_count} cameras")
     else:
         return Response("No valid calibration points found", status_code=400)
 
 
-
-@configurator.post('/delete_calibration/{index}')
+@configurator.post("/delete_calibration/{index}")
 async def deleteCalibrationEndpoint(request: Request, index: int):
     cc = request.app.state.cc
     cm = request.app.state.cm
@@ -538,13 +603,18 @@ async def deleteCalibrationEndpoint(request: Request, index: int):
         if 0 <= index < len(cm.calibrationPts):
             cm.calibrationPts.pop(index)
             if len(cm.calibrationPts) > 0:
-                if hasattr(cm, 'buildRealSpaceConverter'):
+                if hasattr(cm, "buildRealSpaceConverter"):
                     cm.buildRealSpaceConverter()
                 else:
                     from observer.CalibratedObserver import RealSpaceConverter
-                    cc.rsc = RealSpaceConverter([cNCoordPair 
-                                                       for cPtGrp in cm.calibrationPts
-                                                       for cNCoordPair in list(cPtGrp.items())])
+
+                    cc.rsc = RealSpaceConverter(
+                        [
+                            cNCoordPair
+                            for cPtGrp in cm.calibrationPts
+                            for cNCoordPair in list(cPtGrp.items())
+                        ]
+                    )
             else:
                 cc.rsc = None
             cc.saveConfiguration()
@@ -556,7 +626,7 @@ async def deleteCalibrationEndpoint(request: Request, index: int):
         return Response(str(e), status_code=500)
 
 
-@configurator.post('/delete_cam/{camName}')
+@configurator.post("/delete_cam/{camName}")
 async def deleteCamera(request: Request, camName: str):
     cc = request.app.state.cc
     cc.cameras.pop(camName)
@@ -566,7 +636,7 @@ async def deleteCamera(request: Request, camName: str):
               <input class="btn-secondary" type="button" value="Configuration" onclick="window.location.href='/configurator/'">""")
 
 
-@configurator.post('/grid_configuration')
+@configurator.post("/grid_configuration")
 async def configureGrid(request: Request, size: float = Form(...)):
     cc = request.app.state.cc
     cc.hex = HexGridConfiguration(size=size)
@@ -576,7 +646,7 @@ async def configureGrid(request: Request, size: float = Form(...)):
         <input type="submit" class="btn btn-primary bg-secondary" value="Submit Grid Configuration">""")
 
 
-@configurator.get('/nudge_select/{camName}')
+@configurator.get("/nudge_select/{camName}")
 async def nudgeSelect(request: Request, camName: str, px: float, py: float):
     cc = request.app.state.cc
     try:
@@ -585,48 +655,51 @@ async def nudgeSelect(request: Request, camName: str, px: float, py: float):
         img_x = int(px * w)
         img_y = int(py * h)
         q, r = cc.camCoordToAxial(camName, (img_x, img_y))
-        
+
         poly = cc.cam_hex_at_axial(camName, q, r)
         poly_list = poly.reshape(-1, 2).tolist()
 
         # Return any existing nudge for this cell
         nudge_key = f"{q},{r}"
         existing_nudge = [0, 0]
-        if hasattr(cc.hex, 'hex_nudges'):
+        if hasattr(cc.hex, "hex_nudges"):
             cam_nudges = cc.hex.hex_nudges.get(camName, {})
             existing_nudge = cam_nudges.get(nudge_key, [0, 0])
-        
-        return JSONResponse({
-            "q": q,
-            "r": r,
-            "poly": poly_list,
-            "existing_dx": existing_nudge[0],
-            "existing_dy": existing_nudge[1]
-        })
+
+        return JSONResponse(
+            {
+                "q": q,
+                "r": r,
+                "poly": poly_list,
+                "existing_dx": existing_nudge[0],
+                "existing_dy": existing_nudge[1],
+            }
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
-@configurator.post('/nudge/{camName}')
+
+@configurator.post("/nudge/{camName}")
 async def nudgeHex(request: Request, camName: str):
     cc = request.app.state.cc
     try:
         data = await request.json()
-        hexes = data.get('hexes', [])
-        dx = float(data.get('dx', 0))
-        dy = float(data.get('dy', 0))
-        reset = data.get('reset', False)
-        reset_all = data.get('reset_all', False)
-        
-        if not hasattr(cc.hex, 'hex_nudges'):
+        hexes = data.get("hexes", [])
+        dx = float(data.get("dx", 0))
+        dy = float(data.get("dy", 0))
+        reset = data.get("reset", False)
+        reset_all = data.get("reset_all", False)
+
+        if not hasattr(cc.hex, "hex_nudges"):
             cc.hex.hex_nudges = {}
         if camName not in cc.hex.hex_nudges:
             cc.hex.hex_nudges[camName] = {}
-            
+
         if reset_all:
             cc.hex.hex_nudges[camName] = {}
         else:
             for hex_coords in hexes:
-                q, r = hex_coords['q'], hex_coords['r']
+                q, r = hex_coords["q"], hex_coords["r"]
                 nudge_key = f"{q},{r}"
                 if reset:
                     if nudge_key in cc.hex.hex_nudges[camName]:
@@ -634,12 +707,12 @@ async def nudgeHex(request: Request, camName: str):
                 else:
                     curr_dx, curr_dy = cc.hex.hex_nudges[camName].get(nudge_key, [0, 0])
                     cc.hex.hex_nudges[camName][nudge_key] = [curr_dx + dx, curr_dy + dy]
-            
+
         cc.saveConfiguration()
         # Clear grid overlay cache
-        if hasattr(cc, '_grid_cache'):
+        if hasattr(cc, "_grid_cache"):
             cc._grid_cache.clear()
-            
+
         return JSONResponse({"status": "success"})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -648,13 +721,14 @@ async def nudgeHex(request: Request, camName: str):
 if __name__ == "__main__":
     import uvicorn
     from fastapi import FastAPI
+
     app = FastAPI()
     app.state.cc = CalibratedCaptureConfiguration()
     app.state.cc.capture()
     app.state.cm = CalibrationObserver(app.state.cc)
     app.include_router(configurator)
 
-    @app.get('/{page}')
+    @app.get("/{page}")
     async def getPage(page: str):
         try:
             with open(f"{os.path.dirname(__file__)}/templates/{page}") as f:

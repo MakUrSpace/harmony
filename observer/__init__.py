@@ -13,11 +13,8 @@ try:
         TrackedObject,
         MiniMapObject,
         Transition,
-        distanceFormula
+        distanceFormula,
     )
-    from observer.HexObserver import (
-        HexGridConfiguration,
-        HexCaptureConfiguration
-    )
+    from observer.HexObserver import HexGridConfiguration, HexCaptureConfiguration
 finally:
     os.chdir(oldPath)

@@ -7,6 +7,7 @@ import threading
 import numpy as np
 from unittest import mock
 
+
 @pytest.fixture(scope="module")
 def harmony_server(mock_cv2):
     """Start the Harmony server in-process using mocked hardware, on a background thread."""
@@ -18,12 +19,12 @@ def harmony_server(mock_cv2):
     hs._cm = None
     hs.APPS.clear()
 
-    p_hcc = mock.patch('harmony.harmonyServer.HexCaptureConfiguration')
-    p_hm  = mock.patch('harmony.harmonyServer.HarmonyMachine')
-    p_rcs = mock.patch('harmony.harmonyServer.registerCaptureService')
+    p_hcc = mock.patch("harmony.harmonyServer.HexCaptureConfiguration")
+    p_hm = mock.patch("harmony.harmonyServer.HarmonyMachine")
+    p_rcs = mock.patch("harmony.harmonyServer.registerCaptureService")
 
     MockHexCC = p_hcc.start()
-    MockHM    = p_hm.start()
+    MockHM = p_hm.start()
     p_rcs.start()
 
     mock_cam = mock.MagicMock()
@@ -49,15 +50,17 @@ def harmony_server(mock_cv2):
     mock_cm.memory = []
 
     from harmony.harmonyServer import create_harmony_app
+
     app = create_harmony_app()
 
     # Find a free port
     with socket.socket() as s:
-        s.bind(('', 0))
+        s.bind(("", 0))
         port = s.getsockname()[1]
 
-    config = uvicorn.Config(app, host="127.0.0.1", port=port,
-                            log_level="error", loop="asyncio")
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=port, log_level="error", loop="asyncio"
+    )
     server = uvicorn.Server(config)
 
     thread = threading.Thread(target=server.run, daemon=True)
@@ -67,21 +70,25 @@ def harmony_server(mock_cv2):
     ready = False
     for _ in range(40):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(('127.0.0.1', port)) == 0:
+            if s.connect_ex(("127.0.0.1", port)) == 0:
                 ready = True
                 break
         time.sleep(0.25)
 
     if not ready:
         server.should_exit = True
-        p_hcc.stop(); p_hm.stop(); p_rcs.stop()
+        p_hcc.stop()
+        p_hm.stop()
+        p_rcs.stop()
         pytest.fail("Harmony server failed to start within 10 seconds")
 
     yield f"http://127.0.0.1:{port}"
 
     server.should_exit = True
     thread.join(timeout=5)
-    p_hcc.stop(); p_hm.stop(); p_rcs.stop()
+    p_hcc.stop()
+    p_hm.stop()
+    p_rcs.stop()
 
 
 def test_homepage_loads(page: Page, harmony_server):
@@ -122,4 +129,3 @@ def test_ui_latency(page: Page, harmony_server):
     assert response.ok
     api_time = time.time() - start_time
     assert api_time < 0.5, f"Canvas data API response is too slow: {api_time}s"
-

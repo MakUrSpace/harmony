@@ -4,6 +4,7 @@ import sys
 
 LOCK_FILE = "/tmp/harmony_observer.lock"
 
+
 class FileLock:
     def __init__(self):
         self.lock_file = open(LOCK_FILE, "w")

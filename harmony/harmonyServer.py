@@ -28,7 +28,13 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from fastapi import FastAPI, APIRouter, Request, Form, Query
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 
 from observer import HexGridConfiguration, HexCaptureConfiguration
 from observer.Observer import hStackImages, clipImage, Camera
@@ -43,8 +49,8 @@ from harmony.HarmonyMachine import HarmonyMachine, INCHES_TO_MM
 # Module-level state (replaces Flask's current_app / Blueprint pattern)
 # ---------------------------------------------------------------------------
 
-_cc = None   # CaptureConfiguration
-_cm = None   # HarmonyMachine
+_cc = None  # CaptureConfiguration
+_cm = None  # HarmonyMachine
 _config: dict = {}
 
 DATA_LOCK = threading.Lock()
@@ -63,10 +69,12 @@ def _get_cm():
 # FastAPI Router (replaces Flask Blueprint)
 # ---------------------------------------------------------------------------
 
-harmony = APIRouter(prefix='/harmony', tags=['harmony'])
+harmony = APIRouter(prefix="/harmony", tags=["harmony"])
 from fastapi.templating import Jinja2Templates
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "harmony_templates"))
 
+templates = Jinja2Templates(
+    directory=os.path.join(os.path.dirname(__file__), "harmony_templates")
+)
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +86,7 @@ virtual_map_res = (1200, 1200)
 
 
 def imageToBase64(img):
-    return base64.b64encode(cv2.imencode('.jpg', img)[1]).decode()
+    return base64.b64encode(cv2.imencode(".jpg", img)[1]).decode()
 
 
 # ---------------------------------------------------------------------------
@@ -134,20 +142,23 @@ class FrameBroadcaster:
         with self.lock:
             self.clients += 1
             if self.last_frame:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpg\r\n\r\n' + self.last_frame + b'\r\n')
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpg\r\n\r\n" + self.last_frame + b"\r\n"
+                )
 
         try:
             while True:
                 with self.condition:
-                    self.condition.wait(timeout=1.0) # check shutdown every second
+                    self.condition.wait(timeout=1.0)  # check shutdown every second
                     if not self.running or SHUTDOWN_EVENT.is_set():
                         break
                     frame = self.last_frame
 
                 if frame:
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpg\r\n\r\n' + frame + b'\r\n')
+                    yield (
+                        b"--frame\r\nContent-Type: image/jpg\r\n\r\n" + frame + b"\r\n"
+                    )
         finally:
             with self.lock:
                 self.clients -= 1
@@ -168,15 +179,21 @@ def render_minimap(cm, encode=True):
             return None
 
         cx, cy, cw, ch, sx, sy, lx, ly = get_virtual_map_crop(cm)
-        
-        if cw > 0 and ch > 0:
-            camImage = camImage[cy:cy+ch, cx:cx+cw]
 
-        camImage = cv2.resize(camImage, (virtual_map_res[0], virtual_map_res[1]), interpolation=cv2.INTER_AREA)
+        if cw > 0 and ch > 0:
+            camImage = camImage[cy : cy + ch, cx : cx + cw]
+
+        camImage = cv2.resize(
+            camImage,
+            (virtual_map_res[0], virtual_map_res[1]),
+            interpolation=cv2.INTER_AREA,
+        )
         if not encode:
             return cv2.cvtColor(camImage, cv2.COLOR_BGR2RGB)
 
-        ret, encoded = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+        ret, encoded = cv2.imencode(
+            ".jpg", camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+        )
         return encoded.tobytes()
     except Exception as e:
         print(f"Minimap render error: {e}")
@@ -197,30 +214,38 @@ def render_camera(cc, camName):
 
         masked = frame.copy()
 
-        if hasattr(cc, 'rsc') and cc.rsc is not None:
-            if getattr(cc, 'show_grid', True):
+        if hasattr(cc, "rsc") and cc.rsc is not None:
+            if getattr(cc, "show_grid", True):
                 try:
                     grid_overlay = draw_dynamic_grid(cc, camName)
                     if grid_overlay is not None:
                         if grid_overlay.shape[:2] == masked.shape[:2]:
-                            cv2.addWeighted(grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked)
+                            cv2.addWeighted(
+                                grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
+                            )
                 except Exception as e:
                     print(f"Grid blend error: {e}")
 
         masked = cam.cropToActiveZone(masked)
 
-        cropped = masked[y:y+h, x:x+w]
-        camImage = cv2.resize(cropped, tuple(perspective_res), interpolation=cv2.INTER_LINEAR)
+        cropped = masked[y : y + h, x : x + w]
+        camImage = cv2.resize(
+            cropped, tuple(perspective_res), interpolation=cv2.INTER_LINEAR
+        )
 
-        ret, encoded = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+        ret, encoded = cv2.imencode(
+            ".jpg", camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+        )
         return encoded.tobytes()
     except Exception as e:
         print(f"Camera render error {camName}: {e}")
         return None
 
 
-@harmony.post('/set_overlays')
-async def setHarmonyOverlays(request: Request, show_grid: bool = Form(...), show_objects: bool = Form(...)):
+@harmony.post("/set_overlays")
+async def setHarmonyOverlays(
+    request: Request, show_grid: bool = Form(...), show_objects: bool = Form(...)
+):
     cc = _get_cc()
     cc.show_grid = show_grid
     cc.show_objects = show_objects
@@ -238,30 +263,60 @@ def get_broadcaster(key, render_func):
 # Console streaming
 # ---------------------------------------------------------------------------
 
+
 def renderConsole():
     while not SHUTDOWN_EVENT.is_set():
         cm = _get_cm()
         shape = (170, 400)
         zeros = np.zeros(shape, dtype="uint8")
-        consoleImage = cv2.putText(zeros, f'Cycle {cm.cycleCounter}',
-            (50, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'Mode: {cm.mode:7}',
-            (50, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        consoleImage = cv2.putText(zeros, f'Board State: {cm.state:10}',
-            (50, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 255, 2, cv2.LINE_AA)
-        ret, consoleImage = cv2.imencode('.jpg', zeros)
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpg\r\n\r\n' + consoleImage.tobytes() + b'\r\n')
+        consoleImage = cv2.putText(
+            zeros,
+            f"Cycle {cm.cycleCounter}",
+            (50, 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            255,
+            2,
+            cv2.LINE_AA,
+        )
+        consoleImage = cv2.putText(
+            zeros,
+            f"Mode: {cm.mode:7}",
+            (50, 65),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            255,
+            2,
+            cv2.LINE_AA,
+        )
+        consoleImage = cv2.putText(
+            zeros,
+            f"Board State: {cm.state:10}",
+            (50, 105),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            255,
+            2,
+            cv2.LINE_AA,
+        )
+        ret, consoleImage = cv2.imencode(".jpg", zeros)
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpg\r\n\r\n" + consoleImage.tobytes() + b"\r\n"
+        )
 
 
-@harmony.get('/harmony_console')
+@harmony.get("/harmony_console")
 def getConsoleImage():
-    return StreamingResponse(renderConsole(), media_type='multipart/x-mixed-replace; boundary=frame')
+    return StreamingResponse(
+        renderConsole(), media_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Combined cameras (legacy)
 # ---------------------------------------------------------------------------
+
 
 def genCombinedCamerasView():
     while not SHUTDOWN_EVENT.is_set():
@@ -270,20 +325,28 @@ def genCombinedCamerasView():
         for camName in cc.cameras.keys():
             camImage = cc.cameras[camName].mostRecentFrame.copy()
             camImages.append(camImage)
-        camImage = cv2.resize(camImages[0] if len(camImages) == 1 else np.vstack(camImages), [480, 640], interpolation=cv2.INTER_AREA)
-        ret, camImage = cv2.imencode('.jpg', camImage)
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+        camImage = cv2.resize(
+            camImages[0] if len(camImages) == 1 else np.vstack(camImages),
+            [480, 640],
+            interpolation=cv2.INTER_AREA,
+        )
+        ret, camImage = cv2.imencode(".jpg", camImage)
+        yield (
+            b"--frame\r\nContent-Type: image/jpg\r\n\r\n" + camImage.tobytes() + b"\r\n"
+        )
 
 
-@harmony.get('/combinedCameras')
+@harmony.get("/combinedCameras")
 def combinedCamerasResponse():
-    return StreamingResponse(genCombinedCamerasView(), media_type='multipart/x-mixed-replace; boundary=frame')
+    return StreamingResponse(
+        genCombinedCamerasView(), media_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Session / Canvas data structures
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class CellSelection:
@@ -318,7 +381,8 @@ APPS = []
 # Camera-with-changes stream
 # ---------------------------------------------------------------------------
 
-@harmony.get('/camWithChanges/{camName}/{viewId}')
+
+@harmony.get("/camWithChanges/{camName}/{viewId}")
 def cameraViewWithChangesResponse(camName: str, viewId: str):
     cm = _get_cm()
     cc = _get_cc()
@@ -327,7 +391,9 @@ def cameraViewWithChangesResponse(camName: str, viewId: str):
     else:
         broadcaster = get_broadcaster(camName, lambda c=camName: render_camera(cc, c))
 
-    return StreamingResponse(broadcaster.subscribe(), media_type='multipart/x-mixed-replace; boundary=frame')
+    return StreamingResponse(
+        broadcaster.subscribe(), media_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -347,28 +413,30 @@ def get_virtual_map_crop(cm):
     Unified logic to calculate the tight crop of the VirtualMap.
     Returns: (crop_x, crop_y, crop_w, crop_h, scale_x, scale_y, logical_x, logical_y)
     """
-    if not cm or not hasattr(cm.cc, 'realSpaceBoundingBox'):
-        return 0, 0, 1600, 1600, 1200/1600, 1200/1600, 0, 0
+    if not cm or not hasattr(cm.cc, "realSpaceBoundingBox"):
+        return 0, 0, 1600, 1600, 1200 / 1600, 1200 / 1600, 0, 0
 
     bx, by, bw, bh = cm.cc.realSpaceBoundingBox()
 
     # Grid shift logic (must match HexObserver.py)
     shift_x = 0.0
     shift_y = 0.0
-    if bx < 0: shift_x = -bx
-    if by < 0: shift_y = -by
+    if bx < 0:
+        shift_x = -bx
+    if by < 0:
+        shift_y = -by
 
     map_x = int(bx) + shift_x
     map_y = int(by) + shift_y
 
-    margin = 20 # Tight margin
+    margin = 20  # Tight margin
     crop_x = int(max(0, map_x - margin))
     crop_y = int(max(0, map_y - margin))
 
     # Calculate available canvas size
     w_canvas = 1600
     h_canvas = 1600
-    if hasattr(cm.cc, 'hex') and cm.cc.hex:
+    if hasattr(cm.cc, "hex") and cm.cc.hex:
         w_canvas = cm.cc.hex.width
         h_canvas = cm.cc.hex.height
 
@@ -387,7 +455,7 @@ def get_virtual_map_crop(cm):
     crop_h_actual = int(end_y - crop_y)
 
     if crop_w_actual <= 0 or crop_h_actual <= 0:
-        return 0, 0, 1600, 1600, 1200/1600, 1200/1600, 0, 0
+        return 0, 0, 1600, 1600, 1200 / 1600, 1200 / 1600, 0, 0
 
     scale_x = 1200 / crop_w_actual
     scale_y = 1200 / crop_h_actual
@@ -396,7 +464,16 @@ def get_virtual_map_crop(cm):
     logical_x = crop_x - shift_x
     logical_y = crop_y - shift_y
 
-    return crop_x, crop_y, crop_w_actual, crop_h_actual, scale_x, scale_y, logical_x, logical_y
+    return (
+        crop_x,
+        crop_y,
+        crop_w_actual,
+        crop_h_actual,
+        scale_x,
+        scale_y,
+        logical_x,
+        logical_y,
+    )
 
 
 def get_conversion_params(cam_name):
@@ -448,6 +525,7 @@ def scale_point(pt, scale):
 # Multi-cell object helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_constituent_axials(obj, cc):
     """
     Return the canonical ordered list of axial cells for *obj*.
@@ -455,7 +533,7 @@ def _get_constituent_axials(obj, cc):
     directly on the object.  For legacy single-cell objects the list is
     derived on-the-fly from changeSetToAxialCoord.
     """
-    axials = getattr(obj, 'constituent_axials', None)
+    axials = getattr(obj, "constituent_axials", None)
     # Must be an actual non-empty list — guards against MagicMock attributes in tests
     # and against legacy objects that never had the field set.
     if isinstance(axials, list) and axials:
@@ -505,15 +583,20 @@ def axial_to_ui_object(q, r):
 
     return {
         "VirtualMap": vm_points,
-        **{camName: [
-            scale_point_new(safe_point(pt), get_conversion_params(camName))
-            for pt in cm.cc.cam_hex_at_axial(camName, q, r)] for camName in cc.cameras.keys()}
+        **{
+            camName: [
+                scale_point_new(safe_point(pt), get_conversion_params(camName))
+                for pt in cm.cc.cam_hex_at_axial(camName, q, r)
+            ]
+            for camName in cc.cameras.keys()
+        },
     }
 
 
 # ---------------------------------------------------------------------------
 # Canvas data
 # ---------------------------------------------------------------------------
+
 
 def _get_canvas_data_dict(viewId: str):
     cm = _get_cm()
@@ -524,7 +607,10 @@ def _get_canvas_data_dict(viewId: str):
         hull = cm.cc.objectToHull(obj)
         if hull is not None and len(hull) > 0:
             raw_vm_pts = hull.reshape(-1, 2)
-            vm_pts = [scale_point_new((float(pt[0]), float(pt[1])), vm_params) for pt in raw_vm_pts]
+            vm_pts = [
+                scale_point_new((float(pt[0]), float(pt[1])), vm_params)
+                for pt in raw_vm_pts
+            ]
         else:
             vm_pts = []
 
@@ -533,15 +619,17 @@ def _get_canvas_data_dict(viewId: str):
             points = obj.changeSet[camName].changePoints
             if len(points) > 0:
                 hull = cv2.convexHull(np.array(points, dtype=np.float32)).reshape(-1, 2)
-                cam_pts = [scale_point_new((float(pt[0]), float(pt[1])), get_conversion_params(camName)) for pt in hull]
+                cam_pts = [
+                    scale_point_new(
+                        (float(pt[0]), float(pt[1])), get_conversion_params(camName)
+                    )
+                    for pt in hull
+                ]
             else:
                 cam_pts = []
             cam_objs[camName] = cam_pts
 
-        objects[obj.oid] = {
-            "VirtualMap": vm_pts,
-            **cam_objs
-        }
+        objects[obj.oid] = {"VirtualMap": vm_pts, **cam_objs}
 
     session_config = SESSIONS.get(viewId, SessionConfig())
 
@@ -549,20 +637,25 @@ def _get_canvas_data_dict(viewId: str):
         "objects": objects,
         **asdict(session_config),
         "selection": {
-            "firstCell": axial_to_ui_object(*session_config.selection.firstCell) if session_config.selection.firstCell is not None else None,
-            "additionalCells": [axial_to_ui_object(*cell) for cell in session_config.selection.additionalCells]
+            "firstCell": axial_to_ui_object(*session_config.selection.firstCell)
+            if session_config.selection.firstCell is not None
+            else None,
+            "additionalCells": [
+                axial_to_ui_object(*cell)
+                for cell in session_config.selection.additionalCells
+            ],
         },
         "selectable": [obj.oid for obj in cm.memory],
         "constituent_axials": {
-            obj.oid: _get_constituent_axials(obj, cc)
-            for obj in cm.memory
-        }
+            obj.oid: _get_constituent_axials(obj, cc) for obj in cm.memory
+        },
     }
     return data
 
 
 def _get_canvas_update_script(viewId: str):
     import json
+
     try:
         canvas_data = _get_canvas_data_dict(viewId)
         canvas_json = json.dumps(canvas_data)
@@ -581,7 +674,7 @@ def _get_canvas_update_script(viewId: str):
         return ""
 
 
-@harmony.get('/canvas_data/{viewId}')
+@harmony.get("/canvas_data/{viewId}")
 def getCanvasData(viewId: str):
     return JSONResponse(_get_canvas_data_dict(viewId))
 
@@ -589,6 +682,7 @@ def getCanvasData(viewId: str):
 # ---------------------------------------------------------------------------
 # Combined cameras with changes
 # ---------------------------------------------------------------------------
+
 
 def genCombinedCameraWithChangesView():
     while not SHUTDOWN_EVENT.is_set():
@@ -601,58 +695,66 @@ def genCombinedCameraWithChangesView():
             if cm.lastClassification is not None:
                 print("Has class")
             camImages = list(cm.getCameraImagesWithChanges(cc.cameras.keys()).values())
-            
+
         if camImages:
             camImage = camImages[0] if len(camImages) == 1 else np.vstack(camImages)
             camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_LINEAR)
-            ret, camImage = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpg\r\n\r\n' + camImage.tobytes() + b'\r\n')
+            ret, camImage = cv2.imencode(
+                ".jpg", camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+            )
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpg\r\n\r\n" + camImage.tobytes() + b"\r\n"
+            )
         time.sleep(0.1)
 
 
-@harmony.get('/combinedCamerasWithChanges')
+@harmony.get("/combinedCamerasWithChanges")
 def combinedCamerasWithChangesResponse():
-    return StreamingResponse(genCombinedCameraWithChangesView(), media_type='multipart/x-mixed-replace; boundary=frame')
+    return StreamingResponse(
+        genCombinedCameraWithChangesView(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 # ---------------------------------------------------------------------------
 # Reset / Save / Load
 # ---------------------------------------------------------------------------
 
-@harmony.get('/reset')
+
+@harmony.get("/reset")
 def resetHarmony(request: Request = None):
-    if request and request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request and request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     global _cm
     with DATA_LOCK:
         new_cm = HarmonyMachine(_get_cc())
         new_cm.reset()
         _cm = new_cm
-    return 'success'
+    return "success"
 
 
-@harmony.post('/save')
+@harmony.post("/save")
 async def saveHarmonyPost(request: Request, game_name: str = Form(...)):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     if not game_name:
         return Response("Game name required", status_code=400)
     return _save_harmony(game_name)
 
 
-@harmony.post('/load')
+@harmony.post("/load")
 async def loadHarmonyPost(request: Request, game_name: str = Form(...)):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     if not game_name:
         return Response("Game name required", status_code=400)
     return _load_harmony(game_name)
 
 
-@harmony.get('/save_game/{gameName}')
+@harmony.get("/save_game/{gameName}")
 def saveHarmony(request: Request, gameName: str):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     return _save_harmony(gameName)
 
@@ -662,10 +764,7 @@ def _save_harmony(gameName: str):
     try:
         cm = _get_cm()
         cm.saveGame(gameName)
-        save_data = {
-            'memory': cm.memory,
-            'sessions': SESSIONS
-        }
+        save_data = {"memory": cm.memory, "sessions": SESSIONS}
         with open(f"{gameName}.pickle", "wb") as f:
             pickle.dump(save_data, f)
         return Response(f"Game saved as {gameName}")
@@ -674,9 +773,9 @@ def _save_harmony(gameName: str):
         return Response(f"Error saving game: {e}")
 
 
-@harmony.get('/load_game/{gameName}')
+@harmony.get("/load_game/{gameName}")
 def loadHarmony(request: Request, gameName: str):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     return _load_harmony(gameName)
 
@@ -689,12 +788,14 @@ def _load_harmony(gameName: str):
             with open(pickle_path, "rb") as f:
                 load_data = pickle.load(f)
             cm = _get_cm()
-            new_memory = load_data.get('memory', [])
+            new_memory = load_data.get("memory", [])
             cm.memory = new_memory
             print(f"Loaded {len(new_memory)} objects into memory.")
-            loaded_sessions = load_data.get('sessions', {})
+            loaded_sessions = load_data.get("sessions", {})
             SESSIONS.update(loaded_sessions)
-            print(f"Merged {len(loaded_sessions)} sessions from save. Total sessions: {len(SESSIONS)}")
+            print(
+                f"Merged {len(loaded_sessions)} sessions from save. Total sessions: {len(SESSIONS)}"
+            )
         else:
             return Response(f"Save file {gameName}.pickle not found")
         return Response(f"Game {gameName} loaded. Objects: {len(_get_cm().memory)}")
@@ -707,26 +808,81 @@ def _load_harmony(gameName: str):
 # Session ID management
 # ---------------------------------------------------------------------------
 
-ADJECTIVES = ["Cool", "Happy", "Fast", "Shiny", "Blue", "Red", "Green", "Bright", "Dark", "Loud", "Quiet", "Brave", "Calm", "Eager", "Fair", "Gentle", "Jolly", "Kind", "Lively", "Nice", "Proud", "Silly", "Witty", "Zealous"]
-NOUNS = ["Tiger", "Eagle", "Shark", "Bear", "Lion", "Wolf", "Fox", "Hawk", "Owl", "Frog", "Toad", "Fish", "Crab", "Star", "Moon", "Sun", "Cloud", "Rain", "Snow", "Wind", "Storm", "River", "Lake", "Sea", "Ocean"]
+ADJECTIVES = [
+    "Cool",
+    "Happy",
+    "Fast",
+    "Shiny",
+    "Blue",
+    "Red",
+    "Green",
+    "Bright",
+    "Dark",
+    "Loud",
+    "Quiet",
+    "Brave",
+    "Calm",
+    "Eager",
+    "Fair",
+    "Gentle",
+    "Jolly",
+    "Kind",
+    "Lively",
+    "Nice",
+    "Proud",
+    "Silly",
+    "Witty",
+    "Zealous",
+]
+NOUNS = [
+    "Tiger",
+    "Eagle",
+    "Shark",
+    "Bear",
+    "Lion",
+    "Wolf",
+    "Fox",
+    "Hawk",
+    "Owl",
+    "Frog",
+    "Toad",
+    "Fish",
+    "Crab",
+    "Star",
+    "Moon",
+    "Sun",
+    "Cloud",
+    "Rain",
+    "Snow",
+    "Wind",
+    "Storm",
+    "River",
+    "Lake",
+    "Sea",
+    "Ocean",
+]
 
 
 def simple_id_generator():
     return f"{random.choice(ADJECTIVES)}-{random.choice(NOUNS)}"
 
 
-@harmony.post('/update_session_id')
+@harmony.post("/update_session_id")
 async def update_session_id(viewId: str = Form(...), newViewId: str = Form(...)):
     if not viewId or not newViewId:
         return Response("Invalid Request", status_code=400)
 
     if newViewId in SESSIONS:
-        return HTMLResponse(f"""<script>window.location.href = "/harmony/?viewId={newViewId}";</script>""")
+        return HTMLResponse(
+            f"""<script>window.location.href = "/harmony/?viewId={newViewId}";</script>"""
+        )
 
     with DATA_LOCK:
         if viewId in SESSIONS:
             SESSIONS[newViewId] = SESSIONS.pop(viewId)
-            return HTMLResponse(f"""<script>window.location.href = "/harmony/?viewId={newViewId}";</script>""")
+            return HTMLResponse(
+                f"""<script>window.location.href = "/harmony/?viewId={newViewId}";</script>"""
+            )
         else:
             return Response("Session not found", status_code=404)
 
@@ -735,8 +891,9 @@ async def update_session_id(viewId: str = Form(...), newViewId: str = Form(...))
 # Main Harmony page
 # ---------------------------------------------------------------------------
 
-@harmony.get('/')
-@harmony.get('')
+
+@harmony.get("/")
+@harmony.get("")
 async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=None)):
     cm = _get_cm()
     cc = _get_cc()
@@ -747,11 +904,18 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
     except TypeError:
         pass  # HarmonyMachine may be a mock during testing
 
-    template_name = request.app.state.config.get('HARMONY_TEMPLATE', 'Harmony.html')
-    with open(f"{os.path.dirname(__file__)}/harmony_templates/{template_name}", "r") as f:
+    template_name = request.app.state.config.get("HARMONY_TEMPLATE", "Harmony.html")
+    with open(
+        f"{os.path.dirname(__file__)}/harmony_templates/{template_name}", "r"
+    ) as f:
         template = f.read()
 
-    cameraButtons = ' '.join([f'''<input type="button" class="btn btn-info" value="Camera {camName}" onclick="gameWorldClick('{camName}')">''' for camName in cc.cameras.keys()])
+    cameraButtons = " ".join(
+        [
+            f"""<input type="button" class="btn btn-info" value="Camera {camName}" onclick="gameWorldClick('{camName}')">"""
+            for camName in cc.cameras.keys()
+        ]
+    )
     cameraButtons = f"""<input type="button" class="btn btn-info" value="Virtual Map" onclick="gameWorldClick('VirtualMap')">{cameraButtons}"""
     cameraButtons += f""" <input type="button" class="btn btn-warning" value="All Views" onclick="gameWorldClick('All')">"""
 
@@ -763,7 +927,7 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
 
     # Priority: 1. Query param, 2. Cookie
     if not viewId:
-        viewId = request.cookies.get('session_view_id')
+        viewId = request.cookies.get("session_view_id")
 
     if viewId and viewId in SESSIONS:
         pass  # Resume session
@@ -776,22 +940,23 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
                 break
         SESSIONS[viewId] = SessionConfig()
 
-    showGridChecked = "checked" if getattr(cc, 'show_grid', True) else ""
-    showObjectsChecked = "checked" if getattr(cc, 'show_objects', True) else ""
+    showGridChecked = "checked" if getattr(cc, "show_grid", True) else ""
+    showObjectsChecked = "checked" if getattr(cc, "show_objects", True) else ""
 
-    rendered = template.replace(
-        "{viewId}", viewId).replace(
-        "{defaultCamera}", defaultCam).replace(
-        "{cameraButtons}", cameraButtons).replace(
-        "{harmonyURL}", "/harmony/").replace(
-        "{configuratorURL}", '/configurator').replace(
-        "{showGridChecked}", showGridChecked).replace(
-        "{showObjectsChecked}", showObjectsChecked)
+    rendered = (
+        template.replace("{viewId}", viewId)
+        .replace("{defaultCamera}", defaultCam)
+        .replace("{cameraButtons}", cameraButtons)
+        .replace("{harmonyURL}", "/harmony/")
+        .replace("{configuratorURL}", "/configurator")
+        .replace("{showGridChecked}", showGridChecked)
+        .replace("{showObjectsChecked}", showObjectsChecked)
+    )
 
     resp = HTMLResponse(rendered)
-    cookie_val = request.cookies.get('session_view_id')
+    cookie_val = request.cookies.get("session_view_id")
     if cookie_val != viewId:
-        resp.set_cookie('session_view_id', viewId)
+        resp.set_cookie("session_view_id", viewId)
 
     return resp
 
@@ -807,7 +972,7 @@ GROUP_COLORS = {
     "enemies": (70, 60, 230),
     "targetable": (255, 200, 0),
     "terrain": (30, 105, 210),
-    "selectable": (180, 105, 255)
+    "selectable": (180, 105, 255),
 }
 
 
@@ -816,7 +981,11 @@ def custom_object_visual(cm, changeSet, color, margin=0):
     if changeSet.empty:
         return np.zeros([10, 10], dtype="float32")
 
-    images = {cam: change.after for cam, change in changeSet.changeSet.items() if change.changeType not in ["delete", None]}
+    images = {
+        cam: change.after
+        for cam, change in changeSet.changeSet.items()
+        if change.changeType not in ["delete", None]
+    }
 
     maxHeight = max([im.shape[0] + margin * 2 for im in images.values()])
     filler = np.zeros((maxHeight, 50, 3), np.uint8)
@@ -827,7 +996,8 @@ def custom_object_visual(cm, changeSet, color, margin=0):
         if change.changeType == "delete":
             images[camName] = filler
         else:
-            images[camName] = clipImage(cv2.addWeighted(
+            images[camName] = clipImage(
+                cv2.addWeighted(
                     cameras[camName].mostRecentFrame.copy(),
                     0.6,
                     cv2.drawContours(
@@ -835,12 +1005,12 @@ def custom_object_visual(cm, changeSet, color, margin=0):
                         change.changeContours,
                         -1,
                         color,
-                        -1
+                        -1,
                     ),
                     0.4,
-                    0
+                    0,
                 ),
-                [dim + m for dim, m in zip(change.clipBox, margins)]
+                [dim + m for dim, m in zip(change.clipBox, margins)],
             )
 
     return hStackImages(images.values())
@@ -863,7 +1033,7 @@ def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
     else:
         visual_image = cm.object_visual(capture)
 
-    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', capture.oid)
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", capture.oid)
 
     if is_moveable:
         moveable_actions = f"""
@@ -881,15 +1051,19 @@ def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
     else:
         moveable_actions = ""
 
-    changeRow = _TRACKED_OBJECT_ROW_TEMPLATE.replace(
-        "{objectName}", capture.oid).replace(
-        "{safeObjectName}", safe_name).replace(
-        "{realCenter}", ", ".join([f"{dim:6.0f}" for dim in cm.cc.changeSetToAxialCoord(capture)])).replace(
-        "{moveDistance}", moveDistance).replace(
-        "{observerURL}", "/harmony/").replace(
-        "{moveableActions}", moveable_actions).replace(
-        "{encodedBA}", imageToBase64(visual_image)).replace(
-        "{viewId}", str(viewId) if viewId else "")
+    changeRow = (
+        _TRACKED_OBJECT_ROW_TEMPLATE.replace("{objectName}", capture.oid)
+        .replace("{safeObjectName}", safe_name)
+        .replace(
+            "{realCenter}",
+            ", ".join([f"{dim:6.0f}" for dim in cm.cc.changeSetToAxialCoord(capture)]),
+        )
+        .replace("{moveDistance}", moveDistance)
+        .replace("{observerURL}", "/harmony/")
+        .replace("{moveableActions}", moveable_actions)
+        .replace("{encodedBA}", imageToBase64(visual_image))
+        .replace("{viewId}", str(viewId) if viewId else "")
+    )
     return changeRow
 
 
@@ -907,28 +1081,39 @@ def buildObjectTable(viewId=None):
             ("allies", session.allies),
             ("enemies", session.enemies),
             ("targetable", session.targetable),
-            ("terrain", session.terrain)
+            ("terrain", session.terrain),
         ]
 
         for group_name, oids in groups:
             group_rows = []
             color = GROUP_COLORS.get(group_name)
-            is_moveable_group = (group_name == "moveable")
+            is_moveable_group = group_name == "moveable"
             for oid in oids:
                 if oid not in seen_oids:
                     for capture in cm.memory:
                         if capture.oid == oid:
-                            group_rows.append(captureToChangeRow(capture, color, is_moveable=is_moveable_group, viewId=viewId))
+                            group_rows.append(
+                                captureToChangeRow(
+                                    capture,
+                                    color,
+                                    is_moveable=is_moveable_group,
+                                    viewId=viewId,
+                                )
+                            )
                             seen_oids.add(oid)
                             break
             if group_rows:
-                changeRows.append(f"<h4>{group_name.capitalize()}</h4>" + " ".join(group_rows))
+                changeRows.append(
+                    f"<h4>{group_name.capitalize()}</h4>" + " ".join(group_rows)
+                )
 
     selectable_rows = []
     selectable_color = GROUP_COLORS.get("selectable")
     for capture in cm.memory:
         if capture.oid not in seen_oids:
-            selectable_rows.append(captureToChangeRow(capture, selectable_color, viewId=viewId))
+            selectable_rows.append(
+                captureToChangeRow(capture, selectable_color, viewId=viewId)
+            )
             seen_oids.add(capture.oid)
 
     if selectable_rows:
@@ -937,7 +1122,7 @@ def buildObjectTable(viewId=None):
     return " ".join(changeRows)
 
 
-@harmony.get('/objects')
+@harmony.get("/objects")
 def getObjectTable(viewId: Optional[str] = Query(default=None)):
     return HTMLResponse(buildObjectTable(viewId))
 
@@ -950,6 +1135,7 @@ def getInteractor():
 # Individual object endpoints
 # ---------------------------------------------------------------------------
 
+
 def _find_object(objectId: str):
     cm = _get_cm()
     try:
@@ -958,74 +1144,94 @@ def _find_object(objectId: str):
         return None
 
 
-@harmony.get('/objects/{objectId}')
+@harmony.get("/objects/{objectId}")
 def getObject(request: Request, objectId: str, footprint: str = Query(default="false")):
     cap = _find_object(objectId)
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
     footprint_enabled = footprint == "true"
     cm = _get_cm()
-    with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectUpdater.html") as f:
+    with open(
+        f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectUpdater.html"
+    ) as f:
         template = f.read()
-    return HTMLResponse(template.replace(
-        "{harmonyURL}", "/harmony/").replace(
-        "{objectName}", cap.oid).replace(
-        "{objectSettings}", buildObjectSettings(cap)).replace(
-        "{footprintToggleState}", str(not footprint_enabled).lower()).replace(
-        "{encodedBA}", imageToBase64(cm.object_visual(cap, withContours=footprint_enabled))))
+    return HTMLResponse(
+        template.replace("{harmonyURL}", "/harmony/")
+        .replace("{objectName}", cap.oid)
+        .replace("{objectSettings}", buildObjectSettings(cap))
+        .replace("{footprintToggleState}", str(not footprint_enabled).lower())
+        .replace(
+            "{encodedBA}",
+            imageToBase64(cm.object_visual(cap, withContours=footprint_enabled)),
+        )
+    )
 
 
-@harmony.post('/objects/{objectId}')
+@harmony.post("/objects/{objectId}")
 async def updateObjectSettings(request: Request, objectId: str):
-    is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
-    viewId = request.cookies.get('session_view_id')
+    is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
+    viewId = request.cookies.get("session_view_id")
     session = SESSIONS.get(viewId)
     is_moveable = session and objectId in session.moveable
-    
+
     if not (is_admin or is_moveable):
         return Response("Forbidden", status_code=403)
-        
+
     cap = _find_object(objectId)
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
-        
+
     form = await request.form()
     new_name = form.get("objectName", "").strip()
     if new_name and new_name != objectId:
         if _find_object(new_name):
             return Response("Object with that name already exists", status_code=400)
-            
+
         with DATA_LOCK:
             cap.oid = new_name
             for sid, sess in SESSIONS.items():
-                for lst in [sess.moveable, sess.selectable, sess.terrain, sess.allies, sess.enemies, sess.targetable]:
+                for lst in [
+                    sess.moveable,
+                    sess.selectable,
+                    sess.terrain,
+                    sess.allies,
+                    sess.enemies,
+                    sess.targetable,
+                ]:
                     if objectId in lst:
                         lst[lst.index(objectId)] = new_name
-                        
+
     return HTMLResponse(buildObjectTable(viewId))
 
 
-@harmony.delete('/objects/{objectId}')
+@harmony.delete("/objects/{objectId}")
 def deleteObjectSettings(request: Request, objectId: str):
-    is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
-    viewId = request.cookies.get('session_view_id')
+    is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
+    viewId = request.cookies.get("session_view_id")
     session = SESSIONS.get(viewId)
     is_moveable = session and objectId in session.moveable
-    
+
     if not (is_admin or is_moveable):
         return Response("Forbidden", status_code=403)
-        
+
     cap = _find_object(objectId)
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
-        
+
     with DATA_LOCK:
         _get_cm().deleteObject(cap.oid)
         for sid, sess in SESSIONS.items():
-            for lst in [sess.moveable, sess.selectable, sess.terrain, sess.allies, sess.enemies, sess.targetable]:
+            for lst in [
+                sess.moveable,
+                sess.selectable,
+                sess.terrain,
+                sess.allies,
+                sess.enemies,
+                sess.targetable,
+            ]:
                 if objectId in lst:
                     lst.remove(objectId)
-                    
+
     return HTMLResponse(buildObjectTable(viewId))
 
 
@@ -1033,7 +1239,7 @@ def buildObjectSettings(cap, objType=None):
     return "200"
 
 
-@harmony.get('/objects/{objectId}/settings')
+@harmony.get("/objects/{objectId}/settings")
 def getObjectSettings(objectId: str):
     cap = _find_object(objectId)
     if cap is None:
@@ -1041,12 +1247,14 @@ def getObjectSettings(objectId: str):
     return HTMLResponse(buildObjectSettings(cap))
 
 
-@harmony.post('/objects/{objectId}/type')
+@harmony.post("/objects/{objectId}/type")
 async def updateObjectType(objectId: str, objectType: str = Form(...)):
     cap = _find_object(objectId)
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
-    assert objectType in ["None", "Terrain", "Structure", "Unit"], f"Unrecognized object type: {objectType}"
+    assert objectType in ["None", "Terrain", "Structure", "Unit"], (
+        f"Unrecognized object type: {objectType}"
+    )
     return HTMLResponse(buildObjectSettings(cap, objType=objectType))
 
 
@@ -1070,9 +1278,9 @@ interactor_template = """
 """
 
 
-@harmony.get('/object_factory/{viewId}')
+@harmony.get("/object_factory/{viewId}")
 def buildObjectFactory(request: Request, viewId: str):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     sel = SESSIONS[viewId].selection
     all_cells = ([sel.firstCell] if sel.firstCell else []) + (sel.additionalCells or [])
@@ -1085,14 +1293,14 @@ def buildObjectFactory(request: Request, viewId: str):
             <div class="mt-2 mb-1">
                 <small class="text-muted">Cells ({cell_count}): <code>{cells_display}</code></small>
             </div>
-            <input type="submit" class="btn btn-primary" value="Define Object ({cell_count} {'cell' if cell_count == 1 else 'cells'})">
+            <input type="submit" class="btn btn-primary" value="Define Object ({cell_count} {"cell" if cell_count == 1 else "cells"})">
         </form>
     """)
 
 
-@harmony.post('/object_factory/{viewId}')
+@harmony.post("/object_factory/{viewId}")
 async def buildObject(request: Request, viewId: str, object_name: str = Form(...)):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     cm = _get_cm()
     objectName = str(object_name)
@@ -1117,14 +1325,15 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
         <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
         <hr>
         <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="/harmony/object_factory/{viewId}" hx-target="#interactor">
-        """)
+        """,
+    )
     html_content += _get_canvas_update_script(viewId)
     return HTMLResponse(html_content)
 
 
-@harmony.delete('/object_factory/{viewId}')
+@harmony.delete("/object_factory/{viewId}")
 def deleteObject(request: Request, viewId: str):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     cc = _get_cc()
     cm = _get_cm()
@@ -1145,9 +1354,10 @@ def deleteObject(request: Request, viewId: str):
 # Move request
 # ---------------------------------------------------------------------------
 
-@harmony.get('/request_move/{oid}/{viewId}')
+
+@harmony.get("/request_move/{oid}/{viewId}")
 def moveObjectDefinition(request: Request, oid: str, viewId: str):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     cc = _get_cc()
     cm = _get_cm()
@@ -1196,7 +1406,8 @@ def moveObjectDefinition(request: Request, oid: str, viewId: str):
 # Pixel selection
 # ---------------------------------------------------------------------------
 
-@harmony.get('/clear_pixel/{viewId}')
+
+@harmony.get("/clear_pixel/{viewId}")
 def clearPixel(viewId: str):
     if viewId in SESSIONS:
         with DATA_LOCK:
@@ -1205,7 +1416,7 @@ def clearPixel(viewId: str):
     return HTMLResponse(_get_canvas_update_script(viewId))
 
 
-@harmony.post('/select_pixel')
+@harmony.post("/select_pixel")
 async def selectPixel(request: Request):
     global SESSIONS
     cm = _get_cm()
@@ -1219,7 +1430,7 @@ async def selectPixel(request: Request):
     if cam == "VirtualMap":
         real_x = x
         real_y = y
-        if cm and hasattr(cm.cc, 'realSpaceBoundingBox'):
+        if cm and hasattr(cm.cc, "realSpaceBoundingBox"):
             scale_x, scale_y, min_x, min_y = get_conversion_params("VirtualMap")
             if scale_x > 0 and scale_y > 0:
                 real_x = (x / scale_x) + min_x
@@ -1231,23 +1442,25 @@ async def selectPixel(request: Request):
         raw_y = (y / scale_y) + offset_y
         axial_coord = cm.cc.camCoordToAxial(cam, (raw_x, raw_y))
 
-    print(f"viewId {viewId} || Received: Pixel {pixel} on Cam {cam} || Translated to Axial: {axial_coord}")
+    print(
+        f"viewId {viewId} || Received: Pixel {pixel} on Cam {cam} || Translated to Axial: {axial_coord}"
+    )
     print(f"INTERNAL SESSIONS ID: {id(SESSIONS)}")
     # Find all objects at *axial_coord* to support cycling.
     all_at_cell = _find_objects_for_axial(axial_coord)
     snapped_first = all_at_cell[0][1] if all_at_cell else None
-    
+
     with DATA_LOCK:
         session = SESSIONS.get(viewId, SessionConfig())
         existing = session.selection
-        
+
         # Determine if we should CYCLE through objects at the same cell.
         # Cycling occurs if:
         # 1. We have multiple objects at the clicked cell.
         # 2. This cell was ALREADY the first selected cell.
         # 3. No additional cells (second cell) are currently selected (or we maintain object context).
-        should_cycle = (len(all_at_cell) > 1 and existing.firstCell == axial_coord)
-        
+        should_cycle = len(all_at_cell) > 1 and existing.firstCell == axial_coord
+
         if should_cycle:
             oids = [o[0].oid for o in all_at_cell]
             try:
@@ -1255,18 +1468,18 @@ async def selectPixel(request: Request):
                 next_idx = (current_idx + 1) % len(oids)
             except (ValueError, TypeError):
                 next_idx = 0
-            
+
             chosen_obj, origin_cell = all_at_cell[next_idx]
             session.selected_oid = chosen_obj.oid
             session.selection.firstCell = origin_cell
-            axial_coord = origin_cell # snap for consistency
-            
+            axial_coord = origin_cell  # snap for consistency
+
         elif all_at_cell and not existing.firstCell:
             # First click on an object cell — select the first one in the list.
             chosen_obj, origin_cell = all_at_cell[0]
             session.selected_oid = chosen_obj.oid
             session.selection.firstCell = origin_cell
-            axial_coord = origin_cell 
+            axial_coord = origin_cell
         elif existing.firstCell:
             if existing.secondCell is None:
                 session.selection.additionalCells = [axial_coord]
@@ -1274,12 +1487,16 @@ async def selectPixel(request: Request):
                 session.selection.additionalCells.insert(0, axial_coord)
         else:
             session.selection = CellSelection(firstCell=axial_coord)
-            session.selected_oid = None # new single cell click, no object implied yet
-            
+            session.selected_oid = None  # new single cell click, no object implied yet
+
         # Ensure selected_oid is synced with what we find at the finally chosen firstCell
         if not all_at_cell and not session.selection.firstCell:
             session.selected_oid = None
-        elif not should_cycle and session.selection.firstCell == axial_coord and all_at_cell:
+        elif (
+            not should_cycle
+            and session.selection.firstCell == axial_coord
+            and all_at_cell
+        ):
             # We just selected the cell for the first time, or clicked into it.
             session.selected_oid = all_at_cell[0][0].oid
 
@@ -1288,7 +1505,7 @@ async def selectPixel(request: Request):
     return await render_interactor(request, viewId, axial_coord)
 
 
-@harmony.post('/toggle_selection/{viewId}')
+@harmony.post("/toggle_selection/{viewId}")
 async def toggleSelection(request: Request, viewId: str):
     """
     Cycles to the next object at the currently selected firstCell.
@@ -1297,10 +1514,10 @@ async def toggleSelection(request: Request, viewId: str):
     session = SESSIONS.get(viewId)
     if not session or not session.selection.firstCell:
         return HTMLResponse("")
-    
+
     axial_coord = session.selection.firstCell
     all_at_cell = _find_objects_for_axial(axial_coord)
-    
+
     if len(all_at_cell) > 1:
         oids = [o[0].oid for o in all_at_cell]
         try:
@@ -1308,24 +1525,24 @@ async def toggleSelection(request: Request, viewId: str):
             next_idx = (current_idx + 1) % len(oids)
         except (ValueError, TypeError):
             next_idx = 0
-        
+
         chosen_obj, origin_cell = all_at_cell[next_idx]
         session.selected_oid = chosen_obj.oid
         session.selection.firstCell = origin_cell
-    
-    # We reuse the selectPixel interactor rendering by manually constructing what a selectPixel 
-    # call would return, but since we don't have a 'form' with 'selectedPixel', 
+
+    # We reuse the selectPixel interactor rendering by manually constructing what a selectPixel
+    # call would return, but since we don't have a 'form' with 'selectedPixel',
     # we just call a helper or re-run the relevant parts.
-    # For now, I'll just have toggleSelection return a redirect or 
+    # For now, I'll just have toggleSelection return a redirect or
     # I'll extract the interactor-rendering logic to a helper.
-    # Actually, I'll just redirect to a GET version of select_pixel if I had one, 
+    # Actually, I'll just redirect to a GET version of select_pixel if I had one,
     # but I don't. I'll just duplicate the rendering logic or call the main logic.
-    
+
     # Let's extract the rendering logic to a helper called 'render_interactor'.
     return await render_interactor(request, viewId, axial_coord)
 
 
-@harmony.post('/select_unit/{oid}/{viewId}')
+@harmony.post("/select_unit/{oid}/{viewId}")
 async def selectUnitInTable(request: Request, oid: str, viewId: str):
     """Selects an object by its OID and focuses the interactor on its origin."""
     cm = _get_cm()
@@ -1333,17 +1550,17 @@ async def selectUnitInTable(request: Request, oid: str, viewId: str):
     target = next((obj for obj in cm.memory if obj.oid == oid), None)
     if not target:
         return HTMLResponse("Object not found", status_code=404)
-    
+
     # Find origin cell
     axials = _get_constituent_axials(target, cc)
     origin_cell = axials[0] if axials else cc.hex.changeSetToAxialCoord(target)
-    
+
     with DATA_LOCK:
         session = SESSIONS.get(viewId, SessionConfig())
         session.selection = CellSelection(firstCell=origin_cell)
         session.selected_oid = oid
         SESSIONS[viewId] = session
-        
+
     return await render_interactor(request, viewId, origin_cell)
 
 
@@ -1359,17 +1576,23 @@ async def render_interactor(request, viewId, axial_coord):
 
     def get_object_type(oid, viewId):
         session = SESSIONS.get(viewId)
-        if not session: return "Unknown"
-        if oid in session.moveable: return "Moveable"
-        if oid in session.allies: return "Ally"
-        if oid in session.enemies: return "Enemy"
-        if oid in session.targetable: return "Targetable"
-        if oid in session.terrain: return "Terrain"
+        if not session:
+            return "Unknown"
+        if oid in session.moveable:
+            return "Moveable"
+        if oid in session.allies:
+            return "Ally"
+        if oid in session.enemies:
+            return "Enemy"
+        if oid in session.targetable:
+            return "Targetable"
+        if oid in session.terrain:
+            return "Terrain"
         return "Selectable"
 
     # Find ALL objects at the first selected cell to display "Object X of Y"
     all_at_first = _find_objects_for_axial(first)
-    
+
     # Identify the specific object we are showing (the one in session.selected_oid)
     first_obj = None
     if session.selected_oid:
@@ -1377,7 +1600,7 @@ async def render_interactor(request, viewId, axial_coord):
             if obj.oid == session.selected_oid:
                 first_obj = obj
                 break
-    
+
     # Fallback to first object if not specifically selected or found
     if not first_obj and all_at_first:
         first_obj = all_at_first[0][0]
@@ -1390,12 +1613,16 @@ async def render_interactor(request, viewId, axial_coord):
         if obj_count > 1:
             # Find current index
             oids = [o[0].oid for o in all_at_first]
-            curr_idx = oids.index(session.selected_oid) if session.selected_oid in oids else 0
-            info_html += f"<div class='alert alert-info py-1 px-2 mb-2'><small>Unit {curr_idx+1} of {obj_count} at this cell</small></div>"
+            curr_idx = (
+                oids.index(session.selected_oid) if session.selected_oid in oids else 0
+            )
+            info_html += f"<div class='alert alert-info py-1 px-2 mb-2'><small>Unit {curr_idx + 1} of {obj_count} at this cell</small></div>"
 
     if first_obj:
         o_type = get_object_type(first_obj.oid, viewId)
-        info_html += f"<h3>Object: {first_obj.oid} <br><small>Type: {o_type}</small></h3>"
+        info_html += (
+            f"<h3>Object: {first_obj.oid} <br><small>Type: {o_type}</small></h3>"
+        )
 
     if selected.additionalCells:
         info_html += "<hr><h3>Additional Selections:</h3>"
@@ -1403,16 +1630,20 @@ async def render_interactor(request, viewId, axial_coord):
             if i > 0:
                 info_html += "<hr style='margin: 10px 0; border-top: 1px dashed #ccc;'>"
             dist = cm.cc.axial_distance(first, cell)
-            
+
             # Find ALL objects at this additional cell
             cell_objs = _find_objects_for_axial(cell)
             obj_str = ""
-            for (obj, _origin) in cell_objs:
+            for obj, _origin in cell_objs:
                 o_type = get_object_type(obj.oid, viewId)
                 obj_str += f" <br>-> Object: {obj.oid} ({o_type})"
-            
-            style = "border: 2px solid cyan; padding: 5px; margin: 2px;" if i == 0 else "padding: 5px; margin: 2px;"
-            label = "Latest Selection" if i == 0 else f"Selection {i+1}"
+
+            style = (
+                "border: 2px solid cyan; padding: 5px; margin: 2px;"
+                if i == 0
+                else "padding: 5px; margin: 2px;"
+            )
+            label = "Latest Selection" if i == 0 else f"Selection {i + 1}"
             info_html += f"<div style='{style}'><b>{label}: {cell}</b><br>Dist to First: {dist} cells{obj_str}</div>"
 
     actions_html = ""
@@ -1427,15 +1658,15 @@ async def render_interactor(request, viewId, axial_coord):
             """
 
         # Move button logic: user must have "Moveable" permission or be an administrator
-        is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
+        is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
         is_moveable = first_obj.oid in session.moveable
-        
+
         if is_admin or is_moveable:
             if selected.additionalCells:
                 actions_html += f"""
                     <input type="button" class="btn btn-info" value="Move {first_obj.oid} Here" hx-get="/harmony/request_move/{first_obj.oid}/{viewId}" hx-target="#interactor">
                 """
-        
+
         if is_admin:
             # Delete button is typically an admin action
             if not selected.additionalCells:
@@ -1443,7 +1674,7 @@ async def render_interactor(request, viewId, axial_coord):
                    <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="/harmony/object_factory/{viewId}" hx-target="#interactor">
                 """
     else:
-        is_admin = request.app.state.config.get('HARMONY_TEMPLATE') == "Harmony.html"
+        is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
         if is_admin:
             actions_html += f"""
                 <div id="object_factory">
@@ -1461,7 +1692,7 @@ async def render_interactor(request, viewId, axial_coord):
     return HTMLResponse(html_content)
 
 
-@harmony.post('/select_additional_pixel/{viewId}')
+@harmony.post("/select_additional_pixel/{viewId}")
 def selectAdditionalPixel(viewId: str):
     pass
 
@@ -1470,48 +1701,49 @@ def selectAdditionalPixel(viewId: str):
 # Minimap stream
 # ---------------------------------------------------------------------------
 
-@harmony.get('/minimap/{viewId}')
+
+@harmony.get("/minimap/{viewId}")
 def minimapResponse(viewId: str):
     cm = _get_cm()
     broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(cm))
-    return StreamingResponse(broadcaster.subscribe(), media_type='multipart/x-mixed-replace; boundary=frame')
+    return StreamingResponse(
+        broadcaster.subscribe(), media_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Session control panel
 # ---------------------------------------------------------------------------
 
-@harmony.get('/control')
+
+@harmony.get("/control")
 def session_control_list(request: Request):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     cm = _get_cm()
-    return templates.TemplateResponse("SessionList.html", {
-        "request": request,
-        "sessions": SESSIONS.keys()
-    })
+    return templates.TemplateResponse(
+        "SessionList.html", {"request": request, "sessions": SESSIONS.keys()}
+    )
 
 
-@harmony.get('/control/{viewId}')
+@harmony.get("/control/{viewId}")
 def session_control_panel(request: Request, viewId: str):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     if viewId not in SESSIONS:
         return Response(f"Session {viewId} not found", status_code=404)
     cm = _get_cm()
     config = SESSIONS.get(viewId)
     objects = cm.memory if cm else []
-    return templates.TemplateResponse("ControlPanel.html", {
-        "request": request,
-        "viewId": viewId,
-        "config": config,
-        "objects": objects
-    })
+    return templates.TemplateResponse(
+        "ControlPanel.html",
+        {"request": request, "viewId": viewId, "config": config, "objects": objects},
+    )
 
 
-@harmony.post('/control/{viewId}/update')
+@harmony.post("/control/{viewId}/update")
 async def update_session_config(viewId: str, request: Request):
-    if request.app.state.config.get('HARMONY_TEMPLATE') != "Harmony.html":
+    if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     if viewId not in SESSIONS:
         return Response(f"Session {viewId} not found", status_code=404)
@@ -1538,12 +1770,13 @@ async def update_session_config(viewId: str, request: Request):
             new_config.moveable.append(oid)
 
     SESSIONS[viewId] = new_config
-    return RedirectResponse(url=f'/harmony/control/{viewId}', status_code=303)
+    return RedirectResponse(url=f"/harmony/control/{viewId}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
 # Static file serving (bootstrap, htmx, etc.)
 # ---------------------------------------------------------------------------
+
 
 def _make_static_router():
     """Creates routes for static files in the harmony app."""
@@ -1554,72 +1787,101 @@ def _make_static_router():
 # App factory
 # ---------------------------------------------------------------------------
 
-def _build_fastapi_app(template_name="Harmony.html", include_configurator=False) -> FastAPI:
+
+def _build_fastapi_app(
+    template_name="Harmony.html", include_configurator=False
+) -> FastAPI:
     """Create a FastAPI app for harmony."""
     global _cc, _cm
 
     app = FastAPI()
 
     # State
-    app.state.config = {'HARMONY_TEMPLATE': template_name}
+    app.state.config = {"HARMONY_TEMPLATE": template_name}
 
     # Include the harmony router
     app.include_router(harmony)
 
     # Root redirect
-    @app.get('/')
+    @app.get("/")
     def index():
-        return RedirectResponse('/harmony/', status_code=303)
+        return RedirectResponse("/harmony/", status_code=303)
 
     # Static files
-    @app.get('/bootstrap.min.css')
+    @app.get("/bootstrap.min.css")
     def getBSCSS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.css", "r") as f:
             content = f.read()
-        return Response(content, media_type="text/css", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="text/css",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
-    @app.get('/bootstrap.min.js')
+    @app.get("/bootstrap.min.js")
     def getBSJS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
-    @app.get('/htmx.min.js')
+    @app.get("/htmx.min.js")
     def getHTMX():
         with open(f"{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
-    @app.get('/HarmonyTemplate.css')
+    @app.get("/HarmonyTemplate.css")
     def getHarmonyCSS():
-        with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyTemplate.css", "r") as f:
+        with open(
+            f"{os.path.dirname(__file__)}/harmony_templates/HarmonyTemplate.css", "r"
+        ) as f:
             content = f.read()
-        return Response(content, media_type="text/css", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="text/css",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
-    @app.get('/HarmonyCanvas.js')
+    @app.get("/HarmonyCanvas.js")
     def getHarmonyCanvasJS():
-        with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyCanvas.js", "r") as f:
+        with open(
+            f"{os.path.dirname(__file__)}/harmony_templates/HarmonyCanvas.js", "r"
+        ) as f:
             content = f.read()
-        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
     # Mount Flask calibrator/observer as WSGI sub-apps if needed
     if include_configurator:
         from flask import Flask as _Flask
+
         flask_sub = _Flask(__name__ + "_sub")
 
         from observer.configurator import configurator as _cfg_bp
         from observer.calibrator import calibrator as _cal_bp
 
-        flask_sub.register_blueprint(_cfg_bp, url_prefix='/configurator')
-        flask_sub.register_blueprint(_cal_bp, url_prefix='/calibrator')
+        flask_sub.register_blueprint(_cfg_bp, url_prefix="/configurator")
+        flask_sub.register_blueprint(_cal_bp, url_prefix="/calibrator")
 
-        @flask_sub.route('/')
+        @flask_sub.route("/")
         def _flask_root():
             from flask import redirect
-            return redirect('/configurator', code=303)
 
-        app.mount('/configurator', WSGIMiddleware(flask_sub))
-        app.mount('/calibrator', WSGIMiddleware(flask_sub))
+            return redirect("/configurator", code=303)
+
+        app.mount("/configurator", WSGIMiddleware(flask_sub))
+        app.mount("/calibrator", WSGIMiddleware(flask_sub))
 
     return app
 
@@ -1634,17 +1896,18 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
         cc = HexCaptureConfiguration()
         if cc.hex is None:
             cc.hex = HexGridConfiguration()
-            
+
         if os.environ.get("MOCK_HARDWARE") == "1":
             import numpy as np
             from unittest import mock
+
             mock_cam = mock.MagicMock()
             mock_cam.camName = "Camera 0"
             mock_cam.mostRecentFrame = np.zeros((480, 640, 3), dtype=np.uint8)
             cc.cameras = {"Camera 0": mock_cam}
         else:
             cc.capture()
-            
+
         _cc = cc
     else:
         cc = _cc
@@ -1655,43 +1918,67 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
     # Expose on app.state for test compatibility
     app.state.cc = cc
     app.state.cm = cm
-    app.state.config = {'HARMONY_TEMPLATE': template_name}
+    app.state.config = {"HARMONY_TEMPLATE": template_name}
 
     app.include_router(harmony)
 
-    @app.get('/')
+    @app.get("/")
     def index():
-        return RedirectResponse('/harmony/', status_code=303)
+        return RedirectResponse("/harmony/", status_code=303)
 
-    @app.get('/bootstrap.min.css')
+    @app.get("/bootstrap.min.css")
     def getBSCSS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.css", "r") as f:
             content = f.read()
-        return Response(content, media_type="text/css", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="text/css",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
-    @app.get('/bootstrap.min.js')
+    @app.get("/bootstrap.min.js")
     def getBSJS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
-    @app.get('/htmx.min.js')
+    @app.get("/htmx.min.js")
     def getHTMX():
         with open(f"{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
-    @app.get('/HarmonyTemplate.css')
+    @app.get("/HarmonyTemplate.css")
     def getHarmonyCSS():
-        with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyTemplate.css", "r") as f:
+        with open(
+            f"{os.path.dirname(__file__)}/harmony_templates/HarmonyTemplate.css", "r"
+        ) as f:
             content = f.read()
-        return Response(content, media_type="text/css", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="text/css",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
-    @app.get('/HarmonyCanvas.js')
+    @app.get("/HarmonyCanvas.js")
     def getHarmonyCanvasJS():
-        with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyCanvas.js", "r") as f:
+        with open(
+            f"{os.path.dirname(__file__)}/harmony_templates/HarmonyCanvas.js", "r"
+        ) as f:
             content = f.read()
-        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=31536000"},
+        )
 
     APPS.append(app)
 
@@ -1712,6 +1999,7 @@ class _CaptureServiceProxy:
     """Thin proxy passed to calibrator.registerCaptureService().
     calibrator accesses app.cm to call cycle(); we forward that
     to the module-level _cm global so it always sees the live machine."""
+
     @property
     def cm(self):
         return _cm
@@ -1720,6 +2008,7 @@ class _CaptureServiceProxy:
 # ---------------------------------------------------------------------------
 # Server startup
 # ---------------------------------------------------------------------------
+
 
 def start_servers():
     global _cc, _cm, APPS
@@ -1751,7 +2040,8 @@ def start_servers():
 
     # --- Admin App (port 7001) ---
     from observer.CalibratedObserver import CalibrationObserver as _CalObs
-    admin_app = FastAPI(lifespan=lifespan) # Shared State
+
+    admin_app = FastAPI(lifespan=lifespan)  # Shared State
     admin_app.state.cc = cc
     # This cm is HarmonyMachine, configurator expects CalibrationObserver for some parts?
     # Actually configurator.py line 22-23:
@@ -1763,22 +2053,26 @@ def start_servers():
     # _cm = None
     # We should ensure the admin_app.state.cm is what's expected.
     # The old flask_sub.cm was _CalObs(cc).
-    admin_app.state.cm = _CalObs(cc) # For configurator
-    admin_app.state.config = {'HARMONY_TEMPLATE': 'Harmony.html'}
+    admin_app.state.cm = _CalObs(cc)  # For configurator
+    admin_app.state.config = {"HARMONY_TEMPLATE": "Harmony.html"}
     APPS.append(admin_app)
 
     admin_app.include_router(harmony)
 
-    @admin_app.get('/')
+    @admin_app.get("/")
     def admin_index():
-        return RedirectResponse('/harmony/', status_code=303)
+        return RedirectResponse("/harmony/", status_code=303)
 
     for route_name, filename, media_type in [
-        ('/bootstrap.min.css', 'templates/bootstrap.min.css', 'text/css'),
-        ('/bootstrap.min.js', 'templates/bootstrap.min.js', 'application/javascript'),
-        ('/htmx.min.js', 'templates/htmx.min.js', 'application/javascript'),
-        ('/HarmonyTemplate.css', 'harmony_templates/HarmonyTemplate.css', 'text/css'),
-        ('/HarmonyCanvas.js', 'harmony_templates/HarmonyCanvas.js', 'application/javascript'),
+        ("/bootstrap.min.css", "templates/bootstrap.min.css", "text/css"),
+        ("/bootstrap.min.js", "templates/bootstrap.min.js", "application/javascript"),
+        ("/htmx.min.js", "templates/htmx.min.js", "application/javascript"),
+        ("/HarmonyTemplate.css", "harmony_templates/HarmonyTemplate.css", "text/css"),
+        (
+            "/HarmonyCanvas.js",
+            "harmony_templates/HarmonyCanvas.js",
+            "application/javascript",
+        ),
     ]:
         _fp = os.path.join(os.path.dirname(__file__), filename)
         _mt = media_type
@@ -1787,6 +2081,7 @@ def start_servers():
             def _route():
                 with open(fp, "r") as f:
                     return Response(f.read(), media_type=mt)
+
             return _route
 
         admin_app.add_api_route(route_name, make_static(), methods=["GET"])
@@ -1798,7 +2093,7 @@ def start_servers():
     # registerCaptureService(_CaptureServiceProxy())
 
     # --- User App (port 7000) ---
-    user_config = {'HARMONY_TEMPLATE': 'HarmonyUser.html'}
+    user_config = {"HARMONY_TEMPLATE": "HarmonyUser.html"}
 
     user_app = FastAPI(lifespan=lifespan)
     user_app.state.cc = cc
@@ -1808,16 +2103,20 @@ def start_servers():
 
     user_app.include_router(harmony)
 
-    @user_app.get('/')
+    @user_app.get("/")
     def user_index():
-        return RedirectResponse('/harmony/', status_code=303)
+        return RedirectResponse("/harmony/", status_code=303)
 
     for route_name, filename, media_type in [
-        ('/bootstrap.min.css', 'templates/bootstrap.min.css', 'text/css'),
-        ('/bootstrap.min.js', 'templates/bootstrap.min.js', 'application/javascript'),
-        ('/htmx.min.js', 'templates/htmx.min.js', 'application/javascript'),
-        ('/HarmonyTemplate.css', 'harmony_templates/HarmonyTemplate.css', 'text/css'),
-        ('/HarmonyCanvas.js', 'harmony_templates/HarmonyCanvas.js', 'application/javascript'),
+        ("/bootstrap.min.css", "templates/bootstrap.min.css", "text/css"),
+        ("/bootstrap.min.js", "templates/bootstrap.min.js", "application/javascript"),
+        ("/htmx.min.js", "templates/htmx.min.js", "application/javascript"),
+        ("/HarmonyTemplate.css", "harmony_templates/HarmonyTemplate.css", "text/css"),
+        (
+            "/HarmonyCanvas.js",
+            "harmony_templates/HarmonyCanvas.js",
+            "application/javascript",
+        ),
     ]:
         _fp = os.path.join(os.path.dirname(__file__), filename)
         _mt = media_type
@@ -1826,6 +2125,7 @@ def start_servers():
             def _route():
                 with open(fp, "r") as f:
                     return Response(f.read(), media_type=mt)
+
             return _route
 
         user_app.add_api_route(route_name, make_static_user(), methods=["GET"])
@@ -1843,8 +2143,15 @@ def start_servers():
     # installation — only the main-thread uvicorn should own SIGINT/SIGTERM.
     def run_user():
         import asyncio
+
         print("Launching Harmony User Server on 7000")
-        cfg = uvicorn.Config(user_app, host="0.0.0.0", port=7000, log_level="warning", timeout_graceful_shutdown=1)
+        cfg = uvicorn.Config(
+            user_app,
+            host="0.0.0.0",
+            port=7000,
+            log_level="warning",
+            timeout_graceful_shutdown=1,
+        )
         server = uvicorn.Server(cfg)
         asyncio.run(server.serve())
 
@@ -1853,13 +2160,21 @@ def start_servers():
 
     # Launch admin server (blocking)
     import uvicorn
+
     print(f"Launching Harmony Admin Server on 7001 (PID: {os.getpid()})")
-    
-    cfg = uvicorn.Config(admin_app, host="0.0.0.0", port=7001, log_level="info", timeout_graceful_shutdown=1)
+
+    cfg = uvicorn.Config(
+        admin_app,
+        host="0.0.0.0",
+        port=7001,
+        log_level="info",
+        timeout_graceful_shutdown=1,
+    )
     server = uvicorn.Server(cfg)
 
     # Monkey-patch uvicorn's handle_exit to set our shutdown event immediately
     original_handle_exit = server.handle_exit
+
     def patched_handle_exit(*args, **kwargs):
         print(f"Server exit triggered, setting shutdown event.")
         SHUTDOWN_EVENT.set()
@@ -1869,7 +2184,7 @@ def start_servers():
             with broadcaster.condition:
                 broadcaster.condition.notify_all()
         return original_handle_exit(*args, **kwargs)
-    
+
     server.handle_exit = patched_handle_exit
 
     server.run()

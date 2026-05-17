@@ -2,6 +2,7 @@
 Unit tests for observer/CalibratedObserver.py focusing on coordinate converters,
 geometry calculations, contour scaling, point ordering, and helper functions.
 """
+
 import pytest
 import numpy as np
 import cv2
@@ -9,7 +10,8 @@ from unittest import mock
 
 # Ensure import of observer modules
 import sys, os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from observer.CalibratedObserver import (
     distanceFormula,
@@ -23,6 +25,7 @@ from observer.CalibratedObserver import (
 # ---------------------------------------------------------------------------
 # Test Pure Mathematical and Helper Functions
 # ---------------------------------------------------------------------------
+
 
 class TestHelperFunctions:
     def test_distance_formula_2d(self):
@@ -44,7 +47,9 @@ class TestHelperFunctions:
 
     def test_scale_contour(self):
         # A simple square contour: [[10, 10], [20, 10], [20, 20], [10, 20]]
-        contour = np.array([[[10, 10]], [[20, 10]], [[20, 20]], [[10, 20]]], dtype=np.int32)
+        contour = np.array(
+            [[[10, 10]], [[20, 10]], [[20, 20]], [[10, 20]]], dtype=np.int32
+        )
         scaled = scale_contour(contour, 2.0)
         assert scaled.shape == contour.shape
         # Centroid is (15, 15). Center-offset is scaled by 2.
@@ -67,7 +72,7 @@ class TestHelperFunctions:
         cam_pts = [(0, 10), (10, 10), (10, 0), (0, 0)]
         real_pts = [(0, 100), (100, 100), (100, 0), (0, 0)]
         ordered_cam, ordered_real = order_points_clockwise(cam_pts, real_pts)
-        
+
         # Verify ordering is clockwise/counterclockwise by checking angles
         # The ordering should be consistent between both arrays
         assert len(ordered_cam) == 4
@@ -92,6 +97,7 @@ class TestHelperFunctions:
 # Test CameraRealSpaceConverter
 # ---------------------------------------------------------------------------
 
+
 class TestCameraRealSpaceConverter:
     def test_get_angle(self):
         pt0 = (0, 0)
@@ -103,7 +109,7 @@ class TestCameraRealSpaceConverter:
     def test_triangle_to_square(self):
         # A right-angled triangle in camera space:
         # A (0,0) - 90 deg, B (10,0) - 60 deg, D (0, 5.7735) - 30 deg (approx)
-        tri_pts = [(0, 0), (10, 0), (0, 17.3205)] # 30-60-90 triangle
+        tri_pts = [(0, 0), (10, 0), (0, 17.3205)]  # 30-60-90 triangle
         square = CameraRealSpaceConverter.triangleToSquare(tri_pts)
         assert len(square) == 4
         # Pt A (90 deg corner) should be (0,0)
@@ -114,9 +120,7 @@ class TestCameraRealSpaceConverter:
         cam_tri = [(0, 0), (10, 0), (0, 17.32)]
         real_tri = [(0, 0), (100, 0), (0, 173.2)]
         converter = CameraRealSpaceConverter(
-            camName="Cam1",
-            camTriPts=cam_tri,
-            realTriPts=real_tri
+            camName="Cam1", camTriPts=cam_tri, realTriPts=real_tri
         )
         assert converter.camRect.shape == (4, 2)
         assert converter.realRect.shape == (4, 2)
@@ -127,9 +131,7 @@ class TestCameraRealSpaceConverter:
         cam_pts = [(0, 0), (10, 0), (10, 10), (0, 10)]
         real_pts = [(0, 0), (100, 0), (100, 100), (0, 100)]
         converter = CameraRealSpaceConverter(
-            camName="Cam2",
-            camTriPts=cam_pts,
-            realTriPts=real_pts
+            camName="Cam2", camTriPts=cam_pts, realTriPts=real_pts
         )
         assert len(converter.camRect) == 4
         assert converter.M is not None
@@ -139,9 +141,7 @@ class TestCameraRealSpaceConverter:
         cam_pts = [(0, 0), (10, 0), (10, 10), (0, 10), (5, 5)]
         real_pts = [(0, 0), (100, 0), (100, 100), (0, 100), (50, 50)]
         converter = CameraRealSpaceConverter(
-            camName="Cam3",
-            camTriPts=cam_pts,
-            realTriPts=real_pts
+            camName="Cam3", camTriPts=cam_pts, realTriPts=real_pts
         )
         assert converter.M is not None
 
@@ -156,7 +156,7 @@ class TestCameraRealSpaceConverter:
         cam_pts = [(0, 0), (20, 0), (20, 20), (0, 20)]
         real_pts = [(0, 0), (100, 0), (100, 100), (0, 100)]
         converter = CameraRealSpaceConverter("CamRoundTrip", cam_pts, real_pts)
-        
+
         # Convert camera (10, 10) -> should be real (50, 50)
         real_coord = converter.convertCameraToRealSpace((10, 10))
         assert real_coord[0] == pytest.approx(50.0)
@@ -182,20 +182,18 @@ class TestCameraRealSpaceConverter:
 # Test RealSpaceConverter
 # ---------------------------------------------------------------------------
 
+
 class TestRealSpaceConverter:
     @pytest.fixture
     def rsc_pairs(self):
         # Format: [ [camName, [camTriPts, realTriPts]], ... ]
         cam1_pts = [(0, 0), (10, 0), (10, 10), (0, 10)]
         real1_pts = [(0, 0), (100, 0), (100, 100), (0, 100)]
-        
+
         cam2_pts = [(0, 0), (5, 0), (5, 5), (0, 5)]
         real2_pts = [(100, 100), (200, 100), (200, 200), (100, 200)]
-        
-        return [
-            ("Cam1", [cam1_pts, real1_pts]),
-            ("Cam2", [cam2_pts, real2_pts])
-        ]
+
+        return [("Cam1", [cam1_pts, real1_pts]), ("Cam2", [cam2_pts, real2_pts])]
 
     def test_init_rsc(self, rsc_pairs):
         rsc = RealSpaceConverter(rsc_pairs)
@@ -207,16 +205,16 @@ class TestRealSpaceConverter:
         # Let's add multiple converters to Cam1
         cam1_pts_a = [(0, 0), (10, 0), (10, 10), (0, 10)]
         real1_pts_a = [(0, 0), (100, 0), (100, 100), (0, 100)]
-        
+
         cam1_pts_b = [(50, 50), (60, 50), (60, 60), (50, 60)]
         real1_pts_b = [(500, 500), (600, 500), (600, 600), (500, 600)]
-        
+
         pairs = [
             ("Cam1", [cam1_pts_a, real1_pts_a]),
-            ("Cam1", [cam1_pts_b, real1_pts_b])
+            ("Cam1", [cam1_pts_b, real1_pts_b]),
         ]
         rsc = RealSpaceConverter(pairs)
-        
+
         # A point close to (5,5) should select the first converter
         conv_near_a = rsc.closestConverterToCamCoord("Cam1", (2, 2))
         assert conv_near_a.camSpaceCentroid.tolist() == [5, 5]
@@ -234,7 +232,7 @@ class TestRealSpaceConverter:
 
     def test_cam_and_real_conversions(self, rsc_pairs):
         rsc = RealSpaceConverter(rsc_pairs)
-        
+
         real_pt = rsc.camCoordToRealSpace("Cam1", (5, 5))
         assert real_pt[0] == pytest.approx(50.0)
         assert real_pt[1] == pytest.approx(50.0)
@@ -245,7 +243,7 @@ class TestRealSpaceConverter:
 
     def test_change_set_calculations(self, rsc_pairs):
         rsc = RealSpaceConverter(rsc_pairs)
-        
+
         # Mock ChangeSet and CameraChange objects
         change_cam1 = mock.MagicMock()
         change_cam1.changeType = "add"
@@ -253,7 +251,10 @@ class TestRealSpaceConverter:
 
         change_cam2 = mock.MagicMock()
         change_cam2.changeType = "add"
-        change_cam2.center = (2.5, 2.5) # Centroid of Cam2 is (2.5, 2.5) in Cam, mapping to (150, 150) in Real
+        change_cam2.center = (
+            2.5,
+            2.5,
+        )  # Centroid of Cam2 is (2.5, 2.5) in Cam, mapping to (150, 150) in Real
 
         cs = mock.MagicMock()
         cs.changeSet = {"Cam1": change_cam1, "Cam2": change_cam2}
@@ -282,7 +283,7 @@ class TestRealSpaceConverter:
 
     def test_tracked_object_calculations(self, rsc_pairs):
         rsc = RealSpaceConverter(rsc_pairs)
-        
+
         change_cam1 = mock.MagicMock()
         change_cam1.changeType = "add"
         change_cam1.center = (5, 5)
@@ -292,7 +293,7 @@ class TestRealSpaceConverter:
 
         prev_change_cam1 = mock.MagicMock()
         prev_change_cam1.changeType = "add"
-        prev_change_cam1.center = (10, 10) # (100, 100) in Real Space
+        prev_change_cam1.center = (10, 10)  # (100, 100) in Real Space
 
         prev_version = mock.MagicMock()
         prev_version.empty = False
@@ -307,10 +308,12 @@ class TestRealSpaceConverter:
         obj2 = mock.MagicMock()
         change2 = mock.MagicMock()
         change2.changeType = "add"
-        change2.center = (8, 8) # (80, 80) in Real space
+        change2.center = (8, 8)  # (80, 80) in Real space
         obj2.changeSet = {"Cam1": change2}
 
-        assert rsc.distanceBetweenObjects(obj, obj2) == pytest.approx(30.0 * (2**0.5), abs=0.01)
+        assert rsc.distanceBetweenObjects(obj, obj2) == pytest.approx(
+            30.0 * (2**0.5), abs=0.01
+        )
 
     def test_tracked_object_last_distance_empty_prev(self, rsc_pairs):
         rsc = RealSpaceConverter(rsc_pairs)
@@ -326,14 +329,14 @@ class TestRealSpaceConverter:
         cam1.mostRecentFrame = np.zeros((100, 100, 3), dtype=np.uint8)
         cam1.cropToActiveZone.return_value = cam1.mostRecentFrame
         cam1.activeZone = [[0, 0], [10, 0], [10, 10], [0, 10]]
-        
+
         cam2 = mock.MagicMock()
         cam2.mostRecentFrame = np.zeros((100, 100, 3), dtype=np.uint8)
         cam2.cropToActiveZone.return_value = cam2.mostRecentFrame
         cam2.activeZone = [[0, 0], [5, 0], [5, 5], [0, 5]]
-        
+
         cameras = {"Cam1": cam1, "Cam2": cam2}
-        
+
         overlap_contours = rsc.cameraRealSpaceOverlap(cameras)
         assert isinstance(overlap_contours, (list, tuple))
 
@@ -345,11 +348,11 @@ class TestRealSpaceConverter:
         cam1 = mock.MagicMock()
         cam1.mostRecentFrame = np.zeros((100, 100, 3), dtype=np.uint8)
         cam1.cropToActiveZone.return_value = cam1.mostRecentFrame
-        
+
         cam2 = mock.MagicMock()
         cam2.mostRecentFrame = np.zeros((100, 100, 3), dtype=np.uint8)
         cam2.cropToActiveZone.return_value = cam2.mostRecentFrame
-        
+
         cameras = {"Cam1": cam1, "Cam2": cam2}
         overlaid = rsc.unwarpedOverlaidCameras(cameras)
         assert overlaid.shape == (1200, 1200, 3)
@@ -359,9 +362,11 @@ class TestRealSpaceConverter:
 # Test CalibratedObserver
 # ---------------------------------------------------------------------------
 
+
 class TestCalibratedObserverClass:
     def test_circle_to_contour(self):
         from observer.CalibratedObserver import CalibratedObserver
+
         center = (50, 50)
         radius = 10
         contour = CalibratedObserver.circle_to_contour(center, radius, num_points=20)
@@ -369,15 +374,16 @@ class TestCalibratedObserverClass:
         # Check that all points lie approx on the circle of radius 10
         for pt in contour:
             x, y = pt[0]
-            dist = ((x - 50)**2 + (y - 50)**2)**0.5
+            dist = ((x - 50) ** 2 + (y - 50) ** 2) ** 0.5
             assert dist == pytest.approx(10.0, abs=1.5)
 
     def test_distinct_colors(self):
         from observer.CalibratedObserver import CalibratedObserver
+
         # Mock cc to pass init
         mock_cc = mock.MagicMock()
         obs = CalibratedObserver(mock_cc)
-        
+
         colors = obs.distinct_colors(n=1, new=True)
         assert len(colors) == 1
         for c in colors:
@@ -390,27 +396,32 @@ class TestCalibratedObserverClass:
 
     def test_calibrate_to_object_and_build_rsc(self):
         from observer.CalibratedObserver import CalibrationObserver
+
         mock_cc = mock.MagicMock()
         mock_cc.cameras = {"Cam1": mock.MagicMock()}
-        
+
         obs = CalibrationObserver(mock_cc)
-        
+
         obs.next_triangle = [[10, 10], [20, 20], [30, 30]]
         obs.first_triangle = [[1, 1], [1, 1], [1, 1]]
-        
+
         calib_obj = mock.MagicMock()
         change = mock.MagicMock()
-        change.changeContours = [np.array([[[10, 10]], [[20, 10]], [[10, 20]]], dtype=np.int32)]
+        change.changeContours = [
+            np.array([[[10, 10]], [[20, 10]], [[10, 20]]], dtype=np.int32)
+        ]
         calib_obj.changeSet = {"Cam1": change}
-        
+
         mock_poly = np.array([[[10, 10]], [[20, 10]], [[10, 20]]], dtype=np.int32)
-        with mock.patch('cv2.approxPolyDP', return_value=mock_poly), \
-             mock.patch('cv2.arcLength', return_value=10.0):
+        with (
+            mock.patch("cv2.approxPolyDP", return_value=mock_poly),
+            mock.patch("cv2.arcLength", return_value=10.0),
+        ):
             obs.calibrateToObject(calib_obj, (0, 0))
-            
+
         assert len(obs.calibrationPts) == 1
         assert "Cam1" in obs.calibrationPts[0]
-        
+
         obs.buildRealSpaceConverter()
         assert mock_cc.rsc is not None
 
@@ -418,28 +429,35 @@ class TestCalibratedObserverClass:
 class TestCalibratedCaptureConfigurationClass:
     def test_line_of_sight(self):
         from observer.CalibratedObserver import CalibratedCaptureConfiguration
+
         cc = object.__new__(CalibratedCaptureConfiguration)
-        
-        hull_a = np.array([[[10, 10]], [[20, 10]], [[20, 20]], [[10, 20]]], dtype=np.int32)
-        hull_b = np.array([[[50, 50]], [[60, 50]], [[60, 60]], [[50, 60]]], dtype=np.int32)
-        
+
+        hull_a = np.array(
+            [[[10, 10]], [[20, 10]], [[20, 20]], [[10, 20]]], dtype=np.int32
+        )
+        hull_b = np.array(
+            [[[50, 50]], [[60, 50]], [[60, 60]], [[50, 60]]], dtype=np.int32
+        )
+
         def mock_object_to_hull(obj, *args, **kwargs):
             if obj.oid == "objA":
                 return hull_a
             elif obj.oid == "objB":
                 return hull_b
             else:
-                return np.array([[[30, 30]], [[40, 30]], [[40, 40]], [[30, 40]]], dtype=np.int32)
-                
+                return np.array(
+                    [[[30, 30]], [[40, 30]], [[40, 40]], [[30, 40]]], dtype=np.int32
+                )
+
         cc.objectToHull = mock_object_to_hull
-        
+
         obj_a = mock.MagicMock()
         obj_a.oid = "objA"
         obj_b = mock.MagicMock()
         obj_b.oid = "objB"
         obj_c = mock.MagicMock()
         obj_c.oid = "objC"
-        
+
         assert cc.line_of_sight(obj_a, obj_b, []) is True
         assert cc.line_of_sight(obj_a, obj_b, [obj_c]) is False
 
@@ -452,25 +470,34 @@ class TestFileLockClass:
 
     def test_file_lock_acquire_success(self):
         from observer.file_lock import FileLock
-        with mock.patch('fcntl.lockf') as mock_lockf, \
-             mock.patch('builtins.open', mock.mock_open()):
+
+        with (
+            mock.patch("fcntl.lockf") as mock_lockf,
+            mock.patch("builtins.open", mock.mock_open()),
+        ):
             lock = FileLock()
             lock.acquire()
             mock_lockf.assert_called_once()
 
     def test_file_lock_acquire_already_running(self):
         from observer.file_lock import FileLock
-        with mock.patch('fcntl.lockf', side_effect=IOError), \
-             mock.patch('builtins.open', mock.mock_open()), \
-             mock.patch('sys.exit') as mock_exit:
+
+        with (
+            mock.patch("fcntl.lockf", side_effect=IOError),
+            mock.patch("builtins.open", mock.mock_open()),
+            mock.patch("sys.exit") as mock_exit,
+        ):
             lock = FileLock()
             lock.acquire()
             mock_exit.assert_called_once_with(1)
 
     def test_file_lock_release(self):
         from observer.file_lock import FileLock
-        with mock.patch('fcntl.lockf') as mock_lockf, \
-             mock.patch('builtins.open', mock.mock_open()):
+
+        with (
+            mock.patch("fcntl.lockf") as mock_lockf,
+            mock.patch("builtins.open", mock.mock_open()),
+        ):
             lock = FileLock()
             lock.release()
             mock_lockf.assert_called_once()

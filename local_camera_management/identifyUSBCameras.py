@@ -7,7 +7,7 @@ def capture_camera(cam_num):
         retval, image = cam.read()
     finally:
         cam.release()
-    retval, buff = cv2.imencode('.jpg', image)
+    retval, buff = cv2.imencode(".jpg", image)
     return buff
 
 

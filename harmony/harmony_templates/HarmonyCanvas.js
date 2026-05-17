@@ -475,7 +475,11 @@ function gameWorldClick(camNum) {
     }
 }
 
+let isSyncingCanvas = false;
+
 function syncCanvasData(viewId) {
+    if (isSyncingCanvas) return; // Prevent request stacking over high-latency connections
+
     // viewId can be passed or retrieved from DOM
     if (!viewId) {
         const val = document.getElementById("viewId");
@@ -484,6 +488,7 @@ function syncCanvasData(viewId) {
 
     if (!viewId) return;
 
+    isSyncingCanvas = true;
     fetch(`/harmony/canvas_data/${viewId}`)
         .then(response => response.json())
         .then(data => {
@@ -494,5 +499,8 @@ function syncCanvasData(viewId) {
                 window.harmonyEditors.forEach(ed => ed.updateData(data));
             }
         })
-        .catch(err => console.error("Error syncing canvas data:", err));
+        .catch(err => console.error("Error syncing canvas data:", err))
+        .finally(() => {
+            isSyncingCanvas = false;
+        });
 }
