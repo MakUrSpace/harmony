@@ -145,7 +145,7 @@
         };
         packages.tests = writeShellApplication {
           name = "run-tests";
-          runtimeInputs = [ harmony-dev-env self'.packages.harmony pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver ];
+          runtimeInputs = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver ];
           text = ''
             export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -172,9 +172,16 @@
           '';
         };
         packages.test = self'.packages.tests;
+        formatter = pkgs.writeShellApplication {
+          name = "nix-fmt";
+          runtimeInputs = [ pkgs.treefmt pkgs.ruff ];
+          text = ''
+            exec treefmt "$@"
+          '';
+        };
         devShells.default = pkgs.mkShell {
           name = "harmonyShell";
-          packages = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver ];
+          packages = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver pkgs.treefmt pkgs.ruff ];
           shellHook = ''
             export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1

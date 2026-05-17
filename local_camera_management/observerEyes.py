@@ -11,9 +11,9 @@ from rpi_ws281x import PixelStrip, Color
 colors = {
     "white": Color(180, 180, 180),
     "blue": Color(0, 0, 255),
-    "green":  Color(0, 255, 0),
+    "green": Color(0, 255, 0),
     "red": Color(255, 0, 0),
-    "off": Color(0, 0, 0)
+    "off": Color(0, 0, 0),
 }
 
 
@@ -26,8 +26,7 @@ def identify_color(color):
     raise Exception(f"Color ({color}) not recognized")
 
 
-
-DCOLOR = 'red'
+DCOLOR = "red"
 PIN = 18
 LEDS = 36
 
@@ -43,13 +42,15 @@ def set_strip_to_color(color=None):
 
 def validateEyes():
     reset = False
-    for eye in [0]: # , 2, 4, 6]:
+    for eye in [0]:  # , 2, 4, 6]:
         for i in range(3):
             resp = req.get(f"http://localhost:808{eye}/snapshot")
             if resp.status_code == 500:
                 reset = True
                 print("Restarting...")
-                subprocess.run(f"sudo systemctl restart cam{eye}-camera-streamer", shell=True)
+                subprocess.run(
+                    f"sudo systemctl restart cam{eye}-camera-streamer", shell=True
+                )
                 sleep(1)
                 print("Trying again")
             else:
@@ -61,12 +62,20 @@ def validateEyes():
         subprocess.run(f"sudo systemctl restart observerServer.service", shell=True)
 
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog='ObserverEyes',
-        description='Validates Observer camera services are running and responsive')
-    strip = PixelStrip(num=LEDS, pin=PIN, freq_hz=800000, dma=10, invert=False, brightness=255, channel=0)
+        prog="ObserverEyes",
+        description="Validates Observer camera services are running and responsive",
+    )
+    strip = PixelStrip(
+        num=LEDS,
+        pin=PIN,
+        freq_hz=800000,
+        dma=10,
+        invert=False,
+        brightness=255,
+        channel=0,
+    )
     strip.begin()
     color = colors[DCOLOR]
     print("Setting lights to red")
