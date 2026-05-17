@@ -88,11 +88,16 @@ class HarmonyMachine(CalibratedObserver):
             return "Cycle Failure"
 
     def getCameraImagesWithChanges(self, cameraKeys=None, show_interactions=True):
-        if cameraKeys is None:
-            cameraKeys = self.cc.cameras.keys()
+        from harmony.harmonyServer import DATA_LOCK
+
+        with DATA_LOCK:
+            objects_to_paint = list(self.objectsAndColors)
+            last_changes = self.lastChanges
+            last_classification = self.lastClassification
+            cameraKeys_copy = list(cameraKeys or self.cc.cameras.keys())
 
         images = {}
-        for camName in cameraKeys:
+        for camName in cameraKeys_copy:
             cam = self.cc.cameras[camName]
 
             # 1. Get Bounding Box
@@ -115,14 +120,13 @@ class HarmonyMachine(CalibratedObserver):
                 px, py = point
                 # Translate
                 tx = px - x
-                ty = py - y
                 # Scale
                 sx = tx * (target_res[0] / w)
-                sy = ty * (target_res[1] / h)
+                sy = (py - y) * (target_res[1] / h)
                 return int(sx), int(sy)
 
             # Paint known objects faction color
-            for objAndColor in self.objectsAndColors[::-1]:
+            for objAndColor in objects_to_paint[::-1]:
                 memObj = objAndColor.object
                 color = objAndColor.color
                 if memObj.changeSet[camName].changeType not in ["delete", None]:
@@ -134,9 +138,6 @@ class HarmonyMachine(CalibratedObserver):
                     camImage = cv2.drawContours(camImage, memContour, -1, color, -1)
 
                     if show_interactions and self.objectCouldInteract(memObj):
-                        center_x, center_y = transform_pt(
-                            memObj.center[camName]
-                        )  # Assuming center is available or calc mean
                         # Re-calc center from transformed contour
                         center_x = int(np.mean(memContour[:, :, 0]))
                         center_y = int(np.mean(memContour[:, :, 1]))
@@ -187,8 +188,8 @@ class HarmonyMachine(CalibratedObserver):
                     )
 
             # Paint last changes red
-            if self.lastChanges is not None and not self.lastChanges.empty:
-                lastChange = self.lastChanges.changeSet[camName]
+            if last_changes is not None and not last_changes.empty:
+                lastChange = last_changes.changeSet[camName]
                 if lastChange is not None and lastChange.changeType not in [
                     "delete",
                     None,
@@ -201,11 +202,8 @@ class HarmonyMachine(CalibratedObserver):
                     )
 
             # Paint classification green
-            if (
-                self.lastClassification is not None
-                and not self.lastClassification.empty
-            ):
-                lastClass = self.lastClassification.changeSet[camName]
+            if last_classification is not None and not last_classification.empty:
+                lastClass = last_classification.changeSet[camName]
                 if lastClass is not None and lastClass.changeType not in [
                     "delete",
                     None,
@@ -217,117 +215,6 @@ class HarmonyMachine(CalibratedObserver):
                         camImage, lastClassContour, -1, (0, 255, 0), -1
                     )
 
-            images[camName] = camImage
-        return images
-        if cameraKeys is None:
-            cameraKeys = self.cc.cameras.keys()
-
-        images = {}
-        for camName in cameraKeys:
-            cam = self.cc.cameras[camName]
-            camImage = cam.cropToActiveZone(cam.mostRecentFrame.copy())
-
-            # Paint known objects faction color
-            for objAndColor in self.objectsAndColors[::-1]:
-                memObj = objAndColor.object
-                color = objAndColor.color
-                if memObj.changeSet[camName].changeType not in ["delete", None]:
-                    memContour = np.array(
-                        [memObj.changeSet[camName].changePoints], dtype=np.int32
-                    )
-                    camImage = cv2.drawContours(camImage, memContour, -1, color, -1)
-                    if show_interactions and self.objectCouldInteract(memObj):
-                        center_x = int(
-                            np.mean(memContour[:, :, 0])
-                        )  # Mean of x-coordinates
-                        center_y = int(
-                            np.mean(memContour[:, :, 1])
-                        )  # Mean of y-coordinates
-                        camImage = cv2.circle(
-                            camImage,
-                            (center_x, center_y),
-                            radius=10,
-                            color=(0, 255, 0),
-                            thickness=-1,
-                        )
-
-                if (
-                    memObj.expectedChange is not None
-                    and memObj.expectedChange.changeSet[camName].changeType
-                    not in ["delete", None]
-                ):
-                    memContour = np.array(
-                        [memObj.expectedChange.changeSet[camName].changePoints],
-                        dtype=np.int32,
-                    )
-                    center_x = int(
-                        np.mean(memContour[:, :, 0])
-                    )  # Mean of x-coordinates
-                    center_y = int(
-                        np.mean(memContour[:, :, 1])
-                    )  # Mean of y-coordinates
-
-                    objContour = np.array(
-                        [
-                            memObj.expectedChange.lastChange.changeSet[
-                                camName
-                            ].changePoints
-                        ],
-                        dtype=np.int32,
-                    )
-                    obj_center_x = int(
-                        np.mean(objContour[:, :, 0])
-                    )  # Mean of x-coordinates
-                    obj_center_y = int(
-                        np.mean(objContour[:, :, 1])
-                    )  # Mean of y-coordinates
-                    camImage = cv2.circle(
-                        camImage,
-                        (center_x, center_y),
-                        radius=10,
-                        color=(0, 255, 0),
-                        thickness=-1,
-                    )
-                    camImage = cv2.line(
-                        camImage,
-                        np.array((center_x, center_y), dtype=np.int32),
-                        np.array((obj_center_x, obj_center_y), dtype=np.int32),
-                        (125, 255, 0),
-                        5,
-                    )
-
-            # Paint last changes red
-            if self.lastChanges is not None and not self.lastChanges.empty:
-                lastChange = self.lastChanges.changeSet[camName]
-                if lastChange is not None and lastChange.changeType not in [
-                    "delete",
-                    None,
-                ]:
-                    lastChangeContour = np.array(
-                        [lastChange.changePoints], dtype=np.int32
-                    )
-                    camImage = cv2.drawContours(
-                        camImage, lastChangeContour, -1, (0, 0, 127), -1
-                    )
-
-            # Paint classification green
-            if (
-                self.lastClassification is not None
-                and not self.lastClassification.empty
-            ):
-                lastClass = self.lastClassification.changeSet[camName]
-                if lastClass is not None and lastClass.changeType not in [
-                    "delete",
-                    None,
-                ]:
-                    lastClassContour = np.array(
-                        [lastClass.changePoints], dtype=np.int32
-                    )
-                    camImage = cv2.drawContours(
-                        camImage, lastClassContour, -1, (0, 255, 0), -1
-                    )
-
-            camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_AREA)
             images[camName] = camImage
         return images
 
