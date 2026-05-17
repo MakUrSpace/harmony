@@ -688,13 +688,18 @@ def genCombinedCameraWithChangesView():
     while not SHUTDOWN_EVENT.is_set():
         cm = _get_cm()
         cc = _get_cc()
-        camImages = []
+
         with DATA_LOCK:
-            if cm.lastChanges is not None and not cm.lastChanges.empty:
-                print("Has changes")
-            if cm.lastClassification is not None:
-                print("Has class")
-            camImages = list(cm.getCameraImagesWithChanges(cc.cameras.keys()).values())
+            has_changes = cm.lastChanges is not None and not cm.lastChanges.empty
+            has_class = cm.lastClassification is not None
+            cam_keys = list(cc.cameras.keys())
+
+        if has_changes:
+            print("Has changes")
+        if has_class:
+            print("Has class")
+
+        camImages = list(cm.getCameraImagesWithChanges(cam_keys).values())
 
         if camImages:
             camImage = camImages[0] if len(camImages) == 1 else np.vstack(camImages)
@@ -868,7 +873,7 @@ def simple_id_generator():
 
 
 @harmony.post("/update_session_id")
-async def update_session_id(viewId: str = Form(...), newViewId: str = Form(...)):
+def update_session_id(viewId: str = Form(...), newViewId: str = Form(...)):
     if not viewId or not newViewId:
         return Response("Invalid Request", status_code=400)
 
@@ -1168,7 +1173,7 @@ def getObject(request: Request, objectId: str, footprint: str = Query(default="f
 
 
 @harmony.post("/objects/{objectId}")
-async def updateObjectSettings(request: Request, objectId: str):
+def updateObjectSettings(request: Request, objectId: str, objectName: str = Form("")):
     is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
     viewId = request.cookies.get("session_view_id")
     session = SESSIONS.get(viewId)
@@ -1181,8 +1186,7 @@ async def updateObjectSettings(request: Request, objectId: str):
     if cap is None:
         return Response(f"{objectId} Not found", status_code=404)
 
-    form = await request.form()
-    new_name = form.get("objectName", "").strip()
+    new_name = objectName.strip()
     if new_name and new_name != objectId:
         if _find_object(new_name):
             return Response("Object with that name already exists", status_code=400)
@@ -1417,15 +1421,23 @@ def clearPixel(viewId: str):
 
 
 @harmony.post("/select_pixel")
-async def selectPixel(request: Request):
+def selectPixel(
+    request: Request,
+    viewId: str = Form(...),
+    selectedPixel: str = Form(...),
+    selectedCamera: str = Form(...),
+    appendPixel: str = Form("False"),
+):
     global SESSIONS
     cm = _get_cm()
-    form = await request.form()
-    viewId = form["viewId"]
-    pixel = json.loads(form["selectedPixel"])
+    pixel = json.loads(selectedPixel)
     x, y = pixel
-    cam = form["selectedCamera"]
-    appendPixel = bool(form["appendPixel"])
+    cam = selectedCamera
+    appendPixel_bool = (
+        appendPixel.lower() in ("true", "1", "yes")
+        if isinstance(appendPixel, str)
+        else bool(appendPixel)
+    )
 
     if cam == "VirtualMap":
         real_x = x
@@ -1448,17 +1460,12 @@ async def selectPixel(request: Request):
     print(f"INTERNAL SESSIONS ID: {id(SESSIONS)}")
     # Find all objects at *axial_coord* to support cycling.
     all_at_cell = _find_objects_for_axial(axial_coord)
-    snapped_first = all_at_cell[0][1] if all_at_cell else None
 
     with DATA_LOCK:
         session = SESSIONS.get(viewId, SessionConfig())
         existing = session.selection
 
         # Determine if we should CYCLE through objects at the same cell.
-        # Cycling occurs if:
-        # 1. We have multiple objects at the clicked cell.
-        # 2. This cell was ALREADY the first selected cell.
-        # 3. No additional cells (second cell) are currently selected (or we maintain object context).
         should_cycle = len(all_at_cell) > 1 and existing.firstCell == axial_coord
 
         if should_cycle:
@@ -1483,7 +1490,10 @@ async def selectPixel(request: Request):
         elif existing.firstCell:
             if existing.secondCell is None:
                 session.selection.additionalCells = [axial_coord]
-            elif appendPixel and axial_coord not in session.selection.additionalCells:
+            elif (
+                appendPixel_bool
+                and axial_coord not in session.selection.additionalCells
+            ):
                 session.selection.additionalCells.insert(0, axial_coord)
         else:
             session.selection = CellSelection(firstCell=axial_coord)
@@ -1502,11 +1512,11 @@ async def selectPixel(request: Request):
 
     SESSIONS[viewId] = session
 
-    return await render_interactor(request, viewId, axial_coord)
+    return render_interactor(request, viewId, axial_coord)
 
 
 @harmony.post("/toggle_selection/{viewId}")
-async def toggleSelection(request: Request, viewId: str):
+def toggleSelection(request: Request, viewId: str):
     """
     Cycles to the next object at the currently selected firstCell.
     This logic mimics clicking the same cell again in selectPixel.
@@ -1530,20 +1540,11 @@ async def toggleSelection(request: Request, viewId: str):
         session.selected_oid = chosen_obj.oid
         session.selection.firstCell = origin_cell
 
-    # We reuse the selectPixel interactor rendering by manually constructing what a selectPixel
-    # call would return, but since we don't have a 'form' with 'selectedPixel',
-    # we just call a helper or re-run the relevant parts.
-    # For now, I'll just have toggleSelection return a redirect or
-    # I'll extract the interactor-rendering logic to a helper.
-    # Actually, I'll just redirect to a GET version of select_pixel if I had one,
-    # but I don't. I'll just duplicate the rendering logic or call the main logic.
-
-    # Let's extract the rendering logic to a helper called 'render_interactor'.
-    return await render_interactor(request, viewId, axial_coord)
+    return render_interactor(request, viewId, axial_coord)
 
 
 @harmony.post("/select_unit/{oid}/{viewId}")
-async def selectUnitInTable(request: Request, oid: str, viewId: str):
+def selectUnitInTable(request: Request, oid: str, viewId: str):
     """Selects an object by its OID and focuses the interactor on its origin."""
     cm = _get_cm()
     cc = _get_cc()
@@ -1561,10 +1562,10 @@ async def selectUnitInTable(request: Request, oid: str, viewId: str):
         session.selected_oid = oid
         SESSIONS[viewId] = session
 
-    return await render_interactor(request, viewId, origin_cell)
+    return render_interactor(request, viewId, origin_cell)
 
 
-async def render_interactor(request, viewId, axial_coord):
+def render_interactor(request, viewId, axial_coord):
     """Refactored core rendering logic for the interactor panel."""
     cm = _get_cm()
     session = SESSIONS.get(viewId, SessionConfig())
