@@ -8,7 +8,7 @@ from typing import Optional
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Request, Response, Form, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse, JSONResponse
 
 from observer.Observer import RemoteCamera, RTSPCamera
 from observer.CalibratedObserver import CalibratedCaptureConfiguration, CalibrationObserver, distanceFormula
@@ -58,13 +58,15 @@ def buildConfigurator(request: Request):
                 <div id="nudgeUI_{cam.camName}"></div>
                 
                 <div class="mt-3" id="activeCalibTableContainer_{cam.camName}" style="display:none; max-width: 600px; margin: auto;">
-                    <h5>Calibration Points (Editable)</h5>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-bordered text-center" id="activeCalibTable_{cam.camName}">
-                            <thead><tr><th>Point</th><th>Pixel X</th><th>Pixel Y</th><th>Axial Q</th><th>Axial R</th></tr></thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
+                    <details>
+                        <summary class="h5" style="cursor: pointer;">Calibration Points (Editable)</summary>
+                        <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered text-center" id="activeCalibTable_{cam.camName}">
+                                <thead><tr><th>Point</th><th>Pixel X</th><th>Pixel Y</th><th>Axial Q</th><th>Axial R</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </details>
                 </div>
 
                 <label for="az">Active Zone</label><br>
@@ -571,21 +573,25 @@ async def nudgeHex(request: Request, camName: str):
         dx = float(data.get('dx', 0))
         dy = float(data.get('dy', 0))
         reset = data.get('reset', False)
+        reset_all = data.get('reset_all', False)
         
         if not hasattr(cc.hex, 'hex_nudges'):
             cc.hex.hex_nudges = {}
         if camName not in cc.hex.hex_nudges:
             cc.hex.hex_nudges[camName] = {}
             
-        for hex_coords in hexes:
-            q, r = hex_coords['q'], hex_coords['r']
-            nudge_key = f"{q},{r}"
-            if reset:
-                if nudge_key in cc.hex.hex_nudges[camName]:
-                    del cc.hex.hex_nudges[camName][nudge_key]
-            else:
-                curr_dx, curr_dy = cc.hex.hex_nudges[camName].get(nudge_key, [0, 0])
-                cc.hex.hex_nudges[camName][nudge_key] = [curr_dx + dx, curr_dy + dy]
+        if reset_all:
+            cc.hex.hex_nudges[camName] = {}
+        else:
+            for hex_coords in hexes:
+                q, r = hex_coords['q'], hex_coords['r']
+                nudge_key = f"{q},{r}"
+                if reset:
+                    if nudge_key in cc.hex.hex_nudges[camName]:
+                        del cc.hex.hex_nudges[camName][nudge_key]
+                else:
+                    curr_dx, curr_dy = cc.hex.hex_nudges[camName].get(nudge_key, [0, 0])
+                    cc.hex.hex_nudges[camName][nudge_key] = [curr_dx + dx, curr_dy + dy]
             
         cc.saveConfiguration()
         # Clear grid overlay cache

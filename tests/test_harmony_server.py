@@ -285,6 +285,19 @@ class TestHarmonyServer(unittest.TestCase):
         self.assertEqual(response3.cookies.get('session_view_id'), new_val)
         self.assertIn(f"Session ID: {new_val}".encode(), response3.content)
 
+    def test_set_overlays(self):
+        """Test setting grid and object overlays."""
+        # The configuration is stored in harmonyServer._cc
+        response = self.client.post('/harmony/set_overlays', data={'show_grid': 'true', 'show_objects': 'false'})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(harmonyServer._cc.show_grid)
+        self.assertFalse(harmonyServer._cc.show_objects)
+        
+        response2 = self.client.post('/harmony/set_overlays', data={'show_grid': 'false', 'show_objects': 'true'})
+        self.assertEqual(response2.status_code, 200)
+        self.assertFalse(harmonyServer._cc.show_grid)
+        self.assertTrue(harmonyServer._cc.show_objects)
+
 
     def test_multi_selection_logic(self):
         """Test multi-selection type prioritization and appending."""
