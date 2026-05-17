@@ -31,19 +31,19 @@ def create_configurator_app():
     async def getBSCSS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.css", "r") as f:
             bscss = f.read()
-        return Response(bscss, media_type="text/css")
+        return Response(bscss, media_type="text/css", headers={"Cache-Control": "public, max-age=31536000"})
     
     @app.get('/bootstrap.min.js')
     async def getBSJS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.js", "r") as f:
             bsjs = f.read()
-        return Response(bsjs, media_type="application/javascript")
+        return Response(bsjs, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
     
     @app.get('/htmx.min.js')
     async def getHTMX():
         with open(f"{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
             htmx = f.read()
-        return Response(htmx, media_type="application/javascript")
+        return Response(htmx, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
         
     return app
 
