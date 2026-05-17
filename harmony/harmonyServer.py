@@ -772,12 +772,17 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
                 break
         SESSIONS[viewId] = SessionConfig()
 
+    showGridChecked = "checked" if getattr(cc, 'show_grid', True) else ""
+    showObjectsChecked = "checked" if getattr(cc, 'show_objects', True) else ""
+
     rendered = template.replace(
         "{viewId}", viewId).replace(
         "{defaultCamera}", defaultCam).replace(
         "{cameraButtons}", cameraButtons).replace(
         "{harmonyURL}", "/harmony/").replace(
-        "{configuratorURL}", '/configurator')
+        "{configuratorURL}", '/configurator').replace(
+        "{showGridChecked}", showGridChecked).replace(
+        "{showObjectsChecked}", showObjectsChecked)
 
     resp = HTMLResponse(rendered)
     cookie_val = request.cookies.get('session_view_id')

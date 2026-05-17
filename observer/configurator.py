@@ -132,6 +132,9 @@ def buildConfigurator(request: Request):
     with open(f"{os.path.dirname(__file__)}/templates/Configurator.html") as f:
         template = f.read()
     
+    showGridChecked = "checked" if getattr(cc, 'show_grid', True) else ""
+    showObjectsChecked = "checked" if getattr(cc, 'show_objects', True) else ""
+
     return template.replace(
         "{configuratorURL}", "/configurator/").replace(
         "{cameraConfigRows}", "\n".join(cameraConfigRows)).replace(
@@ -139,7 +142,9 @@ def buildConfigurator(request: Request):
         "__CAMERA_NAMES_JSON__", cameraNamesJson).replace(
         "__CALIBRATION_PTS_JSON__", calibrationPtsJson).replace(
         "__NUDGES_JSON__", hex_nudges_json).replace(
-        "{calibratorURL}", "/configurator/") # Redirect calibratorURL to configurator base for now
+        "{calibratorURL}", "/configurator/").replace(
+        "{showGridChecked}", showGridChecked).replace(
+        "{showObjectsChecked}", showObjectsChecked)
 
 
     
@@ -299,12 +304,12 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
                                 cv2.circle(img, (x, y), 5, (0, 255, 0), -1)
                                 cv2.putText(img, str(i + 1), (x + 8, y + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
-            ret, img = cv2.imencode('.jpg', img)
+            ret, img = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpg\r\n\r\n' + img.tobytes() + b'\r\n')
             
-            # Rate limiting: ~10 FPS is plenty for configurator preview
-            time.sleep(0.1)
+            # Rate limiting: ~2 FPS is plenty for configurator preview and avoids tunnel saturation
+            time.sleep(0.5)
         except Exception as e:
             print(f"Failed genCameraFullViewWithActiveZone for {camName} -- {e}")
             yield (b'--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n')
