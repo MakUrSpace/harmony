@@ -222,18 +222,7 @@ def draw_dynamic_grid(cc, camName):
         
         for q in range(min_q - pad, max_q + pad + 1):
             for r in range(min_r - pad, max_r + pad + 1):
-                # Calculate Hex in Real Space
-                real_poly = cc.hex_at_axial(q, r, apply_affine=False) # numpy array (6, 1, 2)
-                
-                cam_pts = []
-                for pt in real_poly:
-                    # pt is [x, y]
-                    x, y = pt[0]
-                    converter = rsc.closestConverterToRealCoord(str(camName), (x, y))
-                    cx, cy = converter.convertRealToCameraSpace((x, y))
-                    cam_pts.append([int(round(cx)), int(round(cy))])
-                
-                poly_cam = np.array(cam_pts, dtype=np.int32).reshape((-1, 1, 2))
+                poly_cam = cc.cam_hex_at_axial(str(camName), q, r)
                 
                 # Draw
                 cv2.polylines(overlay, [poly_cam], True, grid_color, 1, cv2.LINE_AA)
