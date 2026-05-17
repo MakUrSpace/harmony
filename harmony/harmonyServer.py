@@ -515,8 +515,7 @@ def axial_to_ui_object(q, r):
 # Canvas data
 # ---------------------------------------------------------------------------
 
-@harmony.get('/canvas_data/{viewId}')
-def getCanvasData(viewId: str):
+def _get_canvas_data_dict(viewId: str):
     cm = _get_cm()
     cc = _get_cc()
     objects = {}
@@ -559,7 +558,32 @@ def getCanvasData(viewId: str):
             for obj in cm.memory
         }
     }
-    return JSONResponse(data)
+    return data
+
+
+def _get_canvas_update_script(viewId: str):
+    import json
+    try:
+        canvas_data = _get_canvas_data_dict(viewId)
+        canvas_json = json.dumps(canvas_data)
+        return f"""
+        <script>
+            if (window.harmonyEditor && document.getElementById('selectedCamera').value !== 'All') {{
+                window.harmonyEditor.updateData({canvas_json});
+            }}
+            if (window.harmonyEditors && document.getElementById('selectedCamera').value === 'All') {{
+                window.harmonyEditors.forEach(function(ed) {{ ed.updateData({canvas_json}); }});
+            }}
+        </script>
+        """
+    except Exception as e:
+        print(f"Error generating canvas update script: {e}")
+        return ""
+
+
+@harmony.get('/canvas_data/{viewId}')
+def getCanvasData(viewId: str):
+    return JSONResponse(_get_canvas_data_dict(viewId))
 
 
 # ---------------------------------------------------------------------------
@@ -1074,7 +1098,7 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
         trackedObject = cm.cc.define_object_from_axials(objectName, axials)
     cm.commitChanges(trackedObject)
     cell_summary = ", ".join(str(c) for c in axials)
-    return HTMLResponse(interactor_template.format(
+    html_content = interactor_template.format(
         info=f"""
         <h2>Object Defined</h2>
         <h3>Name: {trackedObject.oid}</h3>
@@ -1084,7 +1108,9 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
         <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
         <hr>
         <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="/harmony/object_factory/{viewId}" hx-target="#interactor">
-        """))
+        """)
+    html_content += _get_canvas_update_script(viewId)
+    return HTMLResponse(html_content)
 
 
 @harmony.delete('/object_factory/{viewId}')
@@ -1103,7 +1129,7 @@ def deleteObject(request: Request, viewId: str):
     if mem:
         cm.memory.remove(mem)
     SESSIONS[viewId].selection = CellSelection()
-    return Response("Success")
+    return HTMLResponse("Success" + _get_canvas_update_script(viewId))
 
 
 # ---------------------------------------------------------------------------
@@ -1154,7 +1180,7 @@ def moveObjectDefinition(request: Request, oid: str, viewId: str):
         cm.memory.remove(existing)
         cm.commitChanges(trackedObject)
         SESSIONS[viewId].selection = CellSelection()
-    return Response("Success")
+    return HTMLResponse("Success" + _get_canvas_update_script(viewId))
 
 
 # ---------------------------------------------------------------------------
@@ -1166,7 +1192,8 @@ def clearPixel(viewId: str):
     if viewId in SESSIONS:
         with DATA_LOCK:
             SESSIONS[viewId].selection = CellSelection()
-    return HTMLResponse("")
+            SESSIONS[viewId].selected_oid = None
+    return HTMLResponse(_get_canvas_update_script(viewId))
 
 
 @harmony.post('/select_pixel')
@@ -1420,7 +1447,9 @@ async def render_interactor(request, viewId, axial_coord):
         <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
     """
 
-    return HTMLResponse(interactor_template.format(info=info_html, actions=actions_html))
+    html_content = interactor_template.format(info=info_html, actions=actions_html)
+    html_content += _get_canvas_update_script(viewId)
+    return HTMLResponse(html_content)
 
 
 @harmony.post('/select_additional_pixel/{viewId}')
@@ -1538,31 +1567,31 @@ def _build_fastapi_app(template_name="Harmony.html", include_configurator=False)
     def getBSCSS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.css", "r") as f:
             content = f.read()
-        return Response(content, media_type="text/css")
+        return Response(content, media_type="text/css", headers={"Cache-Control": "public, max-age=31536000"})
 
     @app.get('/bootstrap.min.js')
     def getBSJS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript")
+        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
 
     @app.get('/htmx.min.js')
     def getHTMX():
         with open(f"{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript")
+        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
 
     @app.get('/HarmonyTemplate.css')
     def getHarmonyCSS():
         with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyTemplate.css", "r") as f:
             content = f.read()
-        return Response(content, media_type="text/css")
+        return Response(content, media_type="text/css", headers={"Cache-Control": "public, max-age=31536000"})
 
     @app.get('/HarmonyCanvas.js')
     def getHarmonyCanvasJS():
         with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyCanvas.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript")
+        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
 
     # Mount Flask calibrator/observer as WSGI sub-apps if needed
     if include_configurator:
@@ -1629,31 +1658,31 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
     def getBSCSS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.css", "r") as f:
             content = f.read()
-        return Response(content, media_type="text/css")
+        return Response(content, media_type="text/css", headers={"Cache-Control": "public, max-age=31536000"})
 
     @app.get('/bootstrap.min.js')
     def getBSJS():
         with open(f"{os.path.dirname(__file__)}/templates/bootstrap.min.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript")
+        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
 
     @app.get('/htmx.min.js')
     def getHTMX():
         with open(f"{os.path.dirname(__file__)}/templates/htmx.min.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript")
+        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
 
     @app.get('/HarmonyTemplate.css')
     def getHarmonyCSS():
         with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyTemplate.css", "r") as f:
             content = f.read()
-        return Response(content, media_type="text/css")
+        return Response(content, media_type="text/css", headers={"Cache-Control": "public, max-age=31536000"})
 
     @app.get('/HarmonyCanvas.js')
     def getHarmonyCanvasJS():
         with open(f"{os.path.dirname(__file__)}/harmony_templates/HarmonyCanvas.js", "r") as f:
             content = f.read()
-        return Response(content, media_type="application/javascript")
+        return Response(content, media_type="application/javascript", headers={"Cache-Control": "public, max-age=31536000"})
 
     APPS.append(app)
 
