@@ -593,12 +593,16 @@ def getCanvasData(viewId: str):
 def genCombinedCameraWithChangesView():
     while not SHUTDOWN_EVENT.is_set():
         cm = _get_cm()
+        cc = _get_cc()
+        camImages = []
         with DATA_LOCK:
             if cm.lastChanges is not None and not cm.lastChanges.empty:
                 print("Has changes")
             if cm.lastClassification is not None:
                 print("Has class")
-            camImages = list(cm.getCameraImagesWithChanges(_get_cc().cameras.keys()).values())
+            camImages = list(cm.getCameraImagesWithChanges(cc.cameras.keys()).values())
+            
+        if camImages:
             camImage = camImages[0] if len(camImages) == 1 else np.vstack(camImages)
             camImage = cv2.resize(camImage, [480, 640], interpolation=cv2.INTER_LINEAR)
             ret, camImage = cv2.imencode('.jpg', camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
