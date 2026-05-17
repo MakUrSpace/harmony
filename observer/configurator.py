@@ -55,7 +55,13 @@ def buildConfigurator(request: Request):
                     </span>
                     <!-- AZ controls below -->
                 </div>
-                <div id="nudgeUI_{cam.camName}"></div>
+                <div id="nudgeUI_{cam.camName}" style="display:none;"></div>
+                <div id="nudgeTableContainer_{cam.camName}" style="display:none;" class="mt-2">
+                    <details>
+                        <summary class="fw-bold small" style="cursor:pointer;">Defined Nudges for {cam.camName}</summary>
+                        <div id="nudgeTableInner_{cam.camName}"></div>
+                    </details>
+                </div>
                 
                 <div class="mt-3" id="activeCalibTableContainer_{cam.camName}" style="display:none; max-width: 600px; margin: auto;">
                     <details>
@@ -118,6 +124,11 @@ def buildConfigurator(request: Request):
 
     calibrationPtsJson = json.dumps(calibrationPts)
 
+    hex_nudges = {}
+    if hasattr(cc, 'hex') and hasattr(cc.hex, 'hex_nudges') and isinstance(cc.hex.hex_nudges, dict):
+        hex_nudges = cc.hex.hex_nudges
+    hex_nudges_json = json.dumps(hex_nudges)
+
     with open(f"{os.path.dirname(__file__)}/templates/Configurator.html") as f:
         template = f.read()
     
@@ -127,6 +138,7 @@ def buildConfigurator(request: Request):
         "{size}", str(cc.hex.size)).replace(
         "__CAMERA_NAMES_JSON__", cameraNamesJson).replace(
         "__CALIBRATION_PTS_JSON__", calibrationPtsJson).replace(
+        "__NUDGES_JSON__", hex_nudges_json).replace(
         "{calibratorURL}", "/configurator/") # Redirect calibratorURL to configurator base for now
 
 
@@ -555,11 +567,20 @@ async def nudgeSelect(request: Request, camName: str, px: float, py: float):
         
         poly = cc.cam_hex_at_axial(camName, q, r)
         poly_list = poly.reshape(-1, 2).tolist()
+
+        # Return any existing nudge for this cell
+        nudge_key = f"{q},{r}"
+        existing_nudge = [0, 0]
+        if hasattr(cc.hex, 'hex_nudges'):
+            cam_nudges = cc.hex.hex_nudges.get(camName, {})
+            existing_nudge = cam_nudges.get(nudge_key, [0, 0])
         
         return JSONResponse({
             "q": q,
             "r": r,
-            "poly": poly_list
+            "poly": poly_list,
+            "existing_dx": existing_nudge[0],
+            "existing_dy": existing_nudge[1]
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

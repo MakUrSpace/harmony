@@ -20,7 +20,7 @@ def mock_cv2():
     
     mock_cv2_module.VideoCapture.return_value = mock_cap
     mock_cv2_module.resize.return_value = np.zeros((480, 640, 3), dtype=np.uint8)
-    mock_cv2_module.imencode.return_value = (True, b'fake_image_data')
+    mock_cv2_module.imencode.return_value = (True, np.frombuffer(b'fake_image_data', dtype=np.uint8))
     
     # Patch sys.modules so import cv2 works everywhere
     with mock.patch.dict(sys.modules, {'cv2': mock_cv2_module}):

@@ -101,19 +101,22 @@ def test_nudge_select(configurator_client, configurator_app):
     cam_name = "Camera 0"
     
     import numpy as np
-    from unittest import mock
     
-    # Mock camCoordToAxial and cam_hex_at_axial
-    with mock.patch.object(configurator_app.state.cc, 'camCoordToAxial', return_value=(2, 3)), \
-         mock.patch.object(configurator_app.state.cc, 'cam_hex_at_axial', return_value=np.array([[10, 10], [20, 10], [25, 20], [20, 30], [10, 30], [5, 20]])):
-         
-        response = configurator_client.get(f'/configurator/nudge_select/{cam_name}?px=0.5&py=0.5')
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data['q'] == 2
-        assert data['r'] == 3
-        assert len(data['poly']) == 6
+    # Set return values directly on the mock cc — patch.object won't cross the TestClient boundary
+    cc = configurator_app.state.cc
+    cc.camCoordToAxial.return_value = (2, 3)
+    cc.cam_hex_at_axial.return_value = np.array([[10, 10], [20, 10], [25, 20], [20, 30], [10, 30], [5, 20]])
+    # Ensure hex_nudges is a real dict so existing_nudge lookup works
+    if not isinstance(cc.hex.hex_nudges, dict):
+        cc.hex.hex_nudges = {}
+
+    response = configurator_client.get(f'/configurator/nudge_select/{cam_name}?px=0.5&py=0.5')
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data['q'] == 2
+    assert data['r'] == 3
+    assert len(data['poly']) == 6
 
 def test_nudge_hex_apply(configurator_client, configurator_app):
     """Test applying a nudge to a hex."""
