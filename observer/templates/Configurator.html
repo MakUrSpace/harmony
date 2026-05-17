@@ -179,7 +179,12 @@
         var mode = document.getElementById('modeSelect') ? document.getElementById('modeSelect').value : 'calibration';
 
         if (mode === 'nudge') {
-            htmx.ajax('GET', '{configuratorURL}nudge_select/' + camName + '?px=' + (x/w) + '&py=' + (y/h), {target: '#nudgeUI_' + camName, swap: 'innerHTML'});
+            fetch('{configuratorURL}nudge_select/' + camName + '?px=' + (x/w) + '&py=' + (y/h))
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) { alert("Error: " + data.error); return; }
+                    toggleNudgeSelection(camName, data);
+                });
             return;
         }
 
@@ -288,6 +293,148 @@
             }
             ctx.stroke();
         }
+        
+        // Draw nudged hex previews
+        if (selectedNudgeHexes[camName]) {
+            var shift = currentNudgeShift[camName] || {dx:0, dy:0};
+            for (var key in selectedNudgeHexes[camName]) {
+                var hexObj = selectedNudgeHexes[camName][key];
+                if (hexObj && hexObj.poly) {
+                    ctx.beginPath();
+                    ctx.fillStyle = "rgba(0, 255, 255, 0.3)";
+                    ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
+                    for (var i = 0; i < hexObj.poly.length; i++) {
+                        var px = hexObj.poly[i][0] + shift.dx;
+                        var py = hexObj.poly[i][1] + shift.dy;
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+        }
+    }
+
+    var selectedNudgeHexes = {};
+    var currentNudgeShift = {};
+
+    function toggleNudgeSelection(camName, data) {
+        if (!selectedNudgeHexes[camName]) selectedNudgeHexes[camName] = {};
+        if (!currentNudgeShift[camName]) currentNudgeShift[camName] = {dx: 0, dy: 0};
+        
+        var key = data.q + "," + data.r;
+        if (selectedNudgeHexes[camName][key]) {
+            delete selectedNudgeHexes[camName][key];
+        } else {
+            selectedNudgeHexes[camName][key] = data;
+        }
+        renderNudgeUI(camName);
+        drawPoints(camName);
+    }
+
+    function applyNudgeShift(camName, ddx, ddy) {
+        if (!currentNudgeShift[camName]) currentNudgeShift[camName] = {dx: 0, dy: 0};
+        currentNudgeShift[camName].dx += ddx;
+        currentNudgeShift[camName].dy += ddy;
+        drawPoints(camName);
+        renderNudgeUI(camName);
+    }
+    
+    function resetNudgeShift(camName) {
+        if (currentNudgeShift[camName]) {
+            currentNudgeShift[camName].dx = 0;
+            currentNudgeShift[camName].dy = 0;
+            drawPoints(camName);
+        }
+    }
+    
+    function clearNudgeSelection(camName) {
+        selectedNudgeHexes[camName] = {};
+        resetNudgeShift(camName);
+        renderNudgeUI(camName);
+        drawPoints(camName);
+    }
+
+    function commitNudge(camName, resetServer) {
+        var hexes = [];
+        if (selectedNudgeHexes[camName]) {
+            for (var key in selectedNudgeHexes[camName]) {
+                var hObj = selectedNudgeHexes[camName][key];
+                hexes.push({q: hObj.q, r: hObj.r});
+            }
+        }
+        if (hexes.length === 0) return;
+        
+        var dx = currentNudgeShift[camName] ? currentNudgeShift[camName].dx : 0;
+        var dy = currentNudgeShift[camName] ? currentNudgeShift[camName].dy : 0;
+        
+        var payload = {
+            hexes: hexes,
+            dx: dx,
+            dy: dy,
+            reset: resetServer
+        };
+        
+        var uiDiv = document.getElementById('nudgeUI_' + camName);
+        if (uiDiv) uiDiv.innerHTML = '<div class="card p-2 mt-2 bg-dark text-white border-warning text-center">Updating grid...</div>';
+        
+        fetch('{configuratorURL}nudge/' + camName, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        }).then(function(res) { return res.json(); }).then(function(data) {
+            if (data.status === 'success') {
+                resetNudgeShift(camName);
+                if (resetServer) {
+                    clearNudgeSelection(camName);
+                } else {
+                    renderNudgeUI(camName);
+                }
+            } else {
+                alert("Error: " + data.error);
+                renderNudgeUI(camName);
+            }
+        });
+    }
+
+    function renderNudgeUI(camName) {
+        var uiDiv = document.getElementById('nudgeUI_' + camName);
+        if (!uiDiv) return;
+        
+        var sel = selectedNudgeHexes[camName] || {};
+        var keys = Object.keys(sel);
+        if (keys.length === 0) {
+            uiDiv.innerHTML = '<div class="card p-2 mt-2 bg-dark text-white border-warning text-center">Click hexes to select them for nudging.</div>';
+            return;
+        }
+        
+        var shift = currentNudgeShift[camName] || {dx:0, dy:0};
+        
+        uiDiv.innerHTML = `
+        <div class="card p-2 mt-2 bg-dark text-white border-warning">
+            <h5>Selected Hexes: ${keys.length}</h5>
+            <div class="text-center mb-2 text-info small">Preview Shift: [${shift.dx}, ${shift.dy}]</div>
+            <div class="d-flex justify-content-center mb-2">
+                <button class="btn btn-outline-warning" onclick="applyNudgeShift('${camName}', 0, -5)">Up</button>
+            </div>
+            <div class="d-flex justify-content-center mb-2 gap-2">
+                <button class="btn btn-outline-warning" onclick="applyNudgeShift('${camName}', -5, 0)">Left</button>
+                <button class="btn btn-outline-warning" onclick="applyNudgeShift('${camName}', 5, 0)">Right</button>
+            </div>
+            <div class="d-flex justify-content-center mb-2">
+                <button class="btn btn-outline-warning" onclick="applyNudgeShift('${camName}', 0, 5)">Down</button>
+            </div>
+            <div class="d-flex justify-content-center mb-2 gap-2">
+                <button class="btn btn-sm btn-success" onclick="commitNudge('${camName}', false)">Commit Nudge to Grid</button>
+                <button class="btn btn-sm btn-danger" onclick="commitNudge('${camName}', true)">Reset Server Nudge</button>
+            </div>
+            <div class="d-flex justify-content-center mt-2">
+                <button class="btn btn-sm btn-secondary" onclick="clearNudgeSelection('${camName}')">Clear Selection</button>
+            </div>
+        </div>
+        `;
     }
 
     function advanceColumn(camName) {

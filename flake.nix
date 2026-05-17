@@ -171,6 +171,7 @@
             exit "$EXIT_CODE"
           '';
         };
+        packages.test = self'.packages.tests;
         devShells.default = pkgs.mkShell {
           name = "harmonyShell";
           packages = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver ];

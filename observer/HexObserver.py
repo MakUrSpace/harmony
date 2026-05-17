@@ -361,54 +361,101 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         poly_i = np.round(poly).astype(np.int32).reshape((-1, 1, 2))
         return poly_i
 
+    def get_vertex_nudge(self, cam: str, q: int, r: int, vertex_index: int):
+        if not (self.hex and hasattr(self.hex, 'hex_nudges') and cam in self.hex.hex_nudges):
+            return 0.0, 0.0
+            
+        nudges = self.hex.hex_nudges[cam]
+        
+        # Determine the 3 hexes that share this vertex
+        neighbors_map = {
+            0: [(q+1, r-1), (q+1, r)],
+            1: [(q, r-1), (q+1, r-1)],
+            2: [(q-1, r), (q, r-1)],
+            3: [(q-1, r+1), (q-1, r)],
+            4: [(q, r+1), (q-1, r+1)],
+            5: [(q+1, r), (q, r+1)],
+        }
+        
+        hexes_to_check = [(q, r)] + neighbors_map[vertex_index]
+        
+        dx_sum = 0.0
+        dy_sum = 0.0
+        count = 0
+        
+        for hq, hr in hexes_to_check:
+            key = f"{hq},{hr}"
+            if key in nudges:
+                dx, dy = nudges[key]
+                dx_sum += dx
+                dy_sum += dy
+                count += 1
+                
+        if count == 0:
+            return 0.0, 0.0
+        return dx_sum / count, dy_sum / count
+
     def cam_hex_at_axial(self, cam: str, q: int, r: int):
-        w, h = self.cameras[cam].mostRecentFrame.shape[:2]
         grid_poly = self.hex_at_axial(q, r, apply_affine=False)
 
-        dx, dy = 0, 0
-        if self.hex and hasattr(self.hex, 'hex_nudges') and cam in self.hex.hex_nudges:
-            nudge_key = f"{q},{r}"
-            if nudge_key in self.hex.hex_nudges[cam]:
-                dx, dy = self.hex.hex_nudges[cam][nudge_key]
-
         cam_poly = []
-        for pt in grid_poly:    
+        for i, pt in enumerate(grid_poly):    
             x, y = pt[0]
             converter = self.rsc.closestConverterToRealCoord(str(cam), (x, y))
             cx, cy = converter.convertRealToCameraSpace((x, y))
+            
+            dx, dy = self.get_vertex_nudge(cam, q, r, i)
             cam_poly.append([int(round(cx + dx)), int(round(cy + dy))])
+            
         cam_poly = np.array(cam_poly, dtype=np.int32).reshape((-1, 1, 2))
-
         return cam_poly
 
     def objectToHull(self, obj):
         """
-        Monkey-patched version of objectToHull to ensure consistent coordinate transformation
-        between Real Space (object positions) and Map Space (grid visualization).
+        Calculates the boundary polygon of an object in Map Space.
+        Uses the exact hex definitions (constituent_axials) if available to create a perfect
+        contiguous concave hull. Falls back to camera contour convex hull for legacy objects.
         """
+        if hasattr(obj, 'constituent_axials') and obj.constituent_axials:
+            try:
+                # Generate exact map-space hex polygons for each constituent cell
+                polys = []
+                for q, r in obj.constituent_axials:
+                    poly = self.hex_at_axial(q, r, apply_affine=True)
+                    polys.append(np.round(poly).astype(np.int32).reshape((-1, 1, 2)))
+                
+                if not polys:
+                    return np.array([], dtype=np.int32)
+                
+                # Create a mask to perform a geometric union
+                dims = self.realspaceDimensions()
+                mask = np.zeros((dims[1], dims[0]), dtype=np.uint8)
+                cv2.fillPoly(mask, polys, 255)
+                
+                # Extract the merged outer boundary
+                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    # Return the largest contour (should be single unified shape)
+                    return max(contours, key=cv2.contourArea)
+                return np.array([], dtype=np.int32)
+            except Exception as e:
+                print(f"Error in constituent_axials polygon union: {e}")
+                
+        # Legacy fallback: use camera contours and Convex Hull
         all_points_real = []
-        
         rsc = self.rsc
         try:
-            # Iterate over camera views for this object
             for cam_name, change in obj.changeSet.items():
-                if rsc is None:
-                    continue
-                    
-                # Skip cameras not in RSC
-                if cam_name not in rsc.converters:
+                if rsc is None or cam_name not in rsc.converters:
                     continue
                     
                 for contour in change.changeContours:
-                    # contour is (N, 1, 2) or (N, 2)
                     for pt in contour:
-                        # Flatten info [x, y]
                         if len(pt.shape) > 1:
                             x, y = pt[0]
                         else:
                             x, y = pt
                             
-                        # Convert Camera -> Real Space
                         try:
                             cx, cy = float(x), float(y)
                             q, r = self.camCoordToAxial(cam_name, (cx, cy))
@@ -427,23 +474,17 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             if not all_points_real:
                 return np.array([], dtype=np.int32)
                 
-            # Transform Real Space -> Map Pixel Space
             pts_real = np.array(all_points_real, dtype=np.float32)
-            
             if hasattr(self, 'apply_affine_pts'):
                 pts_map = self.apply_affine_pts(pts_real)
             else:
-                print("Warning: apply_affine_pts missing in patched_objectToHull")
                 pts_map = pts_real 
                 
-            # Compute Convex Hull of mapped points
             pts_map_i = np.round(pts_map).astype(np.int32)
-            hull = cv2.convexHull(pts_map_i)
-            
-            return hull
+            return cv2.convexHull(pts_map_i)
             
         except Exception as e:
-            print(f"Error in patched_objectToHull: {e}")
+            print(f"Error in legacy patched_objectToHull: {e}")
             return np.array([], dtype=np.int32)
 
     def realspaceDimensions(self):
