@@ -410,12 +410,72 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         cam_poly = np.array(cam_poly, dtype=np.int32).reshape((-1, 1, 2))
         return cam_poly
 
+    def _get_cameras_cache_key(self):
+        key_parts = []
+        if hasattr(self, 'cameras') and self.cameras:
+            for cam_name, cam in sorted(self.cameras.items()):
+                az = getattr(cam, 'activeZone', None)
+                if az is None:
+                    az = getattr(cam, 'activeZonePolygon', None)
+                if az is not None:
+                    key_parts.append((cam_name, az.tobytes() if hasattr(az, 'tobytes') else tuple(map(tuple, az))))
+        return tuple(key_parts)
+
+    def _get_base_minimap_cache_key(self):
+        cameras_key = self._get_cameras_cache_key()
+        rsc_id = id(self.rsc) if getattr(self, 'rsc', None) is not None else None
+        hex_key = (self.hex.size, self.hex.rotation_deg, self.hex.anchor_xy) if getattr(self, 'hex', None) is not None else None
+        return (cameras_key, rsc_id, hex_key)
+
     def objectToHull(self, obj):
         """
         Calculates the boundary polygon of an object in Map Space.
         Uses the exact hex definitions (constituent_axials) if available to create a perfect
         contiguous concave hull. Falls back to camera contour convex hull for legacy objects.
         """
+        cache_key = None
+        has_hex = getattr(self, 'hex', None) is not None
+        hex_size = self.hex.size if has_hex else None
+        hex_rot = self.hex.rotation_deg if has_hex else None
+        hex_offset = self.hex.offset_xy if has_hex else None
+        hex_anchor = self.hex.anchor_xy if has_hex else None
+
+        if hasattr(obj, 'constituent_axials') and obj.constituent_axials:
+            cache_key = (
+                getattr(obj, 'oid', None),
+                "axial",
+                tuple(sorted(obj.constituent_axials)),
+                hex_size,
+                hex_rot,
+                hex_offset,
+                hex_anchor
+            )
+        else:
+            change_set = getattr(obj, 'changeSet', None)
+            if change_set:
+                contours_info = []
+                for cam_name, change in sorted(change_set.items()):
+                    if change is not None and getattr(change, 'changeContours', None):
+                        cnt_hashes = tuple(len(c) for c in change.changeContours)
+                        contours_info.append((cam_name, cnt_hashes))
+                cache_key = (
+                    getattr(obj, 'oid', None),
+                    "legacy",
+                    tuple(contours_info),
+                    hex_size,
+                    hex_rot,
+                    hex_offset,
+                    hex_anchor
+                )
+
+        if cache_key is not None:
+            if not hasattr(self, '_object_hull_cache'):
+                self._object_hull_cache = {}
+            if cache_key in self._object_hull_cache:
+                return self._object_hull_cache[cache_key]
+
+        # Actual calculation:
+        hull = None
         if hasattr(obj, 'constituent_axials') and obj.constituent_axials:
             try:
                 # Generate exact map-space hex polygons for each constituent cell
@@ -425,67 +485,77 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                     polys.append(np.round(poly).astype(np.int32).reshape((-1, 1, 2)))
                 
                 if not polys:
-                    return np.array([], dtype=np.int32)
-                
-                # Create a mask to perform a geometric union
-                dims = self.realspaceDimensions()
-                mask = np.zeros((dims[1], dims[0]), dtype=np.uint8)
-                cv2.fillPoly(mask, polys, 255)
-                
-                # Extract the merged outer boundary
-                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if contours:
-                    # Return the largest contour (should be single unified shape)
-                    return max(contours, key=cv2.contourArea)
-                return np.array([], dtype=np.int32)
+                    hull = np.array([], dtype=np.int32)
+                else:
+                    # Create a mask to perform a geometric union
+                    dims = self.realspaceDimensions()
+                    mask = np.zeros((dims[1], dims[0]), dtype=np.uint8)
+                    cv2.fillPoly(mask, polys, 255)
+                    
+                    # Extract the merged outer boundary
+                    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    if contours:
+                        # Return the largest contour (should be single unified shape)
+                        hull = max(contours, key=cv2.contourArea)
+                    else:
+                        hull = np.array([], dtype=np.int32)
             except Exception as e:
                 print(f"Error in constituent_axials polygon union: {e}")
-                
-        # Legacy fallback: use camera contours and Convex Hull
-        all_points_real = []
-        rsc = self.rsc
-        try:
-            for cam_name, change in obj.changeSet.items():
-                if rsc is None or cam_name not in rsc.converters:
-                    continue
-                    
-                for contour in change.changeContours:
-                    for pt in contour:
-                        if len(pt.shape) > 1:
-                            x, y = pt[0]
-                        else:
-                            x, y = pt
-                            
-                        try:
-                            cx, cy = float(x), float(y)
-                            q, r = self.camCoordToAxial(cam_name, (cx, cy))
-                            dx, dy = 0, 0
-                            if self.hex and hasattr(self.hex, 'hex_nudges') and cam_name in self.hex.hex_nudges:
-                                nudge_key = f"{q},{r}"
-                                if nudge_key in self.hex.hex_nudges[cam_name]:
-                                    dx, dy = self.hex.hex_nudges[cam_name][nudge_key]
-
-                            converter = rsc.closestConverterToCamCoord(cam_name, (cx, cy))
-                            real_pt = converter.convertCameraToRealSpace((cx - dx, cy - dy))
-                            all_points_real.append(real_pt)
-                        except Exception:
+                hull = np.array([], dtype=np.int32)
+        else:
+            # Legacy fallback: use camera contours and Convex Hull
+            all_points_real = []
+            rsc = getattr(self, 'rsc', None)
+            try:
+                change_set = getattr(obj, 'changeSet', None)
+                if change_set:
+                    for cam_name, change in sorted(change_set.items()):
+                        if rsc is None or cam_name not in rsc.converters or change is None:
                             continue
+                            
+                        change_contours = getattr(change, 'changeContours', None)
+                        if change_contours:
+                            for contour in change_contours:
+                                for pt in contour:
+                                    if len(pt.shape) > 1:
+                                        x, y = pt[0]
+                                    else:
+                                        x, y = pt
+                                        
+                                    try:
+                                        cx, cy = float(x), float(y)
+                                        q, r = self.camCoordToAxial(cam_name, (cx, cy))
+                                        dx, dy = 0, 0
+                                        if self.hex and hasattr(self.hex, 'hex_nudges') and cam_name in self.hex.hex_nudges:
+                                            nudge_key = f"{q},{r}"
+                                            if nudge_key in self.hex.hex_nudges[cam_name]:
+                                                dx, dy = self.hex.hex_nudges[cam_name][nudge_key]
+
+                                        converter = rsc.closestConverterToCamCoord(cam_name, (cx, cy))
+                                        real_pt = converter.convertCameraToRealSpace((cx - dx, cy - dy))
+                                        all_points_real.append(real_pt)
+                                    except Exception:
+                                        continue
+                            
+                if not all_points_real:
+                    hull = np.array([], dtype=np.int32)
+                else:
+                    pts_real = np.array(all_points_real, dtype=np.float32)
+                    if hasattr(self, 'apply_affine_pts'):
+                        pts_map = self.apply_affine_pts(pts_real)
+                    else:
+                        pts_map = pts_real 
                         
-            if not all_points_real:
-                return np.array([], dtype=np.int32)
+                    pts_map_i = np.round(pts_map).astype(np.int32)
+                    hull = cv2.convexHull(pts_map_i)
                 
-            pts_real = np.array(all_points_real, dtype=np.float32)
-            if hasattr(self, 'apply_affine_pts'):
-                pts_map = self.apply_affine_pts(pts_real)
-            else:
-                pts_map = pts_real 
-                
-            pts_map_i = np.round(pts_map).astype(np.int32)
-            return cv2.convexHull(pts_map_i)
-            
-        except Exception as e:
-            print(f"Error in legacy patched_objectToHull: {e}")
-            return np.array([], dtype=np.int32)
+            except Exception as e:
+                print(f"Error in legacy patched_objectToHull: {e}")
+                hull = np.array([], dtype=np.int32)
+
+        if cache_key is not None:
+            self._object_hull_cache[cache_key] = hull
+        return hull
 
     def realspaceDimensions(self):
         width = 1600
@@ -632,25 +702,38 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         if objectsAndColors is None:
             objectsAndColors = []
             
-        # Ensure active zones align with the newly affine-transformed grid dynamically
-        dynamic_camera_contours = self.buildCameraRealspaceContours()
-        dynamic_union_contours = self.buildCameraRealspaceUnionContours(dynamic_camera_contours)
+        # Get base minimap cache key
+        cache_key = self._get_base_minimap_cache_key()
         
-        # Refresh width, height after bounds are recalculated
-        width, height = self.realspaceDimensions()
-        shift_x = 0
-        shift_y = 0
+        if (not hasattr(self, '_base_minimap_cache') or 
+            getattr(self, '_base_minimap_cache_key', None) != cache_key or 
+            self._base_minimap_cache is None):
+            
+            # Recalculate camera contours and union
+            dynamic_camera_contours = self.buildCameraRealspaceContours()
+            dynamic_union_contours = self.buildCameraRealspaceUnionContours(dynamic_camera_contours)
+            
+            # Refresh width, height after bounds are recalculated
+            width, height = self.realspaceDimensions()
+            
+            # Generate base image with the grid overlay
+            base_image = self.draw_hex_grid_overlay(
+                np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
+            )
+            
+            cv2.drawContours(base_image, dynamic_camera_contours, -1, (125, 125, 125), 6)
+            cv2.drawContours(base_image, dynamic_union_contours, -1, (255, 255, 255), 4)
+            
+            self._base_minimap_cache = base_image
+            self._base_minimap_cache_key = cache_key
+            
+        image = self._base_minimap_cache.copy()
         
-        # Initialize with current dimensions to ensure 'image' exists
-        image = self.draw_hex_grid_overlay(
-            np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height
-        )
-        
-        cv2.drawContours(image, dynamic_camera_contours, -1, (125, 125, 125), 6)
-        cv2.drawContours(image, dynamic_union_contours, -1, (255, 255, 255), 4)
-
         drawnObjs = []
-        print(f"MiniMap: Rendering {len(objectsAndColors)} objects")
+        # print(f"MiniMap: Rendering {len(objectsAndColors)} objects")
+        
+        # We need shift_x and shift_y to shift object hulls
+        shift_x, shift_y = self.hex.offset_xy if (getattr(self, 'hex', None) is not None and hasattr(self.hex, 'offset_xy')) else (0, 0)
         
         for objAndColor in objectsAndColors[::-1]:
             obj = objAndColor.object
@@ -662,15 +745,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             try:
                 hull = self.objectToHull(obj)
                 if hull is not None and len(hull) > 0:
-                    # Hull is already in map coordinates (from patched_objectToHull)
-                    # We need to apply the shift to it as well!
-                    # patched_objectToHull uses apply_affine_pts but doesn't know about our local shift_x/y
+                    # Make a copy of the hull to avoid mutating the cached hull!
+                    hull_shifted = hull.copy()
                     
                     # Shift hull points
-                    hull[:, 0, 0] += int(shift_x)
-                    hull[:, 0, 1] += int(shift_y)
+                    hull_shifted[:, 0, 0] += int(shift_x)
+                    hull_shifted[:, 0, 1] += int(shift_y)
                     
-                    image = cv2.drawContours(image, [hull], -1, color, -1)
+                    image = cv2.drawContours(image, [hull_shifted], -1, color, -1)
                 else:
                     print(f"MiniMap: Zero-area/Empty hull for object {obj}")
             except Exception as e:

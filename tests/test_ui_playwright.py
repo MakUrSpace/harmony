@@ -106,3 +106,20 @@ def test_admin_vs_user_permissions_js(page: Page, harmony_server):
     # Validates page loads at all with mocked hardware
     page.goto(f"{harmony_server}/harmony/")
     expect(page.locator("body")).to_be_visible()
+
+
+def test_ui_latency(page: Page, harmony_server):
+    # Measures the load time of the main page
+    start_time = time.time()
+    page.goto(f"{harmony_server}/harmony/")
+    expect(page.locator("body")).to_be_visible()
+    load_time = time.time() - start_time
+    assert load_time < 3.0, f"UI page load time is too slow: {load_time}s"
+
+    # Measures API latency of canvas data retrieval
+    start_time = time.time()
+    response = page.request.get(f"{harmony_server}/harmony/canvas_data/test_view")
+    assert response.ok
+    api_time = time.time() - start_time
+    assert api_time < 0.5, f"Canvas data API response is too slow: {api_time}s"
+
