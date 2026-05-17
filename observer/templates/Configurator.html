@@ -405,8 +405,10 @@
         
         var sel = selectedNudgeHexes[camName] || {};
         var keys = Object.keys(sel);
+        var clearAllHtml = `<div class="d-flex justify-content-center mt-2"><button class="btn btn-sm btn-danger" onclick="clearAllNudges('${camName}')">Clear ALL Nudges for Camera</button></div>`;
+        
         if (keys.length === 0) {
-            uiDiv.innerHTML = '<div class="card p-2 mt-2 bg-dark text-white border-warning text-center">Click hexes to select them for nudging.</div>';
+            uiDiv.innerHTML = '<div class="card p-2 mt-2 bg-dark text-white border-warning text-center">Click hexes to select them for nudging.' + clearAllHtml + '</div>';
             return;
         }
         
@@ -428,13 +430,44 @@
             </div>
             <div class="d-flex justify-content-center mb-2 gap-2">
                 <button class="btn btn-sm btn-success" onclick="commitNudge('${camName}', false)">Commit Nudge to Grid</button>
-                <button class="btn btn-sm btn-danger" onclick="commitNudge('${camName}', true)">Reset Server Nudge</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="commitNudge('${camName}', true)">Reset Server Nudge</button>
             </div>
-            <div class="d-flex justify-content-center mt-2">
+            <div class="d-flex justify-content-center mt-2 gap-2">
                 <button class="btn btn-sm btn-secondary" onclick="clearNudgeSelection('${camName}')">Clear Selection</button>
             </div>
+            ${clearAllHtml}
         </div>
         `;
+    }
+
+    function clearAllNudges(camName) {
+        if (!confirm("Are you sure you want to clear ALL nudges for " + camName + "?")) return;
+        
+        var payload = {
+            hexes: [],
+            dx: 0,
+            dy: 0,
+            reset: false,
+            reset_all: true
+        };
+        
+        var uiDiv = document.getElementById('nudgeUI_' + camName);
+        if (uiDiv) uiDiv.innerHTML = '<div class="card p-2 mt-2 bg-dark text-white border-warning text-center">Clearing all nudges...</div>';
+        
+        fetch('{configuratorURL}nudge/' + camName, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        }).then(function(res) { return res.json(); }).then(function(data) {
+            if (data.status === 'success') {
+                selectedNudgeHexes[camName] = {};
+                resetNudgeShift(camName);
+                renderNudgeUI(camName);
+            } else {
+                alert("Error: " + data.error);
+                renderNudgeUI(camName);
+            }
+        });
     }
 
     function advanceColumn(camName) {

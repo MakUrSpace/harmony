@@ -95,3 +95,68 @@ def test_manual_calibration_logic(configurator_client, configurator_app):
         # Structure is [pixel, real, axial]
         assert len(cam_calibs[cam_name]) == 3
         assert len(cam_calibs[cam_name][2]) == 4
+
+def test_nudge_select(configurator_client, configurator_app):
+    """Test getting the polygon for a clicked hex."""
+    cam_name = "Camera 0"
+    
+    import numpy as np
+    from unittest import mock
+    
+    # Mock camCoordToAxial and cam_hex_at_axial
+    with mock.patch.object(configurator_app.state.cc, 'camCoordToAxial', return_value=(2, 3)), \
+         mock.patch.object(configurator_app.state.cc, 'cam_hex_at_axial', return_value=np.array([[10, 10], [20, 10], [25, 20], [20, 30], [10, 30], [5, 20]])):
+         
+        response = configurator_client.get(f'/configurator/nudge_select/{cam_name}?px=0.5&py=0.5')
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data['q'] == 2
+        assert data['r'] == 3
+        assert len(data['poly']) == 6
+
+def test_nudge_hex_apply(configurator_client, configurator_app):
+    """Test applying a nudge to a hex."""
+    cam_name = "Camera 0"
+    
+    if not hasattr(configurator_app.state.cc.hex, 'hex_nudges') or not isinstance(configurator_app.state.cc.hex.hex_nudges, dict):
+        configurator_app.state.cc.hex.hex_nudges = {}
+    
+    payload = {
+        "hexes": [{"q": 2, "r": 3}, {"q": 2, "r": 4}],
+        "dx": 10,
+        "dy": -5,
+        "reset": False
+    }
+    
+    response = configurator_client.post(f'/configurator/nudge/{cam_name}', json=payload)
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    
+    nudges = configurator_app.state.cc.hex.hex_nudges[cam_name]
+    assert "2,3" in nudges
+    assert "2,4" in nudges
+    assert nudges["2,3"] == [10, -5]
+    
+    # Check saveConfiguration was called
+    configurator_app.state.cc.saveConfiguration.assert_called()
+
+def test_nudge_hex_reset(configurator_client, configurator_app):
+    """Test resetting a nudge on a hex."""
+    cam_name = "Camera 0"
+    
+    # Manually set a nudge first
+    if not hasattr(configurator_app.state.cc.hex, 'hex_nudges'):
+        configurator_app.state.cc.hex.hex_nudges = {}
+    configurator_app.state.cc.hex.hex_nudges[cam_name] = {"2,3": [10, -5]}
+    
+    payload = {
+        "hexes": [{"q": 2, "r": 3}],
+        "reset": True
+    }
+    
+    response = configurator_client.post(f'/configurator/nudge/{cam_name}', json=payload)
+    assert response.status_code == 200
+    
+    # Ensure it's deleted
+    assert "2,3" not in configurator_app.state.cc.hex.hex_nudges[cam_name]

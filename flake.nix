@@ -158,7 +158,7 @@
 
             EXIT_CODE=0
             echo "--- Running Python tests (pytest) ---"
-            if ! pytest tests/ "$@"; then
+            if ! pytest tests/ --cov=harmony --cov=observer --cov-report=term-missing "$@"; then
               EXIT_CODE=1
             fi
 
