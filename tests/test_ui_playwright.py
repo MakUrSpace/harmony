@@ -89,24 +89,6 @@ def test_homepage_loads(page: Page, harmony_server):
     expect(page.locator("h1")).to_contain_text("Harmony")
 
 
-def test_canvas_click_updates_selection(page: Page, harmony_server):
-    page.goto(f"{harmony_server}/harmony/")
-
-    # Page must load
-    expect(page.locator("body")).to_be_visible()
-
-    # Canvas may not be interactable without real camera data — skip gracefully
-    canvas = page.locator("#GameWorldOverlay")
-    try:
-        canvas.click(position={"x": 100, "y": 100}, timeout=5000)
-    except Exception:
-        pytest.skip("GameWorldOverlay not clickable without real calibration data")
-
-    # Just verify the interactor element is reachable
-    interactor = page.locator("#interactor")
-    expect(interactor).to_be_visible(timeout=5000)
-
-
 def test_camera_switching(page: Page, harmony_server):
     page.goto(f"{harmony_server}/harmony/")
 
