@@ -79,6 +79,7 @@
 
     var cameraNames = __CAMERA_NAMES_JSON__;
     var calibrationPts = __CALIBRATION_PTS_JSON__ || [];
+    var allNudges = __NUDGES_JSON__ || {};
     var manualPoints = {};
     var axialPoints = {};
     var editMode = false;
@@ -329,8 +330,14 @@
             delete selectedNudgeHexes[camName][key];
         } else {
             selectedNudgeHexes[camName][key] = data;
+            // Pre-populate shift from server's existing nudge if this is the first selection
+            if (Object.keys(selectedNudgeHexes[camName]).length === 1 &&
+                    (data.existing_dx || data.existing_dy)) {
+                currentNudgeShift[camName] = {dx: data.existing_dx || 0, dy: data.existing_dy || 0};
+            }
         }
         renderNudgeUI(camName);
+        renderNudgeTable(camName);
         drawPoints(camName);
     }
 
@@ -386,12 +393,23 @@
             body: JSON.stringify(payload)
         }).then(function(res) { return res.json(); }).then(function(data) {
             if (data.status === 'success') {
+                // Update local nudge state
+                if (!allNudges[camName]) allNudges[camName] = {};
+                hexes.forEach(function(h) {
+                    var k = h.q + ',' + h.r;
+                    if (resetServer) {
+                        delete allNudges[camName][k];
+                    } else {
+                        allNudges[camName][k] = [dx, dy];
+                    }
+                });
                 resetNudgeShift(camName);
                 if (resetServer) {
                     clearNudgeSelection(camName);
                 } else {
                     renderNudgeUI(camName);
                 }
+                renderNudgeTable(camName);
             } else {
                 alert("Error: " + data.error);
                 renderNudgeUI(camName);
@@ -460,14 +478,35 @@
             body: JSON.stringify(payload)
         }).then(function(res) { return res.json(); }).then(function(data) {
             if (data.status === 'success') {
+                allNudges[camName] = {};
                 selectedNudgeHexes[camName] = {};
                 resetNudgeShift(camName);
                 renderNudgeUI(camName);
+                renderNudgeTable(camName);
             } else {
                 alert("Error: " + data.error);
                 renderNudgeUI(camName);
             }
         });
+    }
+
+    function renderNudgeTable(camName) {
+        var container = document.getElementById('nudgeTableContainer_' + camName);
+        var inner = document.getElementById('nudgeTableInner_' + camName);
+        if (!container || !inner) return;
+        var nudges = allNudges[camName] || {};
+        var keys = Object.keys(nudges);
+        container.style.display = keys.length > 0 ? 'block' : 'none';
+        if (keys.length === 0) {
+            inner.innerHTML = '<p class="text-muted small">No nudges defined yet.</p>';
+            return;
+        }
+        var rows = keys.map(function(k) {
+            var parts = k.split(',');
+            var dx = nudges[k][0], dy = nudges[k][1];
+            return '<tr><td>' + parts[0] + '</td><td>' + parts[1] + '</td><td>' + dx + '</td><td>' + dy + '</td></tr>';
+        }).join('');
+        inner.innerHTML = '<div class="table-responsive" style="max-height:200px;overflow-y:auto;"><table class="table table-sm table-bordered table-dark text-center mb-0"><thead><tr><th>Q</th><th>R</th><th>dx</th><th>dy</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
     }
 
     function advanceColumn(camName) {
@@ -642,6 +681,15 @@
             var nudgeUI = document.getElementById('nudgeUI_' + camName);
             if (nudgeUI) {
                 nudgeUI.style.display = (mode === 'nudge') ? 'block' : 'none';
+            }
+            var nudgeTableContainer = document.getElementById('nudgeTableContainer_' + camName);
+            if (nudgeTableContainer) {
+                nudgeTableContainer.style.display = (mode === 'nudge') ? 'block' : 'none';
+            }
+            // Always render nudge UI so Clear All is visible without needing a prior click
+            if (mode === 'nudge') {
+                renderNudgeUI(camName);
+                renderNudgeTable(camName);
             }
         });
     }

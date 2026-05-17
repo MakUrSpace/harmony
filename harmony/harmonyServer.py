@@ -1596,7 +1596,17 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
         cc = HexCaptureConfiguration()
         if cc.hex is None:
             cc.hex = HexGridConfiguration()
-        cc.capture()
+            
+        if os.environ.get("MOCK_HARDWARE") == "1":
+            import numpy as np
+            from unittest import mock
+            mock_cam = mock.MagicMock()
+            mock_cam.camName = "Camera 0"
+            mock_cam.mostRecentFrame = np.zeros((480, 640, 3), dtype=np.uint8)
+            cc.cameras = {"Camera 0": mock_cam}
+        else:
+            cc.capture()
+            
         _cc = cc
     else:
         cc = _cc
