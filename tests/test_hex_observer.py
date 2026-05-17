@@ -474,3 +474,60 @@ class TestHexObserverExtra:
         img = np.zeros((200, 200, 3), dtype=np.uint8)
         out = cc.draw_hex_grid_overlay(img, 10, 10, 100, 100, alpha=0.5)
         assert out.shape == (200, 200, 3)
+
+    def test_minimap_and_hull_latency(self, hex_cfg):
+        import time
+        from observer.HexObserver import HexCaptureConfiguration
+        cc = object.__new__(HexCaptureConfiguration)
+        cc.hex = hex_cfg
+        cc.cameras = {}
+        cc.rsc = mock.MagicMock()
+        cc._grid_cache = {}
+        
+        # Test object
+        obj = mock.MagicMock()
+        obj.oid = 'test_obj'
+        obj.constituent_axials = [(0, 0), (1, 0), (0, 1)]
+        
+        # We need mock for realspaceDimensions and hex_at_axial
+        cc.realspaceDimensions = mock.MagicMock(return_value=(1600, 1600))
+        cc.hex_at_axial = mock.MagicMock(return_value=np.array([[[0, 0]], [[10, 0]], [[10, 10]], [[0, 10]], [[5, 15]], [[15, 5]]], dtype=np.float32))
+        
+        # Measure latency of first run (uncached)
+        t0 = time.time()
+        hull1 = cc.objectToHull(obj)
+        first_hull_dur = time.time() - t0
+        
+        # Measure latency of subsequent cached runs
+        t1 = time.time()
+        for _ in range(50):
+            hull2 = cc.objectToHull(obj)
+        cached_hull_dur = (time.time() - t1) / 50.0
+        
+        # The cached run should be practically instantaneous (e.g. less than 2ms)
+        assert cached_hull_dur < 0.002, f"Cached hull calculation too slow: {cached_hull_dur}s"
+        assert np.array_equal(hull1, hull2)
+        
+        # Test buildMiniMap latency
+        # Mock dependencies of buildMiniMap: buildCameraRealspaceContours, buildCameraRealspaceUnionContours, draw_hex_grid_overlay
+        cc.buildCameraRealspaceContours = mock.MagicMock(return_value=[])
+        cc.buildCameraRealspaceUnionContours = mock.MagicMock(return_value=[])
+        cc.draw_hex_grid_overlay = mock.MagicMock(return_value=np.zeros((1600, 1600, 3), dtype=np.uint8))
+        
+        from observer.HexObserver import MiniMapObject
+        objects = [MiniMapObject(obj, (255, 0, 0))]
+        
+        # First call (uncached)
+        t2 = time.time()
+        map1 = cc.buildMiniMap(objects)
+        first_map_dur = time.time() - t2
+        
+        # Cached calls
+        t3 = time.time()
+        for _ in range(50):
+            map2 = cc.buildMiniMap(objects)
+        cached_map_dur = (time.time() - t3) / 50.0
+        
+        # The cached buildMiniMap should be extremely fast (e.g. less than 5ms)
+        assert cached_map_dur < 0.005, f"Cached minimap render too slow: {cached_map_dur}s"
+
