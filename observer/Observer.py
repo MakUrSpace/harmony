@@ -149,6 +149,11 @@ class CameraChange:
                 min(yS) + int(self.height / 2),
             ]
 
+            if self.before is None:
+                self.before = np.zeros((1080, 1920, 3), dtype=np.uint8)
+            if self.after is None:
+                self.after = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
             beforeHeight, beforeWidth, *_ = self.before.shape
             if beforeHeight > self.height and beforeWidth > self.width:
                 self.before = clipImage(self.before, self.clipBox)

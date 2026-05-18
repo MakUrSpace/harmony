@@ -2676,7 +2676,7 @@ def start_servers():
     def _signal_shutdown():
         """Immediately signal all streaming connections to stop, then let Hypercorn drain."""
         if not SHUTDOWN_EVENT.is_set():
-            print("\nShutdown signal received — stopping all streams.")
+            print("\nShutdown signal received - stopping all streams.")
             SHUTDOWN_EVENT.set()
             for broadcaster in BROADCASTERS.values():
                 broadcaster.stop()

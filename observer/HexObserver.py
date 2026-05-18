@@ -964,8 +964,10 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         if objectsAndColors is None:
             objectsAndColors = []
 
+        frame = self.cameras[cam].mostRecentFrame
+        height, width = frame.shape[:2] if frame is not None else (1080, 1920)
+
         if self.rsc is None:
-            height, width = self.cameras[cam].mostRecentFrame.shape[:2]
             return np.zeros((height, width, 3), dtype="uint8")
 
         # If no objects, use the dynamic grid for better quality/coverage
@@ -1005,9 +1007,10 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             return {}
 
         for cam in self.cameras.keys():
-            cameraChanges = self.cameras[cam].cropToActiveZone(
-                self.cameras[cam].mostRecentFrame.copy()
-            )
+            frame = self.cameras[cam].mostRecentFrame
+            if frame is None:
+                frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+            cameraChanges = self.cameras[cam].cropToActiveZone(frame.copy())
             w, h = cameraChanges.shape[:2]
             warped = np.zeros((h, w, 3), dtype="uint8")
             for converter in self.rsc.converters[cam]:
@@ -1054,11 +1057,14 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                 ],
                 dtype="int32",
             )
+            frame = self.cameras[cam].mostRecentFrame
+            if frame is None:
+                frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
             changeSet[cam] = CameraChange(
                 camName=cam,
                 changeContours=[cam_poly.reshape((-1, 1, 2))],
-                before=self.cameras[cam].mostRecentFrame,
-                after=self.cameras[cam].mostRecentFrame,
+                before=frame,
+                after=frame,
                 changeType="add",
                 lastChange=None,
             )
@@ -1080,7 +1086,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             # Use current frame size for the mask
             frame = self.cameras[cam].mostRecentFrame
             if frame is None:
-                raise Exception(f"No mostRecentFrame for camera {cam}")
+                frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
             H, W = frame.shape[:2]
 
             mask = np.zeros((H, W), dtype=np.uint8)
