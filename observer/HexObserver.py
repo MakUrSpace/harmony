@@ -457,7 +457,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             if getattr(self, "hex", None) is not None
             else None
         )
-        show_grid = getattr(self, "show_grid", True)
+        show_grid = getattr(self, "show_grid", False)
         return (cameras_key, rsc_id, hex_key, show_grid)
 
     def objectToHull(self, obj):
@@ -788,7 +788,7 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             width, height = self.realspaceDimensions()
 
             # Generate base image with the grid overlay
-            show_grid = getattr(self, "show_grid", True)
+            show_grid = getattr(self, "show_grid", False)
             if show_grid:
                 base_image = self.draw_hex_grid_overlay(
                     np.zeros([height, width, 3], dtype="uint8"), 0, 0, width, height

@@ -148,7 +148,7 @@ def buildConfigurator(request: Request):
     with open(f"{os.path.dirname(__file__)}/templates/Configurator.html") as f:
         template = f.read()
 
-    showGridChecked = "checked" if getattr(cc, "show_grid", True) else ""
+    showGridChecked = "checked" if getattr(cc, "show_grid", False) else ""
     showObjectsChecked = "checked" if getattr(cc, "show_objects", True) else ""
 
     return (
@@ -195,103 +195,162 @@ def draw_dynamic_grid(cc, camName):
             return None
         h, w = cam.mostRecentFrame.shape[:2]
 
-        # Caching logic
-        if not hasattr(cc, "_grid_cache"):
-            cc._grid_cache = {}
+        import threading
+
+        # Caching and generating locks initialization
+        if not hasattr(cc, "_grid_cache_lock"):
+            cc._grid_cache_lock = threading.Lock()
+
+        with cc._grid_cache_lock:
+            if not hasattr(cc, "_grid_cache"):
+                cc._grid_cache = {}
+            if not hasattr(cc, "_grid_generating"):
+                cc._grid_generating = set()
 
         cache_key = (camName, id(rsc), hex_grid.size, w, h)
-        if cache_key in cc._grid_cache:
-            return cc._grid_cache[cache_key]
 
-        overlay = np.zeros((h, w, 3), dtype=np.uint8)
+        # 1. Fast cache path
+        with cc._grid_cache_lock:
+            if cache_key in cc._grid_cache:
+                return cc._grid_cache[cache_key]
 
-        # Define 4 corners of the camera frame
-        corners_cam = [(0, 0), (w, 0), (w, h), (0, h)]
+            # 2. Check if already generating in background
+            if cache_key in cc._grid_generating:
+                return "PENDING"
 
-        # Project to Real Space using the converter closest to each corner
-        corners_real = []
-        for p in corners_cam:
-            converter = rsc.closestConverterToCamCoord(str(camName), p)
-            rp = converter.convertCameraToRealSpace(p)
-            corners_real.append(rp)
+            # 3. Mark as generating
+            cc._grid_generating.add(cache_key)
 
-        # Convert to Axial to find range
+        # 4. Spawn background computation thread
+        def calculate_grid_thread():
+            try:
+                overlay = np.zeros((h, w, 3), dtype=np.uint8)
 
-        # Collect base bounding box from calibrated coordinates to prevent mapping
-        # the camera corners across a perspective vanishing line which inflates hex ranges
-        cm = getattr(
-            cc, "cm", None
-        )  # We might not have cm directly in cc, but wait it's passed? No, cc has no cm.
-        # draw_dynamic_grid doesn't get cm. It gets cc and camName.
-        # However, cm is available if imported or we can look inside cc.rsc
-        qs = []
-        rs = []
+                # Define 4 corners of the camera frame
+                corners_cam = [(0, 0), (w, 0), (w, h), (0, h)]
 
-        # Read the RealSpaceConverter configuration to gather mapped axial coordinates
-        if hasattr(cc, "rsc") and cc.rsc and hasattr(cc.rsc, "realCamSpacePairs"):
-            for cName, coordPairs in cc.rsc.realCamSpacePairs:
-                if cName == camName:
-                    if len(coordPairs) > 2:
-                        axials = coordPairs[2]
-                        for pt in axials:
-                            if hasattr(pt, "__iter__") and len(pt) >= 2:
-                                qs.append(int(pt[0]))
-                                rs.append(int(pt[1]))
+                # Project to Real Space using the converter closest to each corner
+                corners_real = []
+                for p in corners_cam:
+                    converter = rsc.closestConverterToCamCoord(str(camName), p)
+                    rp = converter.convertCameraToRealSpace(p)
+                    corners_real.append(rp)
 
-        if qs and rs:
-            min_q, max_q = int(min(qs)) - 15, int(max(qs)) + 15
-            min_r, max_r = int(min(rs)) - 10, int(max(rs)) + 10
-        else:
-            # Fallback to corner projection
-            for cr in corners_real:
-                try:
-                    q, r = cc.pixel_to_axial(cr[0], cr[1])
-                    qs.append(q)
-                    rs.append(r)
-                except (TypeError, ValueError, AttributeError, KeyError):
-                    pass
+                # Convert to Axial to find range
 
-            if qs and rs:
-                try:
-                    min_q, max_q = int(min(qs)), int(max(qs))
-                    min_r, max_r = int(min(rs)), int(max(rs))
-                except TypeError:
-                    min_q, max_q = -5, 5
-                    min_r, max_r = -5, 5
-            else:
-                min_q, max_q = -5, 5
-                min_r, max_r = -5, 5
+                # Collect base bounding box from calibrated coordinates to prevent mapping
+                # the camera corners across a perspective vanishing line which inflates hex ranges
+                qs = []
+                rs = []
 
-        # Add padding to ensure coverage
-        pad = 2
+                # Read the RealSpaceConverter configuration to gather mapped axial coordinates
+                if (
+                    hasattr(cc, "rsc")
+                    and cc.rsc
+                    and hasattr(cc.rsc, "realCamSpacePairs")
+                ):
+                    for cName, coordPairs in cc.rsc.realCamSpacePairs:
+                        if cName == camName:
+                            if len(coordPairs) > 2:
+                                axials = coordPairs[2]
+                                for pt in axials:
+                                    if hasattr(pt, "__iter__") and len(pt) >= 2:
+                                        qs.append(int(pt[0]))
+                                        rs.append(int(pt[1]))
 
-        # Safety bounds to prevent infinite loops or extreme memory usage
-        if (max_q - min_q) > 200 or (max_r - min_r) > 200:
-            print(
-                f"Grid range too large: {max_q - min_q}x{max_r - min_r}. Check calibration."
-            )
-            return None
+                if qs and rs:
+                    min_q, max_q = int(min(qs)) - 15, int(max(qs)) + 15
+                    min_r, max_r = int(min(rs)) - 10, int(max(rs)) + 10
+                else:
+                    # Fallback to corner projection
+                    for cr in corners_real:
+                        try:
+                            q, r = cc.pixel_to_axial(cr[0], cr[1])
+                            qs.append(q)
+                            rs.append(r)
+                        except (TypeError, ValueError, AttributeError, KeyError):
+                            pass
 
-        # Iterate and draw
-        # Use white color for grid lines, typical for overlay
-        grid_color = (255, 255, 255)
+                    if qs and rs:
+                        try:
+                            min_q, max_q = int(min(qs)), int(max(qs))
+                            min_r, max_r = int(min(rs)), int(max(rs))
+                        except TypeError:
+                            min_q, max_q = -5, 5
+                            min_r, max_r = -5, 5
+                    else:
+                        min_q, max_q = -5, 5
+                        min_r, max_r = -5, 5
 
-        for q in range(min_q - pad, max_q + pad + 1):
-            for r in range(min_r - pad, max_r + pad + 1):
-                poly_cam = cc.cam_hex_at_axial(str(camName), q, r)
+                # Add padding to ensure coverage
+                pad = 2
 
-                # Draw
-                cv2.polylines(overlay, [poly_cam], True, grid_color, 1, cv2.LINE_AA)
+                # Safety bounds to prevent infinite loops or extreme memory usage
+                if (max_q - min_q) > 200 or (max_r - min_r) > 200:
+                    print(
+                        f"Grid range too large: {max_q - min_q}x{max_r - min_r}. Check calibration."
+                    )
+                    with cc._grid_cache_lock:
+                        cc._grid_generating.discard(cache_key)
+                    return
 
-        # Cache the result
-        cc._grid_cache[cache_key] = overlay
-        return overlay
+                # Iterate and draw
+                # Use white color for grid lines, typical for overlay
+                grid_color = (255, 255, 255)
+
+                for q in range(min_q - pad, max_q + pad + 1):
+                    for r in range(min_r - pad, max_r + pad + 1):
+                        poly_cam = cc.cam_hex_at_axial(str(camName), q, r)
+
+                        # Draw
+                        cv2.polylines(
+                            overlay, [poly_cam], True, grid_color, 1, cv2.LINE_AA
+                        )
+
+                # Cache the result and clear from generating set
+                with cc._grid_cache_lock:
+                    cc._grid_cache[cache_key] = overlay
+                    cc._grid_generating.discard(cache_key)
+
+            except Exception as e:
+                print(f"Error drawing dynamic grid in background: {e}")
+                with cc._grid_cache_lock:
+                    cc._grid_generating.discard(cache_key)
+
+        threading.Thread(target=calculate_grid_thread, daemon=True).start()
+        return "PENDING"
 
     except Exception as e:
-        print(f"Error drawing dynamic grid: {e}")
-        # import traceback
-        # traceback.print_exc()
+        print(f"Error in draw_dynamic_grid manager: {e}")
         return None
+
+
+def eagerly_precalculate_grids(cc):
+    """
+    Eagerly triggers background calculations and caches the hex grids for all cameras on boot/reconfiguration.
+    """
+    if cc is None:
+        return
+
+    import threading
+
+    if not hasattr(cc, "_grid_cache_lock"):
+        cc._grid_cache_lock = threading.Lock()
+
+    with cc._grid_cache_lock:
+        if not hasattr(cc, "_grid_cache"):
+            cc._grid_cache = {}
+        cc._grid_cache.clear()
+        if not hasattr(cc, "_grid_generating"):
+            cc._grid_generating = set()
+        cc._grid_generating.clear()
+
+    # Trigger async draw thread start for each camera
+    for camName in list(cc.cameras.keys()):
+        try:
+            draw_dynamic_grid(cc, camName)
+        except Exception as e:
+            print(f"Failed eagerly pre-calculating grid for {camName}: {e}")
 
 
 def genCameraFullViewWithActiveZone(cc, cm, camName):
@@ -302,11 +361,22 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
 
             # Overlay Hex Grid if configured and calibration exists
             if hasattr(cc, "rsc") and cc.rsc is not None:
-                if getattr(cc, "show_grid", True):
+                if getattr(cc, "show_grid", False):
                     try:
                         grid_overlay = draw_dynamic_grid(cc, camName)
 
-                        if grid_overlay is not None:
+                        if grid_overlay == "PENDING":
+                            cv2.putText(
+                                img,
+                                "Dynamic Grid: Calibrating & Caching...",
+                                (50, 100),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                1.5,
+                                (0, 165, 255),
+                                3,
+                                cv2.LINE_AA,
+                            )
+                        elif grid_overlay is not None:
                             if grid_overlay.shape[:2] == img.shape[:2]:
                                 cv2.addWeighted(
                                     grid_overlay, 0.5, img, 1.0, 0.0, dst=img

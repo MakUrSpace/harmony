@@ -26,6 +26,14 @@ def create_configurator_app():
     # Include new FastAPI configurator router
     app.include_router(configurator)
 
+    # Eagerly pre-calculate and cache hex grid overlays in the background on startup
+    try:
+        from configurator import eagerly_precalculate_grids
+
+        eagerly_precalculate_grids(app.state.cc)
+    except Exception as e:
+        print(f"Failed eagerly pre-calculating grids on configurator startup: {e}")
+
     @app.get("/")
     async def index():
         return RedirectResponse("/configurator/", status_code=303)

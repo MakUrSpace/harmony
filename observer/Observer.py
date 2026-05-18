@@ -955,6 +955,14 @@ class CaptureConfiguration:
         with open(path, "w") as f:
             f.write(json.dumps(self.buildConfiguration(), indent=2))
 
+        # Re-trigger eager background hex grid pre-calculation
+        try:
+            from observer.configurator import eagerly_precalculate_grids
+
+            eagerly_precalculate_grids(self)
+        except Exception as e:
+            print(f"Failed eagerly pre-calculating grids on saveConfiguration: {e}")
+
 
 # In[11]:
 
