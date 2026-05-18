@@ -85,6 +85,11 @@ perspective_res = (1920, 1080)
 virtual_map_res = (1200, 1200)
 
 
+# Performance caches to prevent heavy OpenCV drawing / contours calculations on polling
+OBJECT_ROW_IMAGE_CACHE = {}  # key -> base64_str
+CANVAS_DATA_CACHE = {}      # key -> dict
+
+
 def imageToBase64(img):
     return base64.b64encode(cv2.imencode(".jpg", img)[1]).decode()
 
@@ -495,6 +500,26 @@ def render_composite_all(cc, cm):
             )
             sub_frames.append(resized)
 
+        # Get VirtualMap frame and append to sub_frames before placeholders
+        vmap_frame = render_minimap(cm, encode=False)
+        if vmap_frame is not None:
+            # Convert back to BGR from RGB
+            vmap_bgr = cv2.cvtColor(vmap_frame, cv2.COLOR_RGB2BGR)
+            vmap_resized = cv2.resize(vmap_bgr, (960, 540), interpolation=cv2.INTER_LINEAR)
+            
+            # Overlay name for premium HUD aesthetic
+            cv2.putText(
+                vmap_resized,
+                "Virtual Map",
+                (30, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                (0, 165, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            sub_frames.append(vmap_resized)
+
         # Ensure we have at least 4 sub-frames for 2x2 grid
         while len(sub_frames) < 4:
             placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
@@ -510,9 +535,12 @@ def render_composite_all(cc, cm):
             )
             sub_frames.append(placeholder)
 
+        # Limit to exactly 4 for 2x2 grid
+        grid_frames = sub_frames[:4]
+
         # Stitch 2x2
-        row1 = cv2.hconcat([sub_frames[0], sub_frames[1]])
-        row2 = cv2.hconcat([sub_frames[2], sub_frames[3]])
+        row1 = cv2.hconcat([grid_frames[0], grid_frames[1]])
+        row2 = cv2.hconcat([grid_frames[2], grid_frames[3]])
         composite = cv2.vconcat([row1, row2])
 
         ret, encoded = cv2.imencode(
@@ -760,6 +788,30 @@ def axial_to_ui_object(q, r):
 def _get_canvas_data_dict(viewId: str):
     cm = _get_cm()
     cc = _get_cc()
+
+    session_config = SESSIONS.get(viewId, SessionConfig())
+    # Create a hashable key for session_config to cache canvas data
+    config_key = (
+        tuple(session_config.selectable),
+        tuple(session_config.terrain),
+        tuple(session_config.targetable),
+        tuple(session_config.enemies),
+        tuple(session_config.allies),
+        tuple(session_config.moveable),
+        session_config.selection.firstCell if session_config.selection else None,
+        tuple(session_config.selection.additionalCells) if session_config.selection else None,
+        session_config.selected_oid,
+        getattr(session_config, "showObjects", True),
+    )
+    cycle_num = cm.cycleCounter if cm else 0
+    cache_key = (viewId, cycle_num, config_key)
+
+    if len(CANVAS_DATA_CACHE) > 500:
+        CANVAS_DATA_CACHE.clear()
+
+    if cache_key in CANVAS_DATA_CACHE:
+        return CANVAS_DATA_CACHE[cache_key]
+
     objects = {}
     for obj in cm.memory:
         vm_params = get_conversion_params("VirtualMap")
@@ -798,6 +850,15 @@ def _get_canvas_data_dict(viewId: str):
                         if contours:
                             largest_contour = max(contours, key=cv2.contourArea)
                             raw_cam_pts = largest_contour.reshape(-1, 2)
+                            try:
+                                if isinstance(largest_contour, np.ndarray) and len(largest_contour) > 2:
+                                    peri = cv2.arcLength(largest_contour, True)
+                                    if isinstance(peri, (int, float)):
+                                        approx = cv2.approxPolyDP(largest_contour, 0.002 * peri, True)
+                                        if approx is not None and isinstance(approx, np.ndarray) and len(approx) > 0:
+                                            raw_cam_pts = approx.reshape(-1, 2)
+                            except Exception:
+                                pass
                             cam_pts = [
                                 scale_point_new(
                                     (float(pt[0]), float(pt[1])),
@@ -824,11 +885,15 @@ def _get_canvas_data_dict(viewId: str):
 
         objects[obj.oid] = {"VirtualMap": vm_pts, **cam_objs}
 
-    session_config = SESSIONS.get(viewId, SessionConfig())
+    comp_cams = sorted(list(cc.cameras.keys()))
+    comp_cams.append("VirtualMap")
+    while len(comp_cams) < 4:
+        comp_cams.append("No Camera")
+    comp_cams = comp_cams[:4]
 
     data = {
         "objects": objects,
-        "cameras": sorted(list(cc.cameras.keys())),
+        "cameras": comp_cams,
         **asdict(session_config),
         "selection": {
             "firstCell": axial_to_ui_object(*session_config.selection.firstCell)
@@ -844,6 +909,8 @@ def _get_canvas_data_dict(viewId: str):
             obj.oid: _get_constituent_axials(obj, cc) for obj in cm.memory
         },
     }
+    
+    CANVAS_DATA_CACHE[cache_key] = data
     return data
 
 
@@ -1227,10 +1294,29 @@ def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
     except (TypeError, ValueError):
         moveDistance = str(moveDistance)
 
-    if color is not None:
-        visual_image = custom_object_visual(cm, capture, color)
+    # Construction of unique state key based on target object state
+    state_key = (
+        capture.oid,
+        color,
+        tuple(
+            (camName, tuple(change.clipBox) if getattr(change, "clipBox", None) is not None else None)
+            for camName, change in capture.changeSet.items()
+            if change is not None and getattr(change, "changeType", None) != "delete"
+        )
+    )
+
+    if len(OBJECT_ROW_IMAGE_CACHE) > 2000:
+        OBJECT_ROW_IMAGE_CACHE.clear()
+
+    if state_key in OBJECT_ROW_IMAGE_CACHE:
+        encoded_ba = OBJECT_ROW_IMAGE_CACHE[state_key]
     else:
-        visual_image = cm.object_visual(capture)
+        if color is not None:
+            visual_image = custom_object_visual(cm, capture, color)
+        else:
+            visual_image = cm.object_visual(capture)
+        encoded_ba = imageToBase64(visual_image)
+        OBJECT_ROW_IMAGE_CACHE[state_key] = encoded_ba
 
     safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", capture.oid)
 
@@ -1260,7 +1346,7 @@ def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
         .replace("{moveDistance}", moveDistance)
         .replace("{observerURL}", "/harmony/")
         .replace("{moveableActions}", moveable_actions)
-        .replace("{encodedBA}", imageToBase64(visual_image))
+        .replace("{encodedBA}", encoded_ba)
         .replace("{viewId}", str(viewId) if viewId else "")
     )
     return changeRow
@@ -1337,6 +1423,17 @@ def buildObjectTable(viewId=None):
     persistence_script = """
 <script>
     (function() {
+        function restoreState() {
+            document.querySelectorAll('.object-category-details').forEach(el => {
+                const saved = localStorage.getItem('collapse-' + el.id);
+                if (saved === 'open') {
+                    el.open = true;
+                } else if (saved === 'closed') {
+                    el.open = false;
+                }
+            });
+        }
+
         if (!window.objectCategoryDetailsListenerRegistered) {
             window.objectCategoryDetailsListenerRegistered = true;
             document.addEventListener('toggle', function(e) {
@@ -1346,15 +1443,13 @@ def buildObjectTable(viewId=None):
                     localStorage.setItem('collapse-' + id, isOpen ? 'open' : 'closed');
                 }
             }, true);
+            
+            document.addEventListener('htmx:afterSettle', function() {
+                restoreState();
+            });
         }
-        document.querySelectorAll('.object-category-details').forEach(el => {
-            const saved = localStorage.getItem('collapse-' + el.id);
-            if (saved === 'open') {
-                el.open = true;
-            } else if (saved === 'closed') {
-                el.open = false;
-            }
-        });
+        
+        restoreState();
     })();
 </script>
 """
@@ -2443,55 +2538,45 @@ def start_servers():
         print(f"Failed to start broadcasters: {e}")
 
     # Launch user server in a background thread.
-    # IMPORTANT: run via uvicorn.Server so we can disable its signal-handler
-    # installation — only the main-thread uvicorn should own SIGINT/SIGTERM.
+    # IMPORTANT: run via hypercorn.asyncio.serve inside a daemon thread
     def run_user():
         import asyncio
+        from hypercorn.config import Config
+        from hypercorn.asyncio import serve
 
-        print("Launching Harmony User Server on 7000")
-        cfg = uvicorn.Config(
-            user_app,
-            host="0.0.0.0",
-            port=7000,
-            log_level="warning",
-            timeout_graceful_shutdown=1,
-        )
-        server = uvicorn.Server(cfg)
-        asyncio.run(server.serve())
+        print("Launching Harmony User Server on 7000 (HTTP/2)")
+        config = Config()
+        config.bind = ["0.0.0.0:7000"]
+        config.loglevel = "warning"
+        
+        asyncio.run(serve(user_app, config))
 
     t = threading.Thread(target=run_user, daemon=True)
     t.start()
 
     # Launch admin server (blocking)
-    import uvicorn
+    import asyncio
+    from hypercorn.config import Config
+    from hypercorn.asyncio import serve
 
-    print(f"Launching Harmony Admin Server on 7001 (PID: {os.getpid()})")
+    print(f"Launching Harmony Admin Server on 7001 (PID: {os.getpid()}) (HTTP/2)")
 
-    cfg = uvicorn.Config(
-        admin_app,
-        host="0.0.0.0",
-        port=7001,
-        log_level="info",
-        timeout_graceful_shutdown=1,
-    )
-    server = uvicorn.Server(cfg)
+    config = Config()
+    config.bind = ["0.0.0.0:7001"]
+    config.loglevel = "info"
 
-    # Monkey-patch uvicorn's handle_exit to set our shutdown event immediately
-    original_handle_exit = server.handle_exit
-
-    def patched_handle_exit(*args, **kwargs):
-        print(f"Server exit triggered, setting shutdown event.")
+    try:
+        asyncio.run(serve(admin_app, config))
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        print("Server exit triggered, setting shutdown event.")
         SHUTDOWN_EVENT.set()
         # Trigger cleanup for broadcasters immediately
         for broadcaster in BROADCASTERS.values():
             broadcaster.stop()
             with broadcaster.condition:
                 broadcaster.condition.notify_all()
-        return original_handle_exit(*args, **kwargs)
-
-    server.handle_exit = patched_handle_exit
-
-    server.run()
 
 
 if __name__ == "__main__":
