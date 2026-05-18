@@ -6,13 +6,17 @@ import socket
 import threading
 import numpy as np
 from unittest import mock
+from collections import namedtuple
+
+HarmonyServers = namedtuple("HarmonyServers", ["admin", "user"])
 
 
 @pytest.fixture(scope="module")
-def harmony_server(mock_cv2):
-    """Start the Harmony server in-process using mocked hardware, on a background thread."""
+def harmony_servers(mock_cv2):
+    """Start both the Admin and User Harmony servers in-process using mocked hardware."""
     import uvicorn
     import harmony.harmonyServer as hs
+    from harmony.harmonyServer import create_harmony_app
 
     # Reset module-level singleton so create_harmony_app initialises fresh
     hs._cc = None
@@ -44,51 +48,91 @@ def harmony_server(mock_cv2):
     mock_cc.memory = []
     mock_cc.objects = []
     mock_cc.grid_overlay.return_value = np.zeros((480, 640, 3), dtype=np.uint8)
+    mock_cc.realSpaceBoundingBox.return_value = (0, 0, 1600, 1600)
 
     mock_cm = MockHM.return_value
     mock_cm.cc = mock_cc
     mock_cm.memory = []
 
-    from harmony.harmonyServer import create_harmony_app
+    # 1. Admin App
+    admin_app = create_harmony_app(template_name="Harmony.html")
+    # Expose state
+    admin_app.state.cc = mock_cc
+    admin_app.state.cm = mock_cm
 
-    app = create_harmony_app()
+    # 2. User App (shares the same hs._cc and hs._cm singleton)
+    user_app = create_harmony_app(template_name="HarmonyUser.html")
+    # Expose state
+    user_app.state.cc = mock_cc
+    user_app.state.cm = mock_cm
 
-    # Find a free port
+    # Find free port for Admin
     with socket.socket() as s:
         s.bind(("", 0))
-        port = s.getsockname()[1]
+        admin_port = s.getsockname()[1]
 
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=port, log_level="error", loop="asyncio"
+    # Find free port for User
+    with socket.socket() as s:
+        s.bind(("", 0))
+        user_port = s.getsockname()[1]
+
+    admin_config = uvicorn.Config(
+        admin_app, host="127.0.0.1", port=admin_port, log_level="error", loop="asyncio"
     )
-    server = uvicorn.Server(config)
+    admin_server = uvicorn.Server(admin_config)
 
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
+    user_config = uvicorn.Config(
+        user_app, host="127.0.0.1", port=user_port, log_level="error", loop="asyncio"
+    )
+    user_server = uvicorn.Server(user_config)
 
-    # Wait for server to be ready
+    admin_thread = threading.Thread(target=admin_server.run, daemon=True)
+    user_thread = threading.Thread(target=user_server.run, daemon=True)
+
+    admin_thread.start()
+    user_thread.start()
+
+    # Wait for both servers to be ready
     ready = False
     for _ in range(40):
+        admin_ready = False
+        user_ready = False
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", port)) == 0:
-                ready = True
-                break
+            if s.connect_ex(("127.0.0.1", admin_port)) == 0:
+                admin_ready = True
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("127.0.0.1", user_port)) == 0:
+                user_ready = True
+        if admin_ready and user_ready:
+            ready = True
+            break
         time.sleep(0.25)
 
     if not ready:
-        server.should_exit = True
+        admin_server.should_exit = True
+        user_server.should_exit = True
         p_hcc.stop()
         p_hm.stop()
         p_rcs.stop()
-        pytest.fail("Harmony server failed to start within 10 seconds")
+        pytest.fail("Harmony servers failed to start within 10 seconds")
 
-    yield f"http://127.0.0.1:{port}"
+    yield HarmonyServers(
+        admin=f"http://127.0.0.1:{admin_port}",
+        user=f"http://127.0.0.1:{user_port}"
+    )
 
-    server.should_exit = True
-    thread.join(timeout=5)
+    admin_server.should_exit = True
+    user_server.should_exit = True
+    admin_thread.join(timeout=5)
+    user_thread.join(timeout=5)
     p_hcc.stop()
     p_hm.stop()
     p_rcs.stop()
+
+
+@pytest.fixture(scope="module")
+def harmony_server(harmony_servers):
+    return harmony_servers.admin
 
 
 def test_homepage_loads(page: Page, harmony_server):
@@ -97,22 +141,86 @@ def test_homepage_loads(page: Page, harmony_server):
 
 
 def test_camera_switching(page: Page, harmony_server):
+    page.add_init_script("HTMLImageElement.prototype.decode = () => Promise.resolve();")
     page.goto(f"{harmony_server}/harmony/")
 
-    # Find a camera button, in this app they are often inputs or list items
-    cam_btn = page.locator("input[type='submit']").filter(has_text="Camera 0").first
-    if cam_btn.count() == 0:
-        cam_btn = page.locator("input").filter(has_text="0").first
+    # Find the Virtual Map camera button
+    vmap_btn = page.locator("input[type='button'][value='Virtual Map']")
+    expect(vmap_btn).to_be_visible()
+    vmap_btn.click()
+    expect(page.locator("#GameWorldHeader")).to_contain_text("VirtualMap")
 
-    if cam_btn.count() > 0:
-        cam_btn.click()
-        expect(page.locator("#GameWorldHeader")).to_contain_text("0")
+    # Find the Camera 0 camera button
+    cam_btn = page.locator("input[type='button'][value='Camera Camera 0']")
+    expect(cam_btn).to_be_visible()
+    cam_btn.click()
+    expect(page.locator("#GameWorldHeader")).to_contain_text("Camera 0")
+
+    # Find the All Views camera button
+    all_btn = page.locator("input[type='button'][value='All Views']")
+    expect(all_btn).to_be_visible()
+    all_btn.click()
+    expect(page.locator("#GameWorldHeader")).to_contain_text("All Views")
 
 
-def test_admin_vs_user_permissions_js(page: Page, harmony_server):
-    # Validates page loads at all with mocked hardware
-    page.goto(f"{harmony_server}/harmony/")
-    expect(page.locator("body")).to_be_visible()
+def test_admin_vs_user_permissions_js(page: Page, harmony_servers):
+    admin_url = harmony_servers.admin
+    user_url = harmony_servers.user
+
+    page.add_init_script("HTMLImageElement.prototype.decode = () => Promise.resolve();")
+
+    # 1. Verify Admin UI elements
+    page.goto(f"{admin_url}/harmony/")
+    expect(page.locator("input[value='Save Game']")).to_be_visible()
+    expect(page.locator("input[value='Load Game']")).to_be_visible()
+    expect(page.locator("button:has-text('Session Control Panels')")).to_be_visible()
+    expect(page.locator("button:has-text('Configurator')")).to_be_visible()
+    expect(page.locator("input[value='Reset Game']")).to_be_visible()
+
+    # 2. Verify User UI elements (admin controls must be absent)
+    page.goto(f"{user_url}/harmony/")
+    expect(page.locator("input[value='Save Game']")).not_to_be_visible()
+    expect(page.locator("input[value='Load Game']")).not_to_be_visible()
+    expect(page.locator("button:has-text('Session Control Panels')")).not_to_be_visible()
+    expect(page.locator("button:has-text('Configurator')")).not_to_be_visible()
+    expect(page.locator("input[value='Reset Game']")).not_to_be_visible()
+
+    # 3. Verify Admin vs User selection permissions (e.g. Delete Object button presence)
+    # Import harmony server globals to mock object selection
+    import harmony.harmonyServer as hs
+
+    # Add a mock object in the shared HarmonyMachine memory
+    mock_obj = mock.MagicMock()
+    mock_obj.oid = "E2EObj"
+    mock_obj.constituent_axials = [(0, 0)]
+    hs._cm.memory = [mock_obj]
+
+    # Configure coordinate tracking mock to return (0, 0)
+    hs._cm.cc.camCoordToAxial.return_value = (0, 0)
+    hs._cm.cc.changeSetToAxialCoord.return_value = (0, 0)
+    hs._cc.changeSetToAxialCoord.return_value = (0, 0)
+
+    # Admin selection
+    page.goto(f"{admin_url}/harmony/?viewId=admin_e2e_session")
+    # Submit coordinate (0, 0) click
+    page.evaluate("""
+        document.getElementById('selectedCamera').value = 'Camera 0';
+        document.getElementById('selectedPixel').value = '[100, 200]';
+        document.getElementById('appendPixel').value = 'false';
+        document.getElementById('selectPixelForm').requestSubmit();
+    """)
+    expect(page.locator("#interactor")).to_contain_text("Delete Object")
+
+    # User selection
+    page.goto(f"{user_url}/harmony/?viewId=user_e2e_session")
+    # Submit same coordinate (0, 0) click
+    page.evaluate("""
+        document.getElementById('selectedCamera').value = 'Camera 0';
+        document.getElementById('selectedPixel').value = '[100, 200]';
+        document.getElementById('appendPixel').value = 'false';
+        document.getElementById('selectPixelForm').requestSubmit();
+    """)
+    expect(page.locator("#interactor")).not_to_contain_text("Delete Object")
 
 
 def test_ui_latency(page: Page, harmony_server):

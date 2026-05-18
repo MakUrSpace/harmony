@@ -236,16 +236,16 @@ class TestHarmonyServer(unittest.TestCase):
             )
             output = harmonyServer.buildObjectTable(view_id)
 
-        self.assertIn("<h4>Moveable</h4>", output)
+        self.assertIn("category-moveable", output)
         self.assertIn("ObjA", output)
-        self.assertIn("<h4>Allies</h4>", output)
+        self.assertIn("category-allies", output)
         self.assertIn("ObjB", output)
-        self.assertIn("<h4>Selectable</h4>", output)
+        self.assertIn("category-selectable", output)
         self.assertIn("ObjC", output)
 
-        idx_move = output.index("<h4>Moveable</h4>")
-        idx_ally = output.index("<h4>Allies</h4>")
-        idx_sel = output.index("<h4>Selectable</h4>")
+        idx_move = output.index("category-moveable")
+        idx_ally = output.index("category-allies")
+        idx_sel = output.index("category-selectable")
         self.assertTrue(idx_move < idx_ally < idx_sel)
 
     def test_update_session_id_reclaim(self):
@@ -851,6 +851,37 @@ class TestHarmonyServer(unittest.TestCase):
         html = resp.text
         self.assertIn("Object Defined", html)
         self.assertIn("UniqueObj", html)
+
+    def test_collapsible_object_categories(self):
+        """Verify that object categories are rendered in collapsible details elements."""
+        view_id = "test_col_cat"
+        session = harmonyServer.SessionConfig()
+        session.selectable = ["ObjSelect"]
+        harmonyServer.SESSIONS[view_id] = session
+
+        # Pre-populate memory with a selectable object
+        mock_obj = mock.MagicMock()
+        mock_obj.oid = "ObjSelect"
+        mock_obj.constituent_axials = [(0, 0)]
+        harmonyServer._cm.memory = [mock_obj]
+
+        with mock.patch.object(harmonyServer, "captureToChangeRow") as mock_row:
+            mock_row.side_effect = (
+                lambda x, color=None, is_moveable=False, viewId=None: x.oid
+            )
+            resp = self.client.get(f"/harmony/objects?viewId={view_id}")
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.text
+
+        # Verify that category details/summary is rendered
+        self.assertIn('<details id="category-selectable"', html)
+        self.assertIn("<summary", html)
+        self.assertIn("Selectable", html)
+
+        # Verify that persistence script block is loaded
+        self.assertIn("objectCategoryDetailsListenerRegistered", html)
+        self.assertIn("localStorage.setItem('collapse-'", html)
 
 
 if __name__ == "__main__":

@@ -139,23 +139,23 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         const showObjects = showObjectsElem ? showObjectsElem.checked : true;
 
         if (showObjects) {
+            if (data.moveable) {
+                drawGroup(data.moveable, 170, 80, 255, drawnSet);
+            }
+            if (data.allies) {
+                drawGroup(data.allies, 0, 210, 120, drawnSet);
+            }
+            if (data.enemies) {
+                drawGroup(data.enemies, 230, 60, 70, drawnSet);
+            }
+            if (data.targetable) {
+                drawGroup(data.targetable, 0, 200, 255, drawnSet);
+            }
             if (data.terrain) {
                 drawGroup(data.terrain, 210, 105, 30, drawnSet);
             }
             if (data.selectable) {
                 drawGroup(data.selectable, 255, 105, 180, drawnSet);
-            }
-            if (data.targetable) {
-                drawGroup(data.targetable, 0, 200, 255, drawnSet);
-            }
-            if (data.enemies) {
-                drawGroup(data.enemies, 230, 60, 70, drawnSet);
-            }
-            if (data.allies) {
-                drawGroup(data.allies, 0, 210, 120, drawnSet);
-            }
-            if (data.moveable) {
-                drawGroup(data.moveable, 170, 80, 255, drawnSet);
             }
         }
 
