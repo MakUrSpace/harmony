@@ -1303,7 +1303,14 @@ def buildObjectTable(viewId=None):
                             break
             if group_rows:
                 changeRows.append(
-                    f"<h4>{group_name.capitalize()}</h4>" + " ".join(group_rows)
+                    f'<details id="category-{group_name}" class="object-category-details" open style="border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; padding: 6px 10px; background: rgba(255, 255, 255, 0.03); text-align: left;">'
+                    f'  <summary style="cursor: pointer; user-select: none; font-size: 1.15rem; font-weight: 600; outline: none; margin-bottom: 0; color: #ffca28; padding: 4px 0;">'
+                    f'    <span style="margin-left: 4px;">{group_name.capitalize()}</span>'
+                    f"  </summary>"
+                    f'  <div class="category-content" style="padding-top: 8px;">'
+                    f"    {' '.join(group_rows)}"
+                    f"  </div>"
+                    f"</details>"
                 )
 
     selectable_rows = []
@@ -1316,9 +1323,43 @@ def buildObjectTable(viewId=None):
             seen_oids.add(capture.oid)
 
     if selectable_rows:
-        changeRows.append(f"<h4>Selectable</h4>" + " ".join(selectable_rows))
+        changeRows.append(
+            f'<details id="category-selectable" class="object-category-details" open style="border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; padding: 6px 10px; background: rgba(255, 255, 255, 0.03); text-align: left;">'
+            f'  <summary style="cursor: pointer; user-select: none; font-size: 1.15rem; font-weight: 600; outline: none; margin-bottom: 0; color: #ffca28; padding: 4px 0;">'
+            f'    <span style="margin-left: 4px;">Selectable</span>'
+            f"  </summary>"
+            f'  <div class="category-content" style="padding-top: 8px;">'
+            f"    {' '.join(selectable_rows)}"
+            f"  </div>"
+            f"</details>"
+        )
 
-    return " ".join(changeRows)
+    persistence_script = """
+<script>
+    (function() {
+        if (!window.objectCategoryDetailsListenerRegistered) {
+            window.objectCategoryDetailsListenerRegistered = true;
+            document.addEventListener('toggle', function(e) {
+                if (e.target && e.target.classList.contains('object-category-details')) {
+                    const id = e.target.id;
+                    const isOpen = e.target.open;
+                    localStorage.setItem('collapse-' + id, isOpen ? 'open' : 'closed');
+                }
+            }, true);
+        }
+        document.querySelectorAll('.object-category-details').forEach(el => {
+            const saved = localStorage.getItem('collapse-' + el.id);
+            if (saved === 'open') {
+                el.open = true;
+            } else if (saved === 'closed') {
+                el.open = false;
+            }
+        });
+    })();
+</script>
+"""
+
+    return " ".join(changeRows) + persistence_script
 
 
 @harmony.get("/objects")
