@@ -600,6 +600,84 @@ class TestHarmonyServer(unittest.TestCase):
         )
         self.assertIn("Move Statue Here", resp.content.decode())
 
+    def test_additional_clicks_replace_or_append(self):
+        """Test that additional clicks:
+        1. Replace the second selection when appendPixel is False.
+        2. Append to multiple selections when appendPixel is True.
+        """
+        view_id = "test_session_replace_append"
+        from harmony.harmonyServer import SessionConfig
+
+        session = SessionConfig()
+        harmonyServer.SESSIONS[view_id] = session
+
+        harmonyServer._cm.cc = harmonyServer._cc
+        harmonyServer._cm.cc.camCoordToAxial = mock.MagicMock(
+            side_effect=lambda cam, pt: tuple(map(int, pt))
+        )
+        harmonyServer.get_conversion_params = mock.MagicMock(
+            return_value=(1.0, 1.0, 0, 0)
+        )
+
+        # 1. First selection (10, 10)
+        self.client.post(
+            "/harmony/select_pixel",
+            data={
+                "viewId": view_id,
+                "selectedPixel": "[10, 10]",
+                "selectedCamera": "Camera 0",
+                "appendPixel": "",
+            },
+        )
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.firstCell, (10, 10))
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.additionalCells, [])
+
+        # 2. Second selection (20, 20) -> should set additionalCells = [(20, 20)]
+        self.client.post(
+            "/harmony/select_pixel",
+            data={
+                "viewId": view_id,
+                "selectedPixel": "[20, 20]",
+                "selectedCamera": "Camera 0",
+                "appendPixel": "",
+            },
+        )
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.firstCell, (10, 10))
+        self.assertEqual(
+            harmonyServer.SESSIONS[view_id].selection.additionalCells, [(20, 20)]
+        )
+
+        # 3. Third selection (30, 30) with appendPixel=False -> should replace second selection
+        self.client.post(
+            "/harmony/select_pixel",
+            data={
+                "viewId": view_id,
+                "selectedPixel": "[30, 30]",
+                "selectedCamera": "Camera 0",
+                "appendPixel": "",
+            },
+        )
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.firstCell, (10, 10))
+        self.assertEqual(
+            harmonyServer.SESSIONS[view_id].selection.additionalCells, [(30, 30)]
+        )
+
+        # 4. Fourth selection (40, 40) with appendPixel=True -> should append (prepend) to additionalCells
+        self.client.post(
+            "/harmony/select_pixel",
+            data={
+                "viewId": view_id,
+                "selectedPixel": "[40, 40]",
+                "selectedCamera": "Camera 0",
+                "appendPixel": "true",
+            },
+        )
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.firstCell, (10, 10))
+        self.assertEqual(
+            harmonyServer.SESSIONS[view_id].selection.additionalCells,
+            [(40, 40), (30, 30)],
+        )
+
     def test_canvas_data_mapping(self):
         """Test the UI coordinate mapping in the canvas_data endpoint."""
         SessionConfig = harmonyServer.SessionConfig

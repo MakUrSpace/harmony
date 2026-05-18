@@ -1490,11 +1490,12 @@ def selectPixel(
         elif existing.firstCell:
             if existing.secondCell is None:
                 session.selection.additionalCells = [axial_coord]
-            elif (
-                appendPixel_bool
-                and axial_coord not in session.selection.additionalCells
-            ):
-                session.selection.additionalCells.insert(0, axial_coord)
+            else:
+                if appendPixel_bool:
+                    if axial_coord not in session.selection.additionalCells:
+                        session.selection.additionalCells.insert(0, axial_coord)
+                else:
+                    session.selection.additionalCells = [axial_coord]
         else:
             session.selection = CellSelection(firstCell=axial_coord)
             session.selected_oid = None  # new single cell click, no object implied yet
