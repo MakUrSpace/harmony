@@ -2548,8 +2548,12 @@ def start_servers():
         config = Config()
         config.bind = ["0.0.0.0:7000"]
         config.loglevel = "warning"
+
+        async def wait_for_shutdown():
+            while not SHUTDOWN_EVENT.is_set():
+                await asyncio.sleep(0.1)
         
-        asyncio.run(serve(user_app, config))
+        asyncio.run(serve(user_app, config, shutdown_trigger=wait_for_shutdown))
 
     t = threading.Thread(target=run_user, daemon=True)
     t.start()
