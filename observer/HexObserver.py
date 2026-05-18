@@ -42,6 +42,7 @@ class HexGridConfiguration:
 class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def loadConfiguration(self, path="observerConfiguration.json"):
         super().loadConfiguration()
+        self._cam_hex_cache = {}
         try:
             config = self.readConfigFile()
         except Exception:
@@ -417,6 +418,12 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         return dx_sum / count, dy_sum / count
 
     def cam_hex_at_axial(self, cam: str, q: int, r: int):
+        if not hasattr(self, "_cam_hex_cache"):
+            self._cam_hex_cache = {}
+        cache_key = (str(cam), q, r)
+        if cache_key in self._cam_hex_cache:
+            return self._cam_hex_cache[cache_key]
+
         grid_poly = self.hex_at_axial(q, r, apply_affine=False)
 
         if (
@@ -428,7 +435,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             cam_poly = [
                 [int(round(pt[0][0])), int(round(pt[0][1]))] for pt in grid_poly
             ]
-            return np.array(cam_poly, dtype=np.int32).reshape((-1, 1, 2))
+            res = np.array(cam_poly, dtype=np.int32).reshape((-1, 1, 2))
+            self._cam_hex_cache[cache_key] = res
+            return res
 
         cam_poly = []
         for i, pt in enumerate(grid_poly):
@@ -440,7 +449,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             cam_poly.append([int(round(cx + dx)), int(round(cy + dy))])
 
         cam_poly = np.array(cam_poly, dtype=np.int32).reshape((-1, 1, 2))
+        self._cam_hex_cache[cache_key] = cam_poly
         return cam_poly
+
 
     def _get_cameras_cache_key(self):
         key_parts = []

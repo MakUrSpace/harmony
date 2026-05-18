@@ -626,19 +626,32 @@ class TestInteractionAndNetworkRequests:
         hs._cm.cc = hs._cc
         hs._cc.realSpaceBoundingBox.return_value = (0, 0, 100, 100)
 
-        r = harmony_client.get("/harmony/camWithChanges/VirtualMap/testview")
-        assert r.status_code == 200
-        iterator = r.iter_content()
-        first_chunk = next(iterator)
-        assert b"--frame" in first_chunk
+        def mock_gen(*args, **kwargs):
+            yield b"--frame\r\nContent-Type: image/jpg\r\n\r\nfake_minimap\r\n"
+
+        mock_broadcaster = mock.MagicMock()
+        mock_broadcaster.subscribe.side_effect = mock_gen
+
+        with mock.patch("harmony.harmonyServer.get_broadcaster", return_value=mock_broadcaster):
+            r = harmony_client.get("/harmony/camWithChanges/VirtualMap/testview")
+            assert r.status_code == 200
+            iterator = r.iter_bytes()
+            first_chunk = next(iterator)
+            assert b"--frame" in first_chunk
 
     def test_combined_cameras_stream(self, harmony_client):
         import harmony.harmonyServer as hs
         dummy_img = np.zeros((100, 100, 3), dtype=np.uint8)
         hs._cm.getCameraImagesWithChanges = mock.MagicMock(return_value={"Camera 0": dummy_img})
 
-        r = harmony_client.get("/harmony/combinedCamerasWithChanges")
-        assert r.status_code == 200
-        iterator = r.iter_content()
-        first_chunk = next(iterator)
-        assert b"--frame" in first_chunk
+        def mock_gen(*args, **kwargs):
+            yield b"--frame\r\nContent-Type: image/jpg\r\n\r\nfake_combined\r\n"
+
+        with mock.patch("harmony.harmonyServer.genCombinedCameraWithChangesView", side_effect=mock_gen):
+            r = harmony_client.get("/harmony/combinedCamerasWithChanges")
+            assert r.status_code == 200
+            iterator = r.iter_bytes()
+            first_chunk = next(iterator)
+            assert b"--frame" in first_chunk
+
+

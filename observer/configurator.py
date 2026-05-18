@@ -798,9 +798,11 @@ async def nudgeHex(request: Request, camName: str):
                     cc.hex.hex_nudges[camName][nudge_key] = [curr_dx + dx, curr_dy + dy]
 
         cc.saveConfiguration()
-        # Clear grid overlay cache
+        # Clear grid overlay cache and hex coord cache
         if hasattr(cc, "_grid_cache"):
             cc._grid_cache.clear()
+        if hasattr(cc, "_cam_hex_cache"):
+            cc._cam_hex_cache.clear()
 
         return JSONResponse({"status": "success"})
     except Exception as e:

@@ -539,36 +539,46 @@ def render_composite_all(cc, cm):
             cv2.rectangle(vmap_resized, (0, 0), (959, 539), boundary_color, 4)
             sub_frames.append(vmap_resized)
 
-        # Ensure we have at least 4 sub-frames for 2x2 grid
-        while len(sub_frames) < 4:
-            placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
-            # Subtle tech-grid pattern
-            for x in range(0, 960, 40):
-                cv2.line(placeholder, (x, 0), (x, 540), (20, 20, 20), 1)
-            for y in range(0, 540, 40):
-                cv2.line(placeholder, (0, y), (960, y), (20, 20, 20), 1)
+        if len(sub_frames) == 3:
+            row1 = cv2.hconcat([sub_frames[0], sub_frames[1]])
+            left_pad = np.zeros((540, 480, 3), dtype=np.uint8)
+            right_pad = np.zeros((540, 480, 3), dtype=np.uint8)
+            # Add visual boundaries for the padded row
+            cv2.rectangle(left_pad, (0, 0), (479, 539), boundary_color, 4)
+            cv2.rectangle(right_pad, (0, 0), (479, 539), boundary_color, 4)
+            row2 = cv2.hconcat([left_pad, sub_frames[2], right_pad])
+            composite = cv2.vconcat([row1, row2])
+        else:
+            # Ensure we have at least 4 sub-frames for 2x2 grid
+            while len(sub_frames) < 4:
+                placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
+                # Subtle tech-grid pattern
+                for x in range(0, 960, 40):
+                    cv2.line(placeholder, (x, 0), (x, 540), (20, 20, 20), 1)
+                for y in range(0, 540, 40):
+                    cv2.line(placeholder, (0, y), (960, y), (20, 20, 20), 1)
 
-            cv2.putText(
-                placeholder,
-                "No Camera",
-                (350, 270),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.2,
-                (70, 70, 70),
-                2,
-                cv2.LINE_AA,
-            )
-            # Add visual boundary border to separate perspectives
-            cv2.rectangle(placeholder, (0, 0), (959, 539), boundary_color, 4)
-            sub_frames.append(placeholder)
+                cv2.putText(
+                    placeholder,
+                    "No Camera",
+                    (350, 270),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.2,
+                    (70, 70, 70),
+                    2,
+                    cv2.LINE_AA,
+                )
+                # Add visual boundary border to separate perspectives
+                cv2.rectangle(placeholder, (0, 0), (959, 539), boundary_color, 4)
+                sub_frames.append(placeholder)
 
-        # Limit to exactly 4 for 2x2 grid
-        grid_frames = sub_frames[:4]
+            # Limit to exactly 4 for 2x2 grid
+            grid_frames = sub_frames[:4]
 
-        # Stitch 2x2
-        row1 = cv2.hconcat([grid_frames[0], grid_frames[1]])
-        row2 = cv2.hconcat([grid_frames[2], grid_frames[3]])
-        composite = cv2.vconcat([row1, row2])
+            # Stitch 2x2
+            row1 = cv2.hconcat([grid_frames[0], grid_frames[1]])
+            row2 = cv2.hconcat([grid_frames[2], grid_frames[3]])
+            composite = cv2.vconcat([row1, row2])
 
         ret, encoded = cv2.imencode(
             ".jpg", composite, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
@@ -1440,8 +1450,9 @@ def buildObjectTable(viewId=None):
                             seen_oids.add(oid)
                             break
             if group_rows:
+                open_attr = "open" if group_name == "moveable" else ""
                 changeRows.append(
-                    f'<details id="category-{group_name}" class="object-category-details" open style="border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; padding: 6px 10px; background: rgba(255, 255, 255, 0.03); text-align: left;">'
+                    f'<details id="category-{group_name}" class="object-category-details" {open_attr} style="border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; padding: 6px 10px; background: rgba(255, 255, 255, 0.03); text-align: left;">'
                     f'  <summary style="cursor: pointer; user-select: none; font-size: 1.15rem; font-weight: 600; outline: none; margin-bottom: 0; color: #ffca28; padding: 4px 0;">'
                     f'    <span style="margin-left: 4px;">{group_name.capitalize()}</span>'
                     f"  </summary>"
@@ -1462,7 +1473,7 @@ def buildObjectTable(viewId=None):
 
     if selectable_rows:
         changeRows.append(
-            f'<details id="category-selectable" class="object-category-details" open style="border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; padding: 6px 10px; background: rgba(255, 255, 255, 0.03); text-align: left;">'
+            f'<details id="category-selectable" class="object-category-details" style="border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; padding: 6px 10px; background: rgba(255, 255, 255, 0.03); text-align: left;">'
             f'  <summary style="cursor: pointer; user-select: none; font-size: 1.15rem; font-weight: 600; outline: none; margin-bottom: 0; color: #ffca28; padding: 4px 0;">'
             f'    <span style="margin-left: 4px;">Selectable</span>'
             f"  </summary>"
