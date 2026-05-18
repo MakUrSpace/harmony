@@ -515,16 +515,56 @@ def render_composite_all(cc, cm):
             cv2.rectangle(resized, (0, 0), (959, 539), boundary_color, 4)
             sub_frames.append(resized)
 
-        # Get VirtualMap frame and append to sub_frames before placeholders
+        # Always include VirtualMap in sub_frames so that quadrant indices stay
+        # aligned with data.cameras from _get_canvas_data_dict.
+        # If render_minimap returns None, use a styled placeholder so the slot is
+        # never skipped (which would shift every subsequent quadrant index).
+        num_real_cams = len(cams)
         vmap_frame = render_minimap(cm, encode=False)
         if vmap_frame is not None:
-            # Convert back to BGR from RGB
             vmap_bgr = cv2.cvtColor(vmap_frame, cv2.COLOR_RGB2BGR)
+        else:
+            # Styled offline placeholder in VirtualMap slot
+            vmap_bgr = np.zeros((960, 960, 3), dtype=np.uint8)
+            vmap_bgr[:] = (25, 25, 35)
+            for gx in range(0, 960, 40):
+                cv2.line(vmap_bgr, (gx, 0), (gx, 960), (20, 20, 30), 1)
+            for gy in range(0, 960, 40):
+                cv2.line(vmap_bgr, (0, gy), (960, gy), (20, 20, 30), 1)
+            cv2.putText(
+                vmap_bgr,
+                "Virtual Map: Loading...",
+                (60, 480),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                (70, 70, 100),
+                2,
+                cv2.LINE_AA,
+            )
+
+        if num_real_cams == 2:
+            # --- 2-camera layout: VirtualMap spans full bottom row (1920×540) ---
+            row1 = cv2.hconcat([sub_frames[0], sub_frames[1]])
+
+            vmap_wide = cv2.resize(vmap_bgr, (1920, 540), interpolation=cv2.INTER_LINEAR)
+            cv2.putText(
+                vmap_wide,
+                "Virtual Map",
+                (30, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                highlight_color,
+                2,
+                cv2.LINE_AA,
+            )
+            cv2.rectangle(vmap_wide, (0, 0), (1919, 539), boundary_color, 4)
+
+            composite = cv2.vconcat([row1, vmap_wide])
+        else:
+            # --- Standard 2×2 grid layout ---
             vmap_resized = cv2.resize(
                 vmap_bgr, (960, 540), interpolation=cv2.INTER_LINEAR
             )
-
-            # Overlay name for premium HUD aesthetic
             cv2.putText(
                 vmap_resized,
                 "Virtual Map",
@@ -535,43 +575,33 @@ def render_composite_all(cc, cm):
                 2,
                 cv2.LINE_AA,
             )
-            # Add visual boundary border to separate perspectives
             cv2.rectangle(vmap_resized, (0, 0), (959, 539), boundary_color, 4)
             sub_frames.append(vmap_resized)
 
-        # Always use a strict 2×2 grid.
-        # VirtualMap is appended directly after the real cameras, so its quadrant
-        # index always matches data.cameras[idx] from _get_canvas_data_dict.
-        # Padding to 4 panels ensures the layout is identical whether there are
-        # 1, 2, 3, or 4 cameras (including VirtualMap).
-        while len(sub_frames) < 4:
-            placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
-            # Subtle tech-grid pattern
-            for gx in range(0, 960, 40):
-                cv2.line(placeholder, (gx, 0), (gx, 540), (20, 20, 20), 1)
-            for gy in range(0, 540, 40):
-                cv2.line(placeholder, (0, gy), (960, gy), (20, 20, 20), 1)
+            # Pad to 4 panels; "No Camera" placeholders fill empty quadrants
+            while len(sub_frames) < 4:
+                placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
+                for gx in range(0, 960, 40):
+                    cv2.line(placeholder, (gx, 0), (gx, 540), (20, 20, 20), 1)
+                for gy in range(0, 540, 40):
+                    cv2.line(placeholder, (0, gy), (960, gy), (20, 20, 20), 1)
+                cv2.putText(
+                    placeholder,
+                    "No Camera",
+                    (350, 270),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.2,
+                    (70, 70, 70),
+                    2,
+                    cv2.LINE_AA,
+                )
+                cv2.rectangle(placeholder, (0, 0), (959, 539), boundary_color, 4)
+                sub_frames.append(placeholder)
 
-            cv2.putText(
-                placeholder,
-                "No Camera",
-                (350, 270),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.2,
-                (70, 70, 70),
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.rectangle(placeholder, (0, 0), (959, 539), boundary_color, 4)
-            sub_frames.append(placeholder)
-
-        # Limit to exactly 4 for 2x2 grid
-        grid_frames = sub_frames[:4]
-
-        # Stitch 2x2
-        row1 = cv2.hconcat([grid_frames[0], grid_frames[1]])
-        row2 = cv2.hconcat([grid_frames[2], grid_frames[3]])
-        composite = cv2.vconcat([row1, row2])
+            grid_frames = sub_frames[:4]
+            row1 = cv2.hconcat([grid_frames[0], grid_frames[1]])
+            row2 = cv2.hconcat([grid_frames[2], grid_frames[3]])
+            composite = cv2.vconcat([row1, row2])
 
         ret, encoded = cv2.imencode(
             ".jpg", composite, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
@@ -935,8 +965,14 @@ def _get_canvas_data_dict(viewId: str):
 
         objects[obj.oid] = {"VirtualMap": vm_pts, **cam_objs}
 
-    comp_cams = sorted(list(cc.cameras.keys()))
+    real_cams = sorted(list(cc.cameras.keys()))
+    num_real_cams = len(real_cams)
+    comp_cams = list(real_cams)
     comp_cams.append("VirtualMap")
+    # vmLayout tells the JS how VirtualMap is drawn in the composite image:
+    # "wide" = spans full bottom row (only when exactly 2 real cameras)
+    # "grid" = occupies a single 960×540 quadrant slot (all other cases)
+    vm_layout = "wide" if num_real_cams == 2 else "grid"
     while len(comp_cams) < 4:
         comp_cams.append("No Camera")
     comp_cams = comp_cams[:4]
@@ -944,6 +980,7 @@ def _get_canvas_data_dict(viewId: str):
     data = {
         "objects": objects,
         "cameras": comp_cams,
+        "vmLayout": vm_layout,
         **asdict(session_config),
         "selection": {
             "firstCell": axial_to_ui_object(*session_config.selection.firstCell)

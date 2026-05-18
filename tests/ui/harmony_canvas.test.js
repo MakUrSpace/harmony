@@ -140,4 +140,75 @@ describe('HarmonyCanvas.js Unit Tests', () => {
         expect(pixelVal[1]).toEqual(600);
         expect(document.getElementById('appendPixel').value).toEqual("true");
     });
+
+    it('handlePixelSelection maps screen coordinates correctly in All view under grid layout', () => {
+        document.getElementById('selectedCamera').value = "All";
+        window.harmonyCanvasData = {
+            cameras: ["Camera0", "Camera1", "VirtualMap", "No Camera"],
+            vmLayout: "grid"
+        };
+        const mockEvent = {
+            clientX: 1440, // middle of right column (960 + 480)
+            clientY: 810,  // middle of bottom row (540 + 270)
+            shiftKey: false
+        };
+        
+        const img = document.getElementById('GameWorld');
+        Object.defineProperty(img, 'clientWidth', { value: 1920, configurable: true });
+        Object.defineProperty(img, 'clientHeight', { value: 1080, configurable: true });
+
+        // Mock image bounds
+        img.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1920, height: 1080 });
+
+        window.handlePixelSelection(mockEvent);
+
+        const pixelVal = JSON.parse(document.getElementById('selectedPixel').value);
+        // VirtualMap is in Quadrant 2 (col 0, row 1) or Quadrant 3 (col 1, row 1)
+        // Here col = 1, row = 1 -> quad_idx = 3 -> "No Camera"
+        // But let's check one specifically in Quadrant 2 (col 0, row 1) - VirtualMap slot in standard 4-grid:
+        // x in [0, 960], y in [540, 1080]
+        const mockEventVM = {
+            clientX: 480, // col 0
+            clientY: 810, // row 1
+            shiftKey: false
+        };
+        window.handlePixelSelection(mockEventVM);
+        
+        // Under grid: x maps relative to half_w, then scales to 1200x1200:
+        // (480 / 960) * 1200 = 600
+        // (270 / 540) * 1200 = 600
+        const pixelValVM = JSON.parse(document.getElementById('selectedPixel').value);
+        expect(pixelValVM[0]).toEqual(600);
+        expect(pixelValVM[1]).toEqual(600);
+    });
+
+    it('handlePixelSelection maps screen coordinates correctly in All view under wide layout', () => {
+        document.getElementById('selectedCamera').value = "All";
+        window.harmonyCanvasData = {
+            cameras: ["Camera0", "Camera1", "VirtualMap", "No Camera"],
+            vmLayout: "wide"
+        };
+        
+        const img = document.getElementById('GameWorld');
+        Object.defineProperty(img, 'clientWidth', { value: 1920, configurable: true });
+        Object.defineProperty(img, 'clientHeight', { value: 1080, configurable: true });
+        img.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1920, height: 1080 });
+
+        // Under wide layout, click in the bottom row (y >= 540) is always VirtualMap.
+        // Let's click at (960, 810) which is in the bottom center.
+        const mockEvent = {
+            clientX: 960, 
+            clientY: 810, // y offset in bottom row is 270 out of 540
+            shiftKey: false
+        };
+
+        window.handlePixelSelection(mockEvent);
+
+        const pixelVal = JSON.parse(document.getElementById('selectedPixel').value);
+        // Under wide:
+        // final_x = (960 / 1920) * 1200 = 600
+        // final_y = (270 / 540) * 1200 = 600
+        expect(pixelVal[0]).toEqual(600);
+        expect(pixelVal[1]).toEqual(600);
+    });
 });

@@ -82,6 +82,23 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         if (!poly || poly.length === 0) return null;
         const half_w = 960;
         const half_h = 540;
+
+        // Wide layout: VirtualMap spans the full bottom row when there are exactly 2 real cameras.
+        const vmLayout = (window.harmonyCanvasData && window.harmonyCanvasData.vmLayout) || 'grid';
+        if (cameraName === 'VirtualMap' && vmLayout === 'wide') {
+            // Bottom row: offsetX = 0, offsetY = 540, full-width scale
+            const scaleX = (1920 / 1200);
+            const scaleY = (half_h / 1200);
+            return poly.map(pt => {
+                const x = Array.isArray(pt) ? pt[0] : pt.x;
+                const y = Array.isArray(pt) ? pt[1] : pt.y;
+                return {
+                    x: x * scaleX,
+                    y: y * scaleY + half_h
+                };
+            });
+        }
+
         const offsetX = (quadIndex % 2) * half_w;
         const offsetY = Math.floor(quadIndex / 2) * half_h;
 
@@ -344,6 +361,10 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         render: draw,
         updateData: function (newData) {
             Object.assign(data, newData);
+            // Mirror vmLayout into the global so translatePolyToQuadrant can read it
+            if (newData.vmLayout !== undefined && window.harmonyCanvasData) {
+                window.harmonyCanvasData.vmLayout = newData.vmLayout;
+            }
             draw();
         }
     };
@@ -434,18 +455,35 @@ function handlePixelSelection(event, camNameOverride) {
 
     if (camName === "All") {
         const cams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras : [];
+        const vmLayout = (window.harmonyCanvasData && window.harmonyCanvasData.vmLayout) || 'grid';
         if (cams.length > 0) {
             const half_w = 960;
             const half_h = 540;
-            const quad_col = Math.floor(image_x / half_w);
-            const quad_row = Math.floor(image_y / half_h);
-            const quad_idx = quad_row * 2 + quad_col;
-            if (quad_idx >= 0 && quad_idx < cams.length) {
-                finalCamName = cams[quad_idx];
-                final_x = (image_x % half_w) * 2;
-                final_y = (image_y % half_h) * 2;
+
+            // In "wide" layout the bottom row is entirely VirtualMap (no quadrant 3)
+            if (vmLayout === 'wide' && image_y >= half_h) {
+                // Click is in the bottom VirtualMap strip
+                finalCamName = 'VirtualMap';
+                // Map from 1920×540 strip back to 1200×1200 VirtualMap space
+                final_x = (image_x / 1920) * 1200;
+                final_y = ((image_y - half_h) / half_h) * 1200;
             } else {
-                finalCamName = cams[0];
+                const quad_col = Math.floor(image_x / half_w);
+                const quad_row = Math.floor(image_y / half_h);
+                const quad_idx = quad_row * 2 + quad_col;
+                if (quad_idx >= 0 && quad_idx < cams.length) {
+                    finalCamName = cams[quad_idx];
+                    if (finalCamName === 'VirtualMap') {
+                        // Standard grid VirtualMap quadrant: map to 1200×1200 space
+                        final_x = ((image_x % half_w) / half_w) * 1200;
+                        final_y = ((image_y % half_h) / half_h) * 1200;
+                    } else {
+                        final_x = (image_x % half_w) * 2;
+                        final_y = (image_y % half_h) * 2;
+                    }
+                } else {
+                    finalCamName = cams[0];
+                }
             }
         }
     }
@@ -632,6 +670,11 @@ function syncCanvasData(viewId) {
             if (data && data.cameras) {
                 if (window.harmonyCanvasData) {
                     window.harmonyCanvasData.cameras = data.cameras;
+                }
+            }
+            if (data && data.vmLayout !== undefined) {
+                if (window.harmonyCanvasData) {
+                    window.harmonyCanvasData.vmLayout = data.vmLayout;
                 }
             }
             if (window.harmonyEditor) {
