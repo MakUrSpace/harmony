@@ -78,19 +78,23 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         }
     }
 
-    function translatePolyToQuadrant(poly, quadIndex) {
+    function translatePolyToQuadrant(poly, quadIndex, cameraName) {
         if (!poly || poly.length === 0) return null;
         const half_w = 960;
         const half_h = 540;
         const offsetX = (quadIndex % 2) * half_w;
         const offsetY = Math.floor(quadIndex / 2) * half_h;
-        
+
+        // VirtualMap polygons are in 1200x1200 space; regular cameras are in 1920x1080.
+        const scaleX = (cameraName === 'VirtualMap') ? (half_w / 1200) : (half_w / 1920);
+        const scaleY = (cameraName === 'VirtualMap') ? (half_h / 1200) : (half_h / 1080);
+
         return poly.map(pt => {
             const x = Array.isArray(pt) ? pt[0] : pt.x;
             const y = Array.isArray(pt) ? pt[1] : pt.y;
             return {
-                x: x * 0.5 + offsetX,
-                y: y * 0.5 + offsetY
+                x: x * scaleX + offsetX,
+                y: y * scaleY + offsetY
             };
         });
     }
@@ -106,7 +110,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                     cams.forEach((cName, quadIdx) => {
                         const poly = data.objects[name][cName];
                         if (poly && poly.length > 0) {
-                            const translated = translatePolyToQuadrant(poly, quadIdx);
+                            const translated = translatePolyToQuadrant(poly, quadIdx, cName);
                             drawPoly(translated, scale, true, r, g, b);
                         }
                     });
@@ -170,7 +174,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                     cams.forEach((cName, quadIdx) => {
                         const poly = data.selection.firstCell[cName];
                         if (poly && poly.length > 0) {
-                            const translated = translatePolyToQuadrant(poly, quadIdx);
+                            const translated = translatePolyToQuadrant(poly, quadIdx, cName);
                             drawPoly(translated, scale, true, 255, 210, 70); // Gold for first
                             
                             // Calculate center
@@ -204,7 +208,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                         cams.forEach((cName, quadIdx) => {
                             const poly = cell[cName];
                             if (poly && poly.length > 0) {
-                                const translated = translatePolyToQuadrant(poly, quadIdx);
+                                const translated = translatePolyToQuadrant(poly, quadIdx, cName);
                                 drawPoly(translated, scale, true, 255, 0, 255); // Magenta for additional
                                 
                                 const fCenter = firstCenters[quadIdx];
