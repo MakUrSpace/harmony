@@ -87,7 +87,7 @@ virtual_map_res = (1200, 1200)
 
 # Performance caches to prevent heavy OpenCV drawing / contours calculations on polling
 OBJECT_ROW_IMAGE_CACHE = {}  # key -> base64_str
-CANVAS_DATA_CACHE = {}      # key -> dict
+CANVAS_DATA_CACHE = {}  # key -> dict
 
 
 def imageToBase64(img):
@@ -439,7 +439,7 @@ def render_composite_all(cc, cm):
         # Get sorted list of cameras (excluding VirtualMap)
         cams = sorted(list(cc.cameras.keys()))
         sub_frames = []
-        
+
         # Border color to visually separate perspectives (4px charcoal border)
         boundary_color = (64, 64, 64)
         highlight_color = (0, 165, 255)
@@ -453,7 +453,7 @@ def render_composite_all(cc, cm):
                     cv2.line(placeholder, (x, 0), (x, 540), (20, 20, 20), 1)
                 for y in range(0, 540, 40):
                     cv2.line(placeholder, (0, y), (960, y), (20, 20, 20), 1)
-                
+
                 cv2.putText(
                     placeholder,
                     f"{name}: Offline",
@@ -483,7 +483,9 @@ def render_composite_all(cc, cm):
                         pending_img = make_pending_image(
                             960, 540, text=f"{name}: Calibrating..."
                         )
-                        cv2.rectangle(pending_img, (0, 0), (959, 539), boundary_color, 4)
+                        cv2.rectangle(
+                            pending_img, (0, 0), (959, 539), boundary_color, 4
+                        )
                         sub_frames.append(pending_img)
                         continue
                     elif grid_overlay is not None:
@@ -518,8 +520,10 @@ def render_composite_all(cc, cm):
         if vmap_frame is not None:
             # Convert back to BGR from RGB
             vmap_bgr = cv2.cvtColor(vmap_frame, cv2.COLOR_RGB2BGR)
-            vmap_resized = cv2.resize(vmap_bgr, (960, 540), interpolation=cv2.INTER_LINEAR)
-            
+            vmap_resized = cv2.resize(
+                vmap_bgr, (960, 540), interpolation=cv2.INTER_LINEAR
+            )
+
             # Overlay name for premium HUD aesthetic
             cv2.putText(
                 vmap_resized,
@@ -543,7 +547,7 @@ def render_composite_all(cc, cm):
                 cv2.line(placeholder, (x, 0), (x, 540), (20, 20, 20), 1)
             for y in range(0, 540, 40):
                 cv2.line(placeholder, (0, y), (960, y), (20, 20, 20), 1)
-                
+
             cv2.putText(
                 placeholder,
                 "No Camera",
@@ -624,67 +628,75 @@ def get_virtual_map_crop(cm):
     Unified logic to calculate the tight crop of the VirtualMap.
     Returns: (crop_x, crop_y, crop_w, crop_h, scale_x, scale_y, logical_x, logical_y)
     """
-    if not cm or not hasattr(cm.cc, "realSpaceBoundingBox"):
+    if (
+        not cm
+        or not hasattr(cm, "cc")
+        or not cm.cc
+        or not hasattr(cm.cc, "realSpaceBoundingBox")
+    ):
         return 0, 0, 1600, 1600, 1200 / 1600, 1200 / 1600, 0, 0
 
-    bx, by, bw, bh = cm.cc.realSpaceBoundingBox()
+    try:
+        bx, by, bw, bh = cm.cc.realSpaceBoundingBox()
 
-    # Grid shift logic (must match HexObserver.py)
-    shift_x = 0.0
-    shift_y = 0.0
-    if bx < 0:
-        shift_x = -bx
-    if by < 0:
-        shift_y = -by
+        # Grid shift logic (must match HexObserver.py)
+        shift_x = 0.0
+        shift_y = 0.0
+        if bx < 0:
+            shift_x = -bx
+        if by < 0:
+            shift_y = -by
 
-    map_x = int(bx) + shift_x
-    map_y = int(by) + shift_y
+        map_x = int(bx) + shift_x
+        map_y = int(by) + shift_y
 
-    margin = 20  # Tight margin
-    crop_x = int(max(0, map_x - margin))
-    crop_y = int(max(0, map_y - margin))
+        margin = 20  # Tight margin
+        crop_x = int(max(0, map_x - margin))
+        crop_y = int(max(0, map_y - margin))
 
-    # Calculate available canvas size
-    w_canvas = 1600
-    h_canvas = 1600
-    if hasattr(cm.cc, "hex") and cm.cc.hex:
-        w_canvas = cm.cc.hex.width
-        h_canvas = cm.cc.hex.height
+        # Calculate available canvas size
+        w_canvas = 1600
+        h_canvas = 1600
+        if hasattr(cm.cc, "hex") and cm.cc.hex:
+            w_canvas = cm.cc.hex.width
+            h_canvas = cm.cc.hex.height
 
-    req_w = int(bx + bw + shift_x)
-    req_h = int(by + bh + shift_y)
-    img_w = max(w_canvas, req_w)
-    img_h = max(h_canvas, req_h)
+        req_w = int(bx + bw + shift_x)
+        req_h = int(by + bh + shift_y)
+        img_w = max(w_canvas, req_w)
+        img_h = max(h_canvas, req_h)
 
-    crop_w = int(bw) + margin * 2
-    crop_h = int(bh) + margin * 2
+        crop_w = int(bw) + margin * 2
+        crop_h = int(bh) + margin * 2
 
-    end_x = min(img_w, crop_x + crop_w)
-    end_y = min(img_h, crop_y + crop_h)
+        end_x = min(img_w, crop_x + crop_w)
+        end_y = min(img_h, crop_y + crop_h)
 
-    crop_w_actual = int(end_x - crop_x)
-    crop_h_actual = int(end_y - crop_y)
+        crop_w_actual = int(end_x - crop_x)
+        crop_h_actual = int(end_y - crop_y)
 
-    if crop_w_actual <= 0 or crop_h_actual <= 0:
+        if crop_w_actual <= 0 or crop_h_actual <= 0:
+            return 0, 0, 1600, 1600, 1200 / 1600, 1200 / 1600, 0, 0
+
+        scale_x = 1200 / crop_w_actual
+        scale_y = 1200 / crop_h_actual
+
+        # Logical origin relative to raw Map space (0,0)
+        logical_x = crop_x - shift_x
+        logical_y = crop_y - shift_y
+
+        return (
+            crop_x,
+            crop_y,
+            crop_w_actual,
+            crop_h_actual,
+            scale_x,
+            scale_y,
+            logical_x,
+            logical_y,
+        )
+    except Exception:
         return 0, 0, 1600, 1600, 1200 / 1600, 1200 / 1600, 0, 0
-
-    scale_x = 1200 / crop_w_actual
-    scale_y = 1200 / crop_h_actual
-
-    # Logical origin relative to raw Map space (0,0)
-    logical_x = crop_x - shift_x
-    logical_y = crop_y - shift_y
-
-    return (
-        crop_x,
-        crop_y,
-        crop_w_actual,
-        crop_h_actual,
-        scale_x,
-        scale_y,
-        logical_x,
-        logical_y,
-    )
 
 
 def get_conversion_params(cam_name):
@@ -823,7 +835,9 @@ def _get_canvas_data_dict(viewId: str):
         tuple(session_config.allies),
         tuple(session_config.moveable),
         session_config.selection.firstCell if session_config.selection else None,
-        tuple(session_config.selection.additionalCells) if session_config.selection else None,
+        tuple(session_config.selection.additionalCells)
+        if session_config.selection
+        else None,
         session_config.selected_oid,
         getattr(session_config, "showObjects", True),
     )
@@ -875,11 +889,20 @@ def _get_canvas_data_dict(viewId: str):
                             largest_contour = max(contours, key=cv2.contourArea)
                             raw_cam_pts = largest_contour.reshape(-1, 2)
                             try:
-                                if isinstance(largest_contour, np.ndarray) and len(largest_contour) > 2:
+                                if (
+                                    isinstance(largest_contour, np.ndarray)
+                                    and len(largest_contour) > 2
+                                ):
                                     peri = cv2.arcLength(largest_contour, True)
                                     if isinstance(peri, (int, float)):
-                                        approx = cv2.approxPolyDP(largest_contour, 0.002 * peri, True)
-                                        if approx is not None and isinstance(approx, np.ndarray) and len(approx) > 0:
+                                        approx = cv2.approxPolyDP(
+                                            largest_contour, 0.002 * peri, True
+                                        )
+                                        if (
+                                            approx is not None
+                                            and isinstance(approx, np.ndarray)
+                                            and len(approx) > 0
+                                        ):
                                             raw_cam_pts = approx.reshape(-1, 2)
                             except Exception:
                                 pass
@@ -933,7 +956,7 @@ def _get_canvas_data_dict(viewId: str):
             obj.oid: _get_constituent_axials(obj, cc) for obj in cm.memory
         },
     }
-    
+
     CANVAS_DATA_CACHE[cache_key] = data
     return data
 
@@ -1323,10 +1346,15 @@ def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
         capture.oid,
         color,
         tuple(
-            (camName, tuple(change.clipBox) if getattr(change, "clipBox", None) is not None else None)
+            (
+                camName,
+                tuple(change.clipBox)
+                if getattr(change, "clipBox", None) is not None
+                else None,
+            )
             for camName, change in capture.changeSet.items()
             if change is not None and getattr(change, "changeType", None) != "delete"
-        )
+        ),
     )
 
     if len(OBJECT_ROW_IMAGE_CACHE) > 2000:
@@ -2586,7 +2614,7 @@ def start_servers():
         async def wait_for_shutdown():
             while not SHUTDOWN_EVENT.is_set():
                 await asyncio.sleep(0.1)
-        
+
         asyncio.run(serve(user_app, config, shutdown_trigger=wait_for_shutdown))
 
     t = threading.Thread(target=run_user, daemon=True)

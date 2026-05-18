@@ -117,8 +117,7 @@ def harmony_servers(mock_cv2):
         pytest.fail("Harmony servers failed to start within 10 seconds")
 
     yield HarmonyServers(
-        admin=f"http://127.0.0.1:{admin_port}",
-        user=f"http://127.0.0.1:{user_port}"
+        admin=f"http://127.0.0.1:{admin_port}", user=f"http://127.0.0.1:{user_port}"
     )
 
     admin_server.should_exit = True
@@ -181,7 +180,9 @@ def test_admin_vs_user_permissions_js(page: Page, harmony_servers):
     page.goto(f"{user_url}/harmony/")
     expect(page.locator("input[value='Save Game']")).not_to_be_visible()
     expect(page.locator("input[value='Load Game']")).not_to_be_visible()
-    expect(page.locator("button:has-text('Session Control Panels')")).not_to_be_visible()
+    expect(
+        page.locator("button:has-text('Session Control Panels')")
+    ).not_to_be_visible()
     expect(page.locator("button:has-text('Configurator')")).not_to_be_visible()
     expect(page.locator("input[value='Reset Game']")).not_to_be_visible()
 

@@ -419,8 +419,15 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def cam_hex_at_axial(self, cam: str, q: int, r: int):
         grid_poly = self.hex_at_axial(q, r, apply_affine=False)
 
-        if not hasattr(self, "rsc") or self.rsc is None or str(cam) not in self.rsc.converters or not self.rsc.converters[str(cam)]:
-            cam_poly = [[int(round(pt[0][0])), int(round(pt[0][1]))] for pt in grid_poly]
+        if (
+            not hasattr(self, "rsc")
+            or self.rsc is None
+            or str(cam) not in self.rsc.converters
+            or not self.rsc.converters[str(cam)]
+        ):
+            cam_poly = [
+                [int(round(pt[0][0])), int(round(pt[0][1]))] for pt in grid_poly
+            ]
             return np.array(cam_poly, dtype=np.int32).reshape((-1, 1, 2))
 
         cam_poly = []

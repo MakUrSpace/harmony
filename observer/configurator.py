@@ -241,13 +241,19 @@ def draw_dynamic_grid(cc, camName):
 
                 # Project to Real Space using the converter closest to each corner
                 corners_real = []
-                if hasattr(rsc, "converters") and str(camName) in rsc.converters and rsc.converters[str(camName)]:
+                if (
+                    hasattr(rsc, "converters")
+                    and str(camName) in rsc.converters
+                    and rsc.converters[str(camName)]
+                ):
                     for p in corners_cam:
                         converter = rsc.closestConverterToCamCoord(str(camName), p)
                         rp = converter.convertCameraToRealSpace(p)
                         corners_real.append(rp)
                 else:
-                    print(f"Camera {camName} is not calibrated. Skipping corner projection.")
+                    print(
+                        f"Camera {camName} is not calibrated. Skipping corner projection."
+                    )
 
                 # Convert to Axial to find range
 

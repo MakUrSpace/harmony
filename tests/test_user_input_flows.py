@@ -215,8 +215,9 @@ class TestObjectCRUD:
         hs._cm.deleteObject = mock.MagicMock()
         view_id = "admin_del"
         hs.SESSIONS[view_id] = SessionConfig()
+        harmony_client.cookies.set("session_view_id", view_id)
         r = harmony_client.request(
-            "DELETE", "/harmony/objects/Target", cookies={"session_view_id": view_id}
+            "DELETE", "/harmony/objects/Target"
         )
         assert r.status_code == 200
         hs._cm.deleteObject.assert_called_once_with("Target")
@@ -570,3 +571,74 @@ class TestConfiguratorInputFlows:
         )
         assert r.status_code == 200
         assert configurator_app.state.cc.hex.size == 30.0
+
+
+# ---------------------------------------------------------------------------
+# Interaction and Network requests
+# ---------------------------------------------------------------------------
+
+
+class TestInteractionAndNetworkRequests:
+    def test_clear_pixel(self, harmony_client):
+        import harmony.harmonyServer as hs
+        from harmony.harmonyServer import SessionConfig, CellSelection
+        view_id = "test_clear"
+        s = SessionConfig()
+        s.selection = CellSelection(firstCell=(1, 2))
+        hs.SESSIONS[view_id] = s
+
+        r = harmony_client.get(f"/harmony/clear_pixel/{view_id}")
+        assert r.status_code == 200
+        assert hs.SESSIONS[view_id].selection.firstCell is None
+
+    def test_canvas_data(self, harmony_client):
+        import harmony.harmonyServer as hs
+        from harmony.harmonyServer import SessionConfig
+        view_id = "test_canvas"
+        hs.SESSIONS[view_id] = SessionConfig()
+
+        r = harmony_client.get(f"/harmony/canvas_data/{view_id}")
+        assert r.status_code == 200
+        data = r.json()
+        assert "objects" in data
+
+    def test_request_move_multi_cell(self, harmony_client):
+        import harmony.harmonyServer as hs
+        from harmony.harmonyServer import SessionConfig, CellSelection
+
+        obj = _mock_obj("MultiMover", axial=(2, 2))
+        obj.constituent_axials = [(2, 2), (2, 3)]
+        hs._cm.memory = [obj]
+        hs._cm.findObject.side_effect = lambda oid: obj if oid == "MultiMover" else None
+
+        view_id = "move_multi"
+        s = _setup_session(hs, view_id, moveable=["MultiMover"])
+        s.selection = CellSelection(firstCell=(2, 2), additionalCells=[(4, 4)])
+
+        r = harmony_client.get(f"/harmony/request_move/MultiMover/{view_id}")
+        assert r.status_code == 200
+        hs._cc.define_object_from_axials.assert_called_once()
+
+    def test_cam_with_changes_stream_virtual_map(self, harmony_client):
+        import harmony.harmonyServer as hs
+        dummy_img = np.zeros((100, 100, 3), dtype=np.uint8)
+        hs._cm.buildMiniMap = mock.MagicMock(return_value=dummy_img)
+        hs._cm.cc = hs._cc
+        hs._cc.realSpaceBoundingBox.return_value = (0, 0, 100, 100)
+
+        r = harmony_client.get("/harmony/camWithChanges/VirtualMap/testview")
+        assert r.status_code == 200
+        iterator = r.iter_content()
+        first_chunk = next(iterator)
+        assert b"--frame" in first_chunk
+
+    def test_combined_cameras_stream(self, harmony_client):
+        import harmony.harmonyServer as hs
+        dummy_img = np.zeros((100, 100, 3), dtype=np.uint8)
+        hs._cm.getCameraImagesWithChanges = mock.MagicMock(return_value={"Camera 0": dummy_img})
+
+        r = harmony_client.get("/harmony/combinedCamerasWithChanges")
+        assert r.status_code == 200
+        iterator = r.iter_content()
+        first_chunk = next(iterator)
+        assert b"--frame" in first_chunk

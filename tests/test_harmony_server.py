@@ -905,7 +905,9 @@ class TestHarmonyServer(unittest.TestCase):
 
         # 1. Initialize selection with firstCell and additionalCells
         session = SessionConfig()
-        session.selection = CellSelection(firstCell=(1, 2), additionalCells=[(3, 4), (5, 6)])
+        session.selection = CellSelection(
+            firstCell=(1, 2), additionalCells=[(3, 4), (5, 6)]
+        )
         harmonyServer.SESSIONS[view_id] = session
 
         # Mock coordinate translator
@@ -925,7 +927,9 @@ class TestHarmonyServer(unittest.TestCase):
 
         # 3. Assert firstCell remains (1, 2), and additionalCells is replaced with [(7, 8)]
         self.assertEqual(harmonyServer.SESSIONS[view_id].selection.firstCell, (1, 2))
-        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.additionalCells, [(7, 8)])
+        self.assertEqual(
+            harmonyServer.SESSIONS[view_id].selection.additionalCells, [(7, 8)]
+        )
 
         # 4. Call select_pixel with appendPixel="False" on the same cell (7, 8) to de-select it
         resp = self.client.post("/harmony/select_pixel", data=data)
