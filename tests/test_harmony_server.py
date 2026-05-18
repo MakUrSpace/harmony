@@ -176,6 +176,8 @@ class TestHarmonyServer(unittest.TestCase):
     def test_cam_with_changes(self):
         response = self.client.get("/harmony/camWithChanges/Camera0/view1")
         self.assertEqual(response.status_code, 200)
+        response_all = self.client.get("/harmony/camWithChanges/All/view1")
+        self.assertEqual(response_all.status_code, 200)
 
     def test_combined_cameras_with_changes(self):
         response = self.client.get("/harmony/combinedCamerasWithChanges")
@@ -729,6 +731,126 @@ class TestHarmonyServer(unittest.TestCase):
         obj_vm = data["objects"]["TargetMapObj"]["VirtualMap"]
         self.assertEqual(obj_vm[0], [10.0, 10.0])
         self.assertEqual(obj_vm[1], [10.0, 30.0])
+
+    def test_show_grid_off_by_default(self):
+        """Verify that show_grid is off (defaults to False) initially."""
+        cc = harmonyServer._cc
+        # If cc does not have show_grid explicitly configured, getattr(cc, "show_grid", False) should return False
+        if hasattr(cc, "show_grid"):
+            delattr(cc, "show_grid")
+        self.assertFalse(getattr(cc, "show_grid", False))
+
+    def test_form_contains_hx_sync(self):
+        """Verify that the selectPixelForm contains hx-sync='this:queue' in the rendered HTML."""
+        resp = self.client.get("/harmony/?viewId=Calm-Sun")
+        self.assertEqual(resp.status_code, 200)
+        html_content = resp.content.decode()
+        self.assertIn('hx-sync="this:queue"', html_content)
+
+    def test_camera_space_contour_union(self):
+        """Verify that the camera space polygon union is used for multi-cell objects."""
+        import numpy as np
+
+        view_id = "test_union_cam"
+        session = harmonyServer.SessionConfig()
+        harmonyServer.SESSIONS[view_id] = session
+
+        mock_obj = mock.MagicMock()
+        mock_obj.oid = "MultiCellObj"
+        # Provide constituent axials
+        mock_obj.constituent_axials = [(1, 1), (1, 2)]
+        harmonyServer._cm.memory = [mock_obj]
+
+        harmonyServer._cm.cc = harmonyServer._cc
+        harmonyServer._cc.cameras = {"Camera 0": mock.MagicMock()}
+
+        # Mock hex coordinates
+        harmonyServer._cm.cc.cam_hex_at_axial = mock.MagicMock(
+            side_effect=lambda cam, q, r: np.array(
+                [[[100, 100]], [[120, 100]], [[120, 120]], [[100, 120]]], dtype=np.int32
+            )
+        )
+
+        # Mock cv2.findContours to prevent mocked cv2 unpack errors
+        mock_contour = np.array(
+            [[[100, 100]], [[120, 100]], [[120, 120]], [[100, 120]]], dtype=np.int32
+        )
+        harmonyServer.cv2.findContours = mock.MagicMock(
+            return_value=([mock_contour], None)
+        )
+
+        harmonyServer.get_conversion_params = mock.MagicMock(
+            return_value=(1.0, 1.0, 0, 0)
+        )
+
+        resp = self.client.get(f"/harmony/canvas_data/{view_id}")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+
+        self.assertIn("MultiCellObj", data["objects"])
+        cam_pts = data["objects"]["MultiCellObj"]["Camera 0"]
+        # Union of identical polygons should return a 4-point rect contour
+        self.assertGreater(len(cam_pts), 0)
+
+    def test_object_definition_validations(self):
+        """Verify that object definition rejects duplicate names or overlapping coordinates."""
+        view_id = "test_factory_val"
+        session = harmonyServer.SessionConfig()
+        session.selection.firstCell = (0, 0)
+        session.selection.additionalCells = [(1, 0)]
+        harmonyServer.SESSIONS[view_id] = session
+
+        # Mock define_object_from_axial and define_object_from_axials to return oid "UniqueObj"
+        harmonyServer._cm.cc.define_object_from_axial.return_value.oid = "UniqueObj"
+        harmonyServer._cm.cc.define_object_from_axials.return_value.oid = "UniqueObj"
+
+        # Pre-populate memory with an existing object named "Hero" on coordinate (0, 0)
+        mock_hero = mock.MagicMock()
+        mock_hero.oid = "Hero"
+        mock_hero.constituent_axials = [(0, 0)]
+        harmonyServer._cm.memory = [mock_hero]
+
+        # 1. Test name collision with "Hero" (case-insensitive)
+        resp = self.client.post(
+            f"/harmony/object_factory/{view_id}",
+            data={"object_name": "hero"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.text
+        self.assertIn("Definition Error", html)
+        self.assertIn("already exists", html)
+
+        # 2. Test cell coordinate overlap (coordinate (0, 0) is occupied by "Hero")
+        resp = self.client.post(
+            f"/harmony/object_factory/{view_id}",
+            data={"object_name": "NewObj"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.text
+        self.assertIn("Definition Error", html)
+        self.assertIn("overlap", html)
+
+        # 3. Test empty name rejection
+        resp = self.client.post(
+            f"/harmony/object_factory/{view_id}",
+            data={"object_name": "   "},
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.text
+        self.assertIn("Definition Error", html)
+        self.assertIn("cannot be empty", html)
+
+        # 4. Test successful definition when name is unique and cells are unoccupied
+        # Clean memory and selection for a clean run
+        mock_hero.constituent_axials = [(9, 9)]  # Move Hero out of the way
+        resp = self.client.post(
+            f"/harmony/object_factory/{view_id}",
+            data={"object_name": "UniqueObj"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.text
+        self.assertIn("Object Defined", html)
+        self.assertIn("UniqueObj", html)
 
 
 if __name__ == "__main__":

@@ -78,14 +78,44 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         }
     }
 
+    function translatePolyToQuadrant(poly, quadIndex) {
+        if (!poly || poly.length === 0) return null;
+        const half_w = 960;
+        const half_h = 540;
+        const offsetX = (quadIndex % 2) * half_w;
+        const offsetY = Math.floor(quadIndex / 2) * half_h;
+        
+        return poly.map(pt => {
+            const x = Array.isArray(pt) ? pt[0] : pt.x;
+            const y = Array.isArray(pt) ? pt[1] : pt.y;
+            return {
+                x: x * 0.5 + offsetX,
+                y: y * 0.5 + offsetY
+            };
+        });
+    }
+
     function drawGroup(group, r, g, b, drawnSet) {
         const scale = getScale(canvas, camName);
+        const currentCam = camName || document.getElementById('selectedCamera').value;
         group.forEach(name => {
             if (drawnSet && drawnSet.has(name)) return;
             if (data.objects[name]) {
-                const poly = getPoly(data.objects[name]);
-                if (!poly) return;
-                drawPoly(poly, scale, true, r, g, b);
+                if (currentCam === "All") {
+                    const cams = data.cameras || [];
+                    cams.forEach((cName, quadIdx) => {
+                        const poly = data.objects[name][cName];
+                        if (poly && poly.length > 0) {
+                            const translated = translatePolyToQuadrant(poly, quadIdx);
+                            drawPoly(translated, scale, true, r, g, b);
+                        }
+                    });
+                } else {
+                    const poly = getPoly(data.objects[name]);
+                    if (poly) {
+                        drawPoly(poly, scale, true, r, g, b);
+                    }
+                }
                 if (drawnSet) drawnSet.add(name);
             }
         });
@@ -109,67 +139,116 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         const showObjects = showObjectsElem ? showObjectsElem.checked : true;
 
         if (showObjects) {
-            if (data.moveable) {
-                drawGroup(data.moveable, 170, 80, 255, drawnSet);
-            }
-            if (data.allies) {
-                drawGroup(data.allies, 0, 210, 120, drawnSet);
-            }
-            if (data.enemies) {
-                drawGroup(data.enemies, 230, 60, 70, drawnSet);
-            }
-            if (data.targetable) {
-                drawGroup(data.targetable, 0, 200, 255, drawnSet);
-            }
             if (data.terrain) {
                 drawGroup(data.terrain, 210, 105, 30, drawnSet);
             }
             if (data.selectable) {
                 drawGroup(data.selectable, 255, 105, 180, drawnSet);
             }
+            if (data.targetable) {
+                drawGroup(data.targetable, 0, 200, 255, drawnSet);
+            }
+            if (data.enemies) {
+                drawGroup(data.enemies, 230, 60, 70, drawnSet);
+            }
+            if (data.allies) {
+                drawGroup(data.allies, 0, 210, 120, drawnSet);
+            }
+            if (data.moveable) {
+                drawGroup(data.moveable, 170, 80, 255, drawnSet);
+            }
         }
 
         if (data.selection) {
-            let firstCenter = null;
+            const currentCam = camName || document.getElementById('selectedCamera').value;
+            let firstCenters = [];
+            let firstCenterSingle = null;
+
             if (data.selection.firstCell) {
-                const poly = getPoly(data.selection.firstCell);
-                if (poly) {
-                    drawPoly(poly, scale, true, 255, 210, 70); // Gold for first
-                    // Calculate center
-                    let cx = 0, cy = 0;
-                    poly.forEach(p => {
-                        const pt = Array.isArray(p) ? { x: p[0], y: p[1] } : p;
-                        cx += pt.x;
-                        cy += pt.y;
+                if (currentCam === "All") {
+                    const cams = data.cameras || [];
+                    cams.forEach((cName, quadIdx) => {
+                        const poly = data.selection.firstCell[cName];
+                        if (poly && poly.length > 0) {
+                            const translated = translatePolyToQuadrant(poly, quadIdx);
+                            drawPoly(translated, scale, true, 255, 210, 70); // Gold for first
+                            
+                            // Calculate center
+                            let cx = 0, cy = 0;
+                            translated.forEach(p => {
+                                cx += p.x;
+                                cy += p.y;
+                            });
+                            firstCenters[quadIdx] = { x: cx / translated.length, y: cy / translated.length };
+                        }
                     });
-                    firstCenter = { x: cx / poly.length, y: cy / poly.length };
+                } else {
+                    const poly = getPoly(data.selection.firstCell);
+                    if (poly) {
+                        drawPoly(poly, scale, true, 255, 210, 70); // Gold for first
+                        let cx = 0, cy = 0;
+                        poly.forEach(p => {
+                            const pt = Array.isArray(p) ? { x: p[0], y: p[1] } : p;
+                            cx += pt.x;
+                            cy += pt.y;
+                        });
+                        firstCenterSingle = { x: cx / poly.length, y: cy / poly.length };
+                    }
                 }
             }
 
             if (data.selection.additionalCells) {
                 data.selection.additionalCells.forEach(cell => {
-                    const poly = getPoly(cell);
-                    if (poly) {
-                        drawPoly(poly, scale, true, 255, 0, 255); // Magenta for additional
+                    if (currentCam === "All") {
+                        const cams = data.cameras || [];
+                        cams.forEach((cName, quadIdx) => {
+                            const poly = cell[cName];
+                            if (poly && poly.length > 0) {
+                                const translated = translatePolyToQuadrant(poly, quadIdx);
+                                drawPoly(translated, scale, true, 255, 0, 255); // Magenta for additional
+                                
+                                const fCenter = firstCenters[quadIdx];
+                                if (fCenter) {
+                                    let cx = 0, cy = 0;
+                                    translated.forEach(p => {
+                                        cx += p.x;
+                                        cy += p.y;
+                                    });
+                                    const currentCenter = { x: cx / translated.length, y: cy / translated.length };
 
-                        // Draw line to first center
-                        if (firstCenter) {
-                            let cx = 0, cy = 0;
-                            poly.forEach(p => {
-                                const pt = Array.isArray(p) ? { x: p[0], y: p[1] } : p;
-                                cx += pt.x;
-                                cy += pt.y;
-                            });
-                            const currentCenter = { x: cx / poly.length, y: cy / poly.length };
+                                    ctx.beginPath();
+                                    ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+                                    ctx.lineWidth = 2;
+                                    ctx.setLineDash([5, 5]);
+                                    ctx.moveTo(fCenter.x * scale.x, fCenter.y * scale.y);
+                                    ctx.lineTo(currentCenter.x * scale.x, currentCenter.y * scale.y);
+                                    ctx.stroke();
+                                    ctx.setLineDash([]);
+                                }
+                            }
+                        });
+                    } else {
+                        const poly = getPoly(cell);
+                        if (poly) {
+                            drawPoly(poly, scale, true, 255, 0, 255); // Magenta for additional
+                            if (firstCenterSingle) {
+                                let cx = 0, cy = 0;
+                                poly.forEach(p => {
+                                    const pt = Array.isArray(p) ? { x: p[0], y: p[1] } : p;
+                                    cx += pt.x;
+                                    cy += pt.y;
+                                });
+                                const currentCenter = { x: cx / poly.length, y: cy / poly.length };
 
-                            ctx.beginPath();
-                            ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-                            ctx.lineWidth = 2;
-                            ctx.setLineDash([5, 5]);
-                            ctx.moveTo(firstCenter.x * scale.x, firstCenter.y * scale.y);
-                            ctx.lineTo(currentCenter.x * scale.x, currentCenter.y * scale.y);
-                            ctx.stroke();
-                            ctx.setLineDash([]);
+                                ctx.beginPath();
+                                ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+                                ctx.lineWidth = 2;
+                                ctx.setLineDash([5, 5]);
+                                ctx.moveTo(firstCenterSingle.x * scale.x, firstCenterSingle.y * scale.y);
+                                ctx.lineTo(currentCenter.x * scale.x, currentCenter.y * scale.y);
+                                ctx.stroke();
+                                ctx.setLineDash([]);
+                            }
                         }
                     }
                 });
@@ -345,6 +424,28 @@ function handlePixelSelection(event, camNameOverride) {
     const image_x = px // (px - 0) * 1
     const image_y = py // (py - 0) * 1
 
+    let finalCamName = camName;
+    let final_x = image_x;
+    let final_y = image_y;
+
+    if (camName === "All") {
+        const cams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras : [];
+        if (cams.length > 0) {
+            const half_w = 960;
+            const half_h = 540;
+            const quad_col = Math.floor(image_x / half_w);
+            const quad_row = Math.floor(image_y / half_h);
+            const quad_idx = quad_row * 2 + quad_col;
+            if (quad_idx >= 0 && quad_idx < cams.length) {
+                finalCamName = cams[quad_idx];
+                final_x = (image_x % half_w) * 2;
+                final_y = (image_y % half_h) * 2;
+            } else {
+                finalCamName = cams[0];
+            }
+        }
+    }
+
     const pixelField = document.getElementById(`selectedPixel`)
     const appendPixelField = document.getElementById(`appendPixel`)
 
@@ -359,13 +460,15 @@ function handlePixelSelection(event, camNameOverride) {
 
     // Temporarily set the selectedCamera form field to the clicked camera
     const selectedCameraInput = document.getElementById('selectedCamera');
-    selectedCameraInput.value = camName;
+    selectedCameraInput.value = finalCamName;
 
-    pixelField.value = JSON.stringify([~~image_x, ~~image_y])
+    pixelField.value = JSON.stringify([~~final_x, ~~final_y])
     selectPixelForm.requestSubmit()
 
     // Restore if needed
     if (camNameOverride) {
+        selectedCameraInput.value = 'All';
+    } else if (camName === 'All') {
         selectedCameraInput.value = 'All';
     }
 }
@@ -410,40 +513,24 @@ function gameWorldClick(camNum) {
         const camField = document.getElementById(`selectedCamera`);
         camField.value = 'All';
 
-        const btns = Array.from(document.querySelectorAll('input[type="button"][value^="Camera "], input[type="button"][value="Virtual Map"]'));
-        const camNames = btns.map(b => b.value.replace('Camera ', '').replace('Virtual Map', 'VirtualMap'));
-
-        let html = '<div style="display: flex; flex-wrap: wrap; justify-content: center;">';
-        camNames.forEach(c => {
-            html += `<div style="flex: 1 1 45%; margin: 10px; text-align: center; max-width: 48%; min-width: 300px;">
-                       <h5>${c}</h5>
-                       <div style="position: relative; display: inline-block; width: 100%;">
-                         <img class="img-responsive border border-3 border-info" src="/harmony/camWithChanges/${c}/${view_id}" style="border-radius:20px; width:100%;" id="GameWorld_${c}">
-                         <canvas id="GameWorldOverlay_${c}" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>
-                       </div>
-                     </div>`;
-        });
-        html += '</div>';
-        container.innerHTML = html;
-
-        setTimeout(() => {
-            if (window.harmonyCanvasData) {
-                window.harmonyEditors = [];
-                camNames.forEach(c => {
-                    const img = document.getElementById(`GameWorld_${c}`);
-                    if (img) {
-                        const editor = initCanvasEditor(`GameWorldOverlay_${c}`, window.harmonyCanvasData, null,
-                            function (clickEvent) { handlePixelSelection(clickEvent, c); }, c);
-                        window.harmonyEditors.push(editor);
-                    }
-                });
-            }
-        }, 100);
+        container.innerHTML = `<img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="/harmony/camWithChanges/All/${view_id}" style="border-radius: 40px; max-width: 90%;">
+                               <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>`;
+        if (window.harmonyCanvasData) {
+            window.harmonyCanvasData.cameraName = 'All';
+            setTimeout(() => {
+                window.harmonyEditor = initCanvasEditor("GameWorldOverlay", window.harmonyCanvasData,
+                    function (updatedData) { console.log("Data updated", updatedData); },
+                    function (clickEvent) { handlePixelSelection(clickEvent); }
+                );
+            }, 50);
+        }
+        window.harmonyEditors = []; // clear multi-view mode
     } else {
-        if (!document.getElementById('GameWorld')) {
+        if (!document.getElementById('GameWorld') || (window.harmonyCanvasData && window.harmonyCanvasData.cameraName === 'All')) {
             container.innerHTML = `<img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="/harmony/camWithChanges/${camNum}/${view_id}" style="border-radius: 40px; max-width: 90%;">
                                    <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>`;
             if (window.harmonyCanvasData) {
+                window.harmonyCanvasData.cameraName = camNum;
                 setTimeout(() => {
                     window.harmonyEditor = initCanvasEditor("GameWorldOverlay", window.harmonyCanvasData,
                         function (updatedData) { console.log("Data updated", updatedData); },
@@ -492,11 +579,13 @@ function syncCanvasData(viewId) {
     fetch(`/harmony/canvas_data/${viewId}`)
         .then(response => response.json())
         .then(data => {
-            if (window.harmonyEditor && document.getElementById('selectedCamera').value !== 'All') {
-                window.harmonyEditor.updateData(data);
+            if (data && data.cameras) {
+                if (window.harmonyCanvasData) {
+                    window.harmonyCanvasData.cameras = data.cameras;
+                }
             }
-            if (window.harmonyEditors && document.getElementById('selectedCamera').value === 'All') {
-                window.harmonyEditors.forEach(ed => ed.updateData(data));
+            if (window.harmonyEditor) {
+                window.harmonyEditor.updateData(data);
             }
         })
         .catch(err => console.error("Error syncing canvas data:", err))

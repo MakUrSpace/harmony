@@ -200,11 +200,58 @@ def render_minimap(cm, encode=True):
         return None
 
 
+def make_pending_image(width=1920, height=1080, text="Harmony: Calibrating grid..."):
+    img = np.zeros((height, width, 3), dtype=np.uint8)
+    # Charcoal premium background
+    img[:] = (35, 35, 35)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1.8
+    font_thickness = 3
+
+    # Centered text coordinates
+    text_size = cv2.getTextSize(text, font, font_scale, font_thickness)[0]
+    tx = (width - text_size[0]) // 2
+    ty = (height + text_size[1]) // 2
+
+    # Gold/Orange border and white centered text
+    cv2.rectangle(img, (20, 20), (width - 20, height - 20), (0, 165, 255), 4)
+    cv2.putText(
+        img,
+        text,
+        (tx, ty),
+        font,
+        font_scale,
+        (255, 255, 255),
+        font_thickness,
+        cv2.LINE_AA,
+    )
+    return img
+
+
 def render_camera(cc, camName):
     try:
         cam = cc.cameras.get(camName)
         if not cam:
             return None
+
+        # Check if show_grid is enabled and grid is pending
+        if (
+            getattr(cc, "show_grid", False)
+            and hasattr(cc, "rsc")
+            and cc.rsc is not None
+        ):
+            try:
+                grid_overlay = draw_dynamic_grid(cc, camName)
+                if grid_overlay == "PENDING":
+                    target_w, target_h = perspective_res
+                    pending_img = make_pending_image(target_w, target_h)
+                    ret, encoded = cv2.imencode(
+                        ".jpg", pending_img, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+                    )
+                    return encoded.tobytes()
+            except Exception as e:
+                print(f"Grid overlay check error: {e}")
 
         x, y, w, h = cam.activeZoneBoundingBox
 
@@ -215,10 +262,10 @@ def render_camera(cc, camName):
         masked = frame.copy()
 
         if hasattr(cc, "rsc") and cc.rsc is not None:
-            if getattr(cc, "show_grid", True):
+            if getattr(cc, "show_grid", False):
                 try:
                     grid_overlay = draw_dynamic_grid(cc, camName)
-                    if grid_overlay is not None:
+                    if grid_overlay is not None and grid_overlay != "PENDING":
                         if grid_overlay.shape[:2] == masked.shape[:2]:
                             cv2.addWeighted(
                                 grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
@@ -382,12 +429,124 @@ APPS = []
 # ---------------------------------------------------------------------------
 
 
+def render_composite_all(cc, cm):
+    try:
+        # Get sorted list of cameras (excluding VirtualMap)
+        cams = sorted(list(cc.cameras.keys()))
+        sub_frames = []
+
+        for name in cams:
+            cam = cc.cameras.get(name)
+            if not cam or cam.mostRecentFrame is None:
+                # Black frame placeholder
+                placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
+                cv2.putText(
+                    placeholder,
+                    f"{name}: Offline",
+                    (100, 270),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.2,
+                    (255, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+                sub_frames.append(placeholder)
+                continue
+
+            x, y, w, h = cam.activeZoneBoundingBox
+            masked = cam.mostRecentFrame.copy()
+
+            # Draw hex grid if show_grid is true
+            if (
+                getattr(cc, "show_grid", False)
+                and hasattr(cc, "rsc")
+                and cc.rsc is not None
+            ):
+                try:
+                    grid_overlay = draw_dynamic_grid(cc, name)
+                    if grid_overlay == "PENDING":
+                        pending_img = make_pending_image(
+                            960, 540, text=f"{name}: Calibrating..."
+                        )
+                        sub_frames.append(pending_img)
+                        continue
+                    elif grid_overlay is not None:
+                        if grid_overlay.shape[:2] == masked.shape[:2]:
+                            cv2.addWeighted(
+                                grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
+                            )
+                except Exception as e:
+                    print(f"Composite grid blend error for {name}: {e}")
+
+            masked = cam.cropToActiveZone(masked)
+            cropped = masked[y : y + h, x : x + w]
+            resized = cv2.resize(cropped, (960, 540), interpolation=cv2.INTER_LINEAR)
+
+            # Overlay name for premium HUD aesthetic
+            cv2.putText(
+                resized,
+                name,
+                (30, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                (0, 165, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            sub_frames.append(resized)
+
+        # Ensure we have at least 4 sub-frames for 2x2 grid
+        while len(sub_frames) < 4:
+            placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
+            cv2.putText(
+                placeholder,
+                "No Camera",
+                (350, 270),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                (100, 100, 100),
+                2,
+                cv2.LINE_AA,
+            )
+            sub_frames.append(placeholder)
+
+        # Stitch 2x2
+        row1 = cv2.hconcat([sub_frames[0], sub_frames[1]])
+        row2 = cv2.hconcat([sub_frames[2], sub_frames[3]])
+        composite = cv2.vconcat([row1, row2])
+
+        ret, encoded = cv2.imencode(
+            ".jpg", composite, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+        )
+        return encoded.tobytes()
+    except Exception as e:
+        print(f"Error rendering composite all view: {e}")
+        # Return fallback error frame
+        fallback = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        cv2.putText(
+            fallback,
+            "Error loading composite view",
+            (400, 540),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.5,
+            (0, 0, 255),
+            3,
+            cv2.LINE_AA,
+        )
+        ret, encoded = cv2.imencode(
+            ".jpg", fallback, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+        )
+        return encoded.tobytes()
+
+
 @harmony.get("/camWithChanges/{camName}/{viewId}")
 def cameraViewWithChangesResponse(camName: str, viewId: str):
     cm = _get_cm()
     cc = _get_cc()
     if camName == "VirtualMap":
         broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(cm))
+    elif camName == "All":
+        broadcaster = get_broadcaster("All", lambda: render_composite_all(cc, cm))
     else:
         broadcaster = get_broadcaster(camName, lambda c=camName: render_camera(cc, c))
 
@@ -616,17 +775,51 @@ def _get_canvas_data_dict(viewId: str):
 
         cam_objs = {}
         for camName in cc.cameras.keys():
-            points = obj.changeSet[camName].changePoints
-            if len(points) > 0:
-                hull = cv2.convexHull(np.array(points, dtype=np.float32)).reshape(-1, 2)
-                cam_pts = [
-                    scale_point_new(
-                        (float(pt[0]), float(pt[1])), get_conversion_params(camName)
+            cam_pts = []
+            axials = _get_constituent_axials(obj, cc)
+            if axials:
+                polys = []
+                for q, r in axials:
+                    try:
+                        poly = cm.cc.cam_hex_at_axial(camName, q, r)
+                        polys.append(poly)
+                    except Exception as e:
+                        print(
+                            f"Failed to get cam_hex_at_axial for {camName} ({q}, {r}): {e}"
+                        )
+
+                if polys:
+                    try:
+                        mask = np.zeros((1080, 1920), dtype=np.uint8)
+                        cv2.fillPoly(mask, polys, 255)
+                        contours, _ = cv2.findContours(
+                            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                        )
+                        if contours:
+                            largest_contour = max(contours, key=cv2.contourArea)
+                            raw_cam_pts = largest_contour.reshape(-1, 2)
+                            cam_pts = [
+                                scale_point_new(
+                                    (float(pt[0]), float(pt[1])),
+                                    get_conversion_params(camName),
+                                )
+                                for pt in raw_cam_pts
+                            ]
+                    except Exception as e:
+                        print(f"Camera polygon union failed for {camName}: {e}")
+
+            if not cam_pts:
+                points = obj.changeSet[camName].changePoints
+                if len(points) > 0:
+                    hull = cv2.convexHull(np.array(points, dtype=np.float32)).reshape(
+                        -1, 2
                     )
-                    for pt in hull
-                ]
-            else:
-                cam_pts = []
+                    cam_pts = [
+                        scale_point_new(
+                            (float(pt[0]), float(pt[1])), get_conversion_params(camName)
+                        )
+                        for pt in hull
+                    ]
             cam_objs[camName] = cam_pts
 
         objects[obj.oid] = {"VirtualMap": vm_pts, **cam_objs}
@@ -635,6 +828,7 @@ def _get_canvas_data_dict(viewId: str):
 
     data = {
         "objects": objects,
+        "cameras": sorted(list(cc.cameras.keys())),
         **asdict(session_config),
         "selection": {
             "firstCell": axial_to_ui_object(*session_config.selection.firstCell)
@@ -661,10 +855,10 @@ def _get_canvas_update_script(viewId: str):
         canvas_json = json.dumps(canvas_data)
         return f"""
         <script>
-            if (window.harmonyEditor && document.getElementById('selectedCamera').value !== 'All') {{
+            if (window.harmonyEditor) {{
                 window.harmonyEditor.updateData({canvas_json});
             }}
-            if (window.harmonyEditors && document.getElementById('selectedCamera').value === 'All') {{
+            if (window.harmonyEditors) {{
                 window.harmonyEditors.forEach(function(ed) {{ ed.updateData({canvas_json}); }});
             }}
         </script>
@@ -945,7 +1139,7 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
                 break
         SESSIONS[viewId] = SessionConfig()
 
-    showGridChecked = "checked" if getattr(cc, "show_grid", True) else ""
+    showGridChecked = "checked" if getattr(cc, "show_grid", False) else ""
     showObjectsChecked = "checked" if getattr(cc, "show_objects", True) else ""
 
     rendered = (
@@ -1302,17 +1496,79 @@ def buildObjectFactory(request: Request, viewId: str):
     """)
 
 
+def _render_factory_error(viewId, error_message, axials):
+    cells_display = ", ".join(str(c) for c in axials) if axials else "(none)"
+    cell_count = len(axials)
+    html_content = interactor_template.format(
+        info=f"""
+        <h2 class="text-danger">Definition Error</h2>
+        <div class="alert alert-danger" role="alert" style="margin-top: 10px; padding: 10px; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 4px;">
+            {error_message}
+        </div>
+        <hr>
+        <form hx-post="/harmony/object_factory/{viewId}" hx-target="#interactor">
+            <label for="object_name" class="form-check-label">Object Name</label>
+            <input type="text" name="object_name" id="object_name" value=""><br>
+            <div class="mt-2 mb-1">
+                <small class="text-muted">Cells ({cell_count}): <code>{cells_display}</code></small>
+            </div>
+            <input type="submit" class="btn btn-primary" value="Define Object ({cell_count} {"cell" if cell_count == 1 else "cells"})">
+        </form>
+        """,
+        actions=f"""
+        <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
+        """,
+    )
+    html_content += _get_canvas_update_script(viewId)
+    return HTMLResponse(html_content)
+
+
 @harmony.post("/object_factory/{viewId}")
 async def buildObject(request: Request, viewId: str, object_name: str = Form(...)):
     if request.app.state.config.get("HARMONY_TEMPLATE") != "Harmony.html":
         return Response("Forbidden", status_code=403)
     cm = _get_cm()
-    objectName = str(object_name)
+    objectName = str(object_name).strip()
     sel = SESSIONS[viewId].selection
     # Collect all selected cells: firstCell is the anchor (origin), additionalCells are the rest.
     axials = ([sel.firstCell] if sel.firstCell else []) + (sel.additionalCells or [])
     if not axials:
         return Response("No cells selected", status_code=400)
+
+    # 1. Validation: Don't allow empty object name
+    if not objectName:
+        return _render_factory_error(viewId, "Object name cannot be empty.", axials)
+
+    # 2. Validation: Don't allow overwriting existing object name
+    if any(mem.oid.lower() == objectName.lower() for mem in cm.memory):
+        return _render_factory_error(
+            viewId,
+            f"Object name <strong>{objectName}</strong> already exists. Please choose a unique name.",
+            axials,
+        )
+
+    # 3. Validation: Don't allow overlapping cells with existing objects
+    existing_cells = set()
+    for mem in cm.memory:
+        if getattr(mem, "constituent_axials", None):
+            existing_cells.update(mem.constituent_axials)
+        else:
+            try:
+                axial = cm.changeSetToAxial(mem.changeSet)
+                if axial:
+                    existing_cells.add(axial)
+            except Exception:
+                pass
+
+    overlapping = [c for c in axials if c in existing_cells]
+    if overlapping:
+        overlapping_str = ", ".join(str(c) for c in overlapping)
+        return _render_factory_error(
+            viewId,
+            f"Selected cells overlap with an existing object at coordinates: {overlapping_str}.",
+            axials,
+        )
+
     if len(axials) == 1:
         trackedObject = cm.cc.define_object_from_axial(objectName, *axials[0])
     else:
@@ -1488,14 +1744,11 @@ def selectPixel(
             session.selection.firstCell = origin_cell
             axial_coord = origin_cell
         elif existing.firstCell:
-            if existing.secondCell is None:
-                session.selection.additionalCells = [axial_coord]
+            if appendPixel_bool:
+                if axial_coord not in session.selection.additionalCells:
+                    session.selection.additionalCells.insert(0, axial_coord)
             else:
-                if appendPixel_bool:
-                    if axial_coord not in session.selection.additionalCells:
-                        session.selection.additionalCells.insert(0, axial_coord)
-                else:
-                    session.selection.additionalCells = [axial_coord]
+                session.selection.additionalCells = [axial_coord]
         else:
             session.selection = CellSelection(firstCell=axial_coord)
             session.selected_oid = None  # new single cell click, no object implied yet
@@ -1923,6 +2176,14 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
     app.state.config = {"HARMONY_TEMPLATE": template_name}
 
     app.include_router(harmony)
+
+    # Eagerly pre-calculate and cache hex grid overlays in the background on startup
+    try:
+        from observer.configurator import eagerly_precalculate_grids
+
+        eagerly_precalculate_grids(cc)
+    except Exception as e:
+        print(f"Failed eagerly pre-calculating grids on startup: {e}")
 
     @app.get("/")
     def index():
