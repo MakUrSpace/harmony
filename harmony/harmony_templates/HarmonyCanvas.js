@@ -463,7 +463,53 @@ function handlePixelSelection(event, camNameOverride) {
     selectedCameraInput.value = finalCamName;
 
     pixelField.value = JSON.stringify([~~final_x, ~~final_y])
-    selectPixelForm.requestSubmit()
+    const isAppend = (event.shiftKey || event.ctrlKey || event.metaKey);
+    const viewIdVal = document.getElementById('viewId') ? document.getElementById('viewId').value : '';
+
+    if (typeof htmx !== 'undefined') {
+        if (typeof window.selectPixelQueue === 'undefined') {
+            window.selectPixelQueue = [];
+            window.selectPixelInProgress = false;
+            document.addEventListener('htmx:afterRequest', function(evt) {
+                if (evt.detail.pathInfo && evt.detail.pathInfo.requestPath && evt.detail.pathInfo.requestPath.includes('select_pixel')) {
+                    window.selectPixelInProgress = false;
+                    if (window.selectPixelQueue.length > 0) {
+                        const nextTask = window.selectPixelQueue.shift();
+                        window.selectPixelInProgress = true;
+                        htmx.ajax('POST', nextTask.url, {
+                            target: nextTask.target,
+                            swap: nextTask.swap,
+                            values: nextTask.values
+                        });
+                    }
+                }
+            });
+        }
+
+        window.selectPixelQueue.push({
+            url: selectPixelForm.getAttribute('hx-post'),
+            target: '#interactor',
+            swap: 'innerHTML',
+            values: {
+                viewId: viewIdVal,
+                selectedPixel: JSON.stringify([~~final_x, ~~final_y]),
+                selectedCamera: finalCamName,
+                appendPixel: isAppend ? "true" : "false"
+            }
+        });
+
+        if (!window.selectPixelInProgress && window.selectPixelQueue.length > 0) {
+            const nextTask = window.selectPixelQueue.shift();
+            window.selectPixelInProgress = true;
+            htmx.ajax('POST', nextTask.url, {
+                target: nextTask.target,
+                swap: nextTask.swap,
+                values: nextTask.values
+            });
+        }
+    } else {
+        selectPixelForm.requestSubmit();
+    }
 
     // Restore if needed
     if (camNameOverride) {

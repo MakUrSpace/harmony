@@ -192,8 +192,18 @@ def draw_dynamic_grid(cc, camName):
 
         cam = cc.cameras[str(camName)]
         if cam.mostRecentFrame is None:
-            return None
-        h, w = cam.mostRecentFrame.shape[:2]
+            # Fallback to default resolution or activeZone bounds
+            w, h = 1920, 1080
+            if getattr(cam, "activeZone", None) is not None and len(cam.activeZone) > 0:
+                try:
+                    pts = np.int32(cam.activeZone)
+                    bx, by, bw, bh = cv2.boundingRect(pts)
+                    w = max(w, bx + bw)
+                    h = max(h, by + bh)
+                except Exception:
+                    pass
+        else:
+            h, w = cam.mostRecentFrame.shape[:2]
 
         import threading
 
@@ -231,10 +241,13 @@ def draw_dynamic_grid(cc, camName):
 
                 # Project to Real Space using the converter closest to each corner
                 corners_real = []
-                for p in corners_cam:
-                    converter = rsc.closestConverterToCamCoord(str(camName), p)
-                    rp = converter.convertCameraToRealSpace(p)
-                    corners_real.append(rp)
+                if hasattr(rsc, "converters") and str(camName) in rsc.converters and rsc.converters[str(camName)]:
+                    for p in corners_cam:
+                        converter = rsc.closestConverterToCamCoord(str(camName), p)
+                        rp = converter.convertCameraToRealSpace(p)
+                        corners_real.append(rp)
+                else:
+                    print(f"Camera {camName} is not calibrated. Skipping corner projection.")
 
                 # Convert to Axial to find range
 
@@ -304,7 +317,7 @@ def draw_dynamic_grid(cc, camName):
 
                         # Draw
                         cv2.polylines(
-                            overlay, [poly_cam], True, grid_color, 1, cv2.LINE_AA
+                            overlay, [poly_cam], True, grid_color, 2, cv2.LINE_AA
                         )
 
                 # Cache the result and clear from generating set

@@ -457,6 +457,21 @@ class TestHarmonyServer(unittest.TestCase):
         html = resp.content.decode()
         self.assertIn("Object: Obj3 (Selectable)", html)
 
+        # Re-click Obj3 with append 'true' (de-select it)
+        resp = self.client.post(
+            "/harmony/select_pixel",
+            data={
+                "viewId": view_id,
+                "selectedPixel": "[30, 30]",
+                "selectedCamera": "Camera 0",
+                "appendPixel": "true",
+            },
+        )
+        html = resp.content.decode()
+        # Obj3 should no longer be in the response
+        self.assertNotIn("Object: Obj3", html)
+        self.assertIn("Object: Obj2", html)
+
     def test_admin_vs_user_delete(self):
         """Verify Delete Object is only in Admin."""
         SessionConfig = harmonyServer.SessionConfig
@@ -882,6 +897,50 @@ class TestHarmonyServer(unittest.TestCase):
         # Verify that persistence script block is loaded
         self.assertIn("objectCategoryDetailsListenerRegistered", html)
         self.assertIn("localStorage.setItem('collapse-'", html)
+
+    def test_select_pixel_single_click_reset(self):
+        """Verify that single clicks replace additional selection cells when selection exists, and initialize selection when it does not."""
+        view_id = "test_single_click"
+        from harmony.harmonyServer import SessionConfig, CellSelection
+
+        # 1. Initialize selection with firstCell and additionalCells
+        session = SessionConfig()
+        session.selection = CellSelection(firstCell=(1, 2), additionalCells=[(3, 4), (5, 6)])
+        harmonyServer.SESSIONS[view_id] = session
+
+        # Mock coordinate translator
+        harmonyServer._cc.camCoordToAxial = mock.MagicMock(return_value=(7, 8))
+        harmonyServer._cc.pixel_to_axial = mock.MagicMock(return_value=(7, 8))
+        harmonyServer._cm.cc = harmonyServer._cc
+
+        # 2. Call select_pixel with appendPixel="False" (single click)
+        data = {
+            "viewId": view_id,
+            "selectedPixel": "[100, 200]",
+            "selectedCamera": "Camera 0",
+            "appendPixel": "False",
+        }
+        resp = self.client.post("/harmony/select_pixel", data=data)
+        self.assertEqual(resp.status_code, 200)
+
+        # 3. Assert firstCell remains (1, 2), and additionalCells is replaced with [(7, 8)]
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.firstCell, (1, 2))
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.additionalCells, [(7, 8)])
+
+        # 4. Call select_pixel with appendPixel="False" on the same cell (7, 8) to de-select it
+        resp = self.client.post("/harmony/select_pixel", data=data)
+        self.assertEqual(resp.status_code, 200)
+
+        # 5. Assert firstCell remains (1, 2), and additionalCells is cleared/de-selected
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.firstCell, (1, 2))
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.additionalCells, [])
+
+        # 6. Test fresh selection starting from clean session
+        harmonyServer.SESSIONS[view_id] = SessionConfig()
+        resp = self.client.post("/harmony/select_pixel", data=data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.firstCell, (7, 8))
+        self.assertEqual(harmonyServer.SESSIONS[view_id].selection.additionalCells, [])
 
 
 if __name__ == "__main__":

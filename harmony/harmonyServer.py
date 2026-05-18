@@ -439,22 +439,32 @@ def render_composite_all(cc, cm):
         # Get sorted list of cameras (excluding VirtualMap)
         cams = sorted(list(cc.cameras.keys()))
         sub_frames = []
+        
+        # Border color to visually separate perspectives (4px charcoal border)
+        boundary_color = (64, 64, 64)
+        highlight_color = (0, 165, 255)
 
         for name in cams:
             cam = cc.cameras.get(name)
             if not cam or cam.mostRecentFrame is None:
-                # Black frame placeholder
+                # Tech-grid offline placeholder
                 placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
+                for x in range(0, 960, 40):
+                    cv2.line(placeholder, (x, 0), (x, 540), (20, 20, 20), 1)
+                for y in range(0, 540, 40):
+                    cv2.line(placeholder, (0, y), (960, y), (20, 20, 20), 1)
+                
                 cv2.putText(
                     placeholder,
                     f"{name}: Offline",
                     (100, 270),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1.2,
-                    (255, 255, 255),
+                    (100, 100, 100),
                     2,
                     cv2.LINE_AA,
                 )
+                cv2.rectangle(placeholder, (0, 0), (959, 539), boundary_color, 4)
                 sub_frames.append(placeholder)
                 continue
 
@@ -473,6 +483,7 @@ def render_composite_all(cc, cm):
                         pending_img = make_pending_image(
                             960, 540, text=f"{name}: Calibrating..."
                         )
+                        cv2.rectangle(pending_img, (0, 0), (959, 539), boundary_color, 4)
                         sub_frames.append(pending_img)
                         continue
                     elif grid_overlay is not None:
@@ -494,10 +505,12 @@ def render_composite_all(cc, cm):
                 (30, 60),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1.2,
-                (0, 165, 255),
+                highlight_color,
                 2,
                 cv2.LINE_AA,
             )
+            # Add visual boundary border to separate perspectives
+            cv2.rectangle(resized, (0, 0), (959, 539), boundary_color, 4)
             sub_frames.append(resized)
 
         # Get VirtualMap frame and append to sub_frames before placeholders
@@ -514,25 +527,35 @@ def render_composite_all(cc, cm):
                 (30, 60),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1.2,
-                (0, 165, 255),
+                highlight_color,
                 2,
                 cv2.LINE_AA,
             )
+            # Add visual boundary border to separate perspectives
+            cv2.rectangle(vmap_resized, (0, 0), (959, 539), boundary_color, 4)
             sub_frames.append(vmap_resized)
 
         # Ensure we have at least 4 sub-frames for 2x2 grid
         while len(sub_frames) < 4:
             placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
+            # Subtle tech-grid pattern
+            for x in range(0, 960, 40):
+                cv2.line(placeholder, (x, 0), (x, 540), (20, 20, 20), 1)
+            for y in range(0, 540, 40):
+                cv2.line(placeholder, (0, y), (960, y), (20, 20, 20), 1)
+                
             cv2.putText(
                 placeholder,
                 "No Camera",
                 (350, 270),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1.2,
-                (100, 100, 100),
+                (70, 70, 70),
                 2,
                 cv2.LINE_AA,
             )
+            # Add visual boundary border to separate perspectives
+            cv2.rectangle(placeholder, (0, 0), (959, 539), boundary_color, 4)
             sub_frames.append(placeholder)
 
         # Limit to exactly 4 for 2x2 grid
@@ -551,6 +574,7 @@ def render_composite_all(cc, cm):
         print(f"Error rendering composite all view: {e}")
         # Return fallback error frame
         fallback = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        cv2.rectangle(fallback, (0, 0), (1919, 1079), (0, 0, 255), 6)
         cv2.putText(
             fallback,
             "Error loading composite view",
@@ -1445,11 +1469,11 @@ def buildObjectTable(viewId=None):
             }, true);
             
             document.addEventListener('htmx:afterSettle', function() {
-                restoreState();
+                setTimeout(restoreState, 0);
             });
         }
         
-        restoreState();
+        setTimeout(restoreState, 0);
     })();
 </script>
 """
@@ -1873,21 +1897,31 @@ def selectPixel(
             session.selection.firstCell = origin_cell
             axial_coord = origin_cell  # snap for consistency
 
-        elif all_at_cell and not existing.firstCell:
-            # First click on an object cell — select the first one in the list.
-            chosen_obj, origin_cell = all_at_cell[0]
-            session.selected_oid = chosen_obj.oid
-            session.selection.firstCell = origin_cell
-            axial_coord = origin_cell
-        elif existing.firstCell:
-            if appendPixel_bool:
-                if axial_coord not in session.selection.additionalCells:
-                    session.selection.additionalCells.insert(0, axial_coord)
+        elif appendPixel_bool:
+            # Shift/Ctrl selection append mode
+            if not existing.firstCell:
+                session.selection.firstCell = axial_coord
+                session.selected_oid = all_at_cell[0][0].oid if all_at_cell else None
             else:
-                session.selection.additionalCells = [axial_coord]
+                if axial_coord in session.selection.additionalCells:
+                    session.selection.additionalCells.remove(axial_coord)
+                else:
+                    session.selection.additionalCells.insert(0, axial_coord)
         else:
-            session.selection = CellSelection(firstCell=axial_coord)
-            session.selected_oid = None  # new single cell click, no object implied yet
+            # Single-click selection (no modifier keys)
+            if existing.firstCell:
+                if axial_coord in session.selection.additionalCells:
+                    session.selection.additionalCells.remove(axial_coord)
+                else:
+                    session.selection.additionalCells = [axial_coord]
+            else:
+                session.selection.firstCell = axial_coord
+                session.selection.additionalCells = []
+                if all_at_cell:
+                    chosen_obj, origin_cell = all_at_cell[0]
+                    session.selected_oid = chosen_obj.oid
+                else:
+                    session.selected_oid = None
 
         # Ensure selected_oid is synced with what we find at the finally chosen firstCell
         if not all_at_cell and not session.selection.firstCell:

@@ -168,6 +168,51 @@
             document.getElementById('renameModalInput').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') doRename();
             });
+
+            // Persist the open state of details elements across HTMX swaps
+            (function() {
+                var detailsStates = {};
+
+                function restoreDetailsStates() {
+                    document.querySelectorAll('.object-category-details').forEach(function(el) {
+                        if (el.id) {
+                            var saved = localStorage.getItem('collapse-' + el.id) || detailsStates[el.id];
+                            if (saved === 'open' || saved === true) {
+                                el.open = true;
+                            } else if (saved === 'closed' || saved === false) {
+                                el.open = false;
+                            }
+                        }
+                    });
+                }
+
+                document.addEventListener('toggle', function(e) {
+                    if (e.target && e.target.classList.contains('object-category-details')) {
+                        if (e.target.id) {
+                            var isOpen = e.target.open;
+                            localStorage.setItem('collapse-' + e.target.id, isOpen ? 'open' : 'closed');
+                            detailsStates[e.target.id] = isOpen;
+                        }
+                    }
+                }, true);
+
+                document.addEventListener('htmx:beforeSwap', function(e) {
+                    document.querySelectorAll('.object-category-details').forEach(function(el) {
+                        if (el.id) {
+                            detailsStates[el.id] = el.open;
+                        }
+                    });
+                });
+
+                document.addEventListener('htmx:afterSwap', function(e) {
+                    restoreDetailsStates();
+                });
+                document.addEventListener('htmx:afterSettle', function(e) {
+                    restoreDetailsStates();
+                });
+
+                restoreDetailsStates();
+            })();
         })();
     </script>
 </body>
