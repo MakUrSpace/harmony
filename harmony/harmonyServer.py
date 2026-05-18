@@ -539,46 +539,39 @@ def render_composite_all(cc, cm):
             cv2.rectangle(vmap_resized, (0, 0), (959, 539), boundary_color, 4)
             sub_frames.append(vmap_resized)
 
-        if len(sub_frames) == 3:
-            row1 = cv2.hconcat([sub_frames[0], sub_frames[1]])
-            left_pad = np.zeros((540, 480, 3), dtype=np.uint8)
-            right_pad = np.zeros((540, 480, 3), dtype=np.uint8)
-            # Add visual boundaries for the padded row
-            cv2.rectangle(left_pad, (0, 0), (479, 539), boundary_color, 4)
-            cv2.rectangle(right_pad, (0, 0), (479, 539), boundary_color, 4)
-            row2 = cv2.hconcat([left_pad, sub_frames[2], right_pad])
-            composite = cv2.vconcat([row1, row2])
-        else:
-            # Ensure we have at least 4 sub-frames for 2x2 grid
-            while len(sub_frames) < 4:
-                placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
-                # Subtle tech-grid pattern
-                for x in range(0, 960, 40):
-                    cv2.line(placeholder, (x, 0), (x, 540), (20, 20, 20), 1)
-                for y in range(0, 540, 40):
-                    cv2.line(placeholder, (0, y), (960, y), (20, 20, 20), 1)
+        # Always use a strict 2×2 grid.
+        # VirtualMap is appended directly after the real cameras, so its quadrant
+        # index always matches data.cameras[idx] from _get_canvas_data_dict.
+        # Padding to 4 panels ensures the layout is identical whether there are
+        # 1, 2, 3, or 4 cameras (including VirtualMap).
+        while len(sub_frames) < 4:
+            placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
+            # Subtle tech-grid pattern
+            for gx in range(0, 960, 40):
+                cv2.line(placeholder, (gx, 0), (gx, 540), (20, 20, 20), 1)
+            for gy in range(0, 540, 40):
+                cv2.line(placeholder, (0, gy), (960, gy), (20, 20, 20), 1)
 
-                cv2.putText(
-                    placeholder,
-                    "No Camera",
-                    (350, 270),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.2,
-                    (70, 70, 70),
-                    2,
-                    cv2.LINE_AA,
-                )
-                # Add visual boundary border to separate perspectives
-                cv2.rectangle(placeholder, (0, 0), (959, 539), boundary_color, 4)
-                sub_frames.append(placeholder)
+            cv2.putText(
+                placeholder,
+                "No Camera",
+                (350, 270),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                (70, 70, 70),
+                2,
+                cv2.LINE_AA,
+            )
+            cv2.rectangle(placeholder, (0, 0), (959, 539), boundary_color, 4)
+            sub_frames.append(placeholder)
 
-            # Limit to exactly 4 for 2x2 grid
-            grid_frames = sub_frames[:4]
+        # Limit to exactly 4 for 2x2 grid
+        grid_frames = sub_frames[:4]
 
-            # Stitch 2x2
-            row1 = cv2.hconcat([grid_frames[0], grid_frames[1]])
-            row2 = cv2.hconcat([grid_frames[2], grid_frames[3]])
-            composite = cv2.vconcat([row1, row2])
+        # Stitch 2x2
+        row1 = cv2.hconcat([grid_frames[0], grid_frames[1]])
+        row2 = cv2.hconcat([grid_frames[2], grid_frames[3]])
+        composite = cv2.vconcat([row1, row2])
 
         ret, encoded = cv2.imencode(
             ".jpg", composite, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
@@ -2633,6 +2626,7 @@ def start_servers():
 
     # Launch admin server (blocking)
     import asyncio
+    import signal
     from hypercorn.config import Config
     from hypercorn.asyncio import serve
 
@@ -2642,19 +2636,41 @@ def start_servers():
     config.bind = ["0.0.0.0:7001"]
     config.loglevel = "info"
 
+    def _signal_shutdown():
+        """Immediately signal all streaming connections to stop, then let Hypercorn drain."""
+        if not SHUTDOWN_EVENT.is_set():
+            print("\nShutdown signal received — stopping all streams.")
+            SHUTDOWN_EVENT.set()
+            for broadcaster in BROADCASTERS.values():
+                broadcaster.stop()
+                with broadcaster.condition:
+                    broadcaster.condition.notify_all()
+
+    async def shutdown_trigger():
+        """Coroutine passed to Hypercorn so it uses our event instead of raw signals."""
+        # Register OS-level signal handlers on the running event loop.
+        loop = asyncio.get_event_loop()
+        stop = loop.create_future()
+
+        def _on_signal():
+            _signal_shutdown()
+            if not stop.done():
+                stop.set_result(None)
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, _on_signal)
+
+        await stop
+
     try:
-        asyncio.run(serve(admin_app, config))
+        asyncio.run(serve(admin_app, config, shutdown_trigger=shutdown_trigger))
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:
-        print("Server exit triggered, setting shutdown event.")
-        SHUTDOWN_EVENT.set()
-        # Trigger cleanup for broadcasters immediately
-        for broadcaster in BROADCASTERS.values():
-            broadcaster.stop()
-            with broadcaster.condition:
-                broadcaster.condition.notify_all()
+        # Guarantee the event is set even if shutdown_trigger never fired.
+        _signal_shutdown()
 
 
 if __name__ == "__main__":
     start_servers()
+
