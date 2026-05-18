@@ -131,11 +131,11 @@
             
             # Split for Harmony Ngrok (horizontal split)
             tmux split-window -t "$SESSION_NAME:0" -h \
-              "echo 'Exposing Harmony on $HARMONY_URL -> $PORT'; ngrok http $PORT --domain=$HARMONY_URL --app-protocol=h2; read"
+              "echo 'Exposing Harmony on $HARMONY_URL -> $PORT'; ngrok http $PORT --domain=$HARMONY_URL --upstream-protocol=http2; read"
             
             # Split for Admin Ngrok (vertical split of the new pane)
             tmux split-window -t "$SESSION_NAME:0.1" -v \
-              "echo 'Exposing Admin on $ADMIN_URL -> $ADMIN_PORT'; ngrok http $ADMIN_PORT --domain=$ADMIN_URL --app-protocol=h2; read"
+              "echo 'Exposing Admin on $ADMIN_URL -> $ADMIN_PORT'; ngrok http $ADMIN_PORT --domain=$ADMIN_URL --upstream-protocol=http2; read"
             
             # Reorganize tiles
             tmux select-layout -t "$SESSION_NAME:0" tiled
