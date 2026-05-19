@@ -30,7 +30,7 @@ describe('HarmonyCanvas.js Unit Tests', () => {
         document = window.document;
 
         // Mock global canvas context
-        window.HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+        window.mockCtx = {
             clearRect: vi.fn(),
             beginPath: vi.fn(),
             moveTo: vi.fn(),
@@ -40,7 +40,8 @@ describe('HarmonyCanvas.js Unit Tests', () => {
             fill: vi.fn(),
             arc: vi.fn(),
             setLineDash: vi.fn()
-        }));
+        };
+        window.HTMLCanvasElement.prototype.getContext = vi.fn(() => window.mockCtx);
 
         // Mock getBoundingClientRect
         window.HTMLCanvasElement.prototype.getBoundingClientRect = vi.fn(() => ({
@@ -214,4 +215,56 @@ describe('HarmonyCanvas.js Unit Tests', () => {
         expect(pixelVal[1]).toEqual(600);
         expect(document.getElementById('selectedCamera').value).toEqual("All");
     });
+
+    it('initCanvasEditor correctly draws objects even with mismatched camera names', () => {
+        // Setup image dimensions
+        const img = document.getElementById('GameWorld');
+        Object.defineProperty(img, 'clientWidth', { value: 1920, configurable: true });
+        Object.defineProperty(img, 'clientHeight', { value: 1080, configurable: true });
+
+        // Create virtual map image so that it exists if looked up
+        const imgVM = document.createElement('img');
+        imgVM.id = 'GameWorld_VirtualMap';
+        Object.defineProperty(imgVM, 'clientWidth', { value: 1200, configurable: true });
+        Object.defineProperty(imgVM, 'clientHeight', { value: 1200, configurable: true });
+        document.body.appendChild(imgVM);
+
+        // Mock canvas dimensions
+        const canvas = document.getElementById('GameWorldOverlay');
+        canvas.width = 1920;
+        canvas.height = 1080;
+
+        // Mock canvas context methods
+        window.mockCtx.lineTo.mockClear();
+
+        // 1. Camera suffix match (e.g. RTSPCamera0 mapping to suffix "0")
+        document.getElementById('selectedCamera').value = "RTSPCamera0";
+        const data = {
+            objects: {
+                Obj1: {
+                    "0": [[100, 100], [200, 200], [300, 100]]
+                }
+            },
+            selectable: ["Obj1"]
+        };
+        
+        const editor = window.initCanvasEditor('GameWorldOverlay', data);
+        expect(window.mockCtx.lineTo).toHaveBeenCalled();
+
+        // 2. Case insensitive match (e.g. "virtualmap" matching "VirtualMap")
+        window.mockCtx.lineTo.mockClear();
+        document.getElementById('selectedCamera').value = "virtualmap";
+        const dataVM = {
+            objects: {
+                ObjVM: {
+                    "VirtualMap": [[10, 10], [20, 20], [30, 10]]
+                }
+            },
+            selectable: ["ObjVM"]
+        };
+        const editorVM = window.initCanvasEditor('GameWorldOverlay', dataVM, null, null, "VirtualMap");
+        expect(window.mockCtx.lineTo).toHaveBeenCalled();
+    });
 });
+
+

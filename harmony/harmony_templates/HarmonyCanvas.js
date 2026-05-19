@@ -49,7 +49,29 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         if (!objOrMap) return null;
         if (Array.isArray(objOrMap)) return objOrMap;
         const currentCam = camName || document.getElementById('selectedCamera').value;
-        return objOrMap[currentCam];
+        if (objOrMap[currentCam] !== undefined) {
+            return objOrMap[currentCam];
+        }
+        // Try case-insensitive matching
+        for (let k in objOrMap) {
+            if (String(k).toLowerCase() === String(currentCam).toLowerCase()) {
+                return objOrMap[k];
+            }
+        }
+        // Try matching digits suffix (e.g. "Camera 0" or "RTSPCamera0" -> "0")
+        const digits = currentCam.match(/\d+/g);
+        if (digits && digits.length > 0) {
+            const suffix = digits[digits.length - 1];
+            if (objOrMap[suffix] !== undefined) {
+                return objOrMap[suffix];
+            }
+        }
+        // Fallback: if there's only one non-VirtualMap key, use it
+        const keys = Object.keys(objOrMap).filter(k => k !== "VirtualMap");
+        if (keys.length === 1) {
+            return objOrMap[keys[0]];
+        }
+        return null;
     }
 
 
@@ -370,10 +392,12 @@ function translatePolyToQuadrant(poly, quadIndex, cName) {
 
 function getNaturalDims(camName) {
     const currentCam = camName || document.getElementById('selectedCamera').value;
-    if (currentCam === "VirtualMap") {
+    const isVirtualMap = String(currentCam).toLowerCase().includes("virtualmap") || currentCam === "VirtualMap";
+    if (isVirtualMap) {
         return { w: 1200, h: 1200 };
     }
-    if (currentCam === "All") {
+    const isAll = String(currentCam).toLowerCase() === "all" || currentCam === "All";
+    if (isAll) {
         const totalCams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras.length : 4;
         const cols = Math.ceil(Math.sqrt(totalCams));
         const rows = Math.ceil(totalCams / cols);
