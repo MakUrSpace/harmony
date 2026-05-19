@@ -156,11 +156,9 @@ def test_camera_switching(page: Page, harmony_server):
     cam_btn.click()
     expect(page.locator("#GameWorldHeader")).to_contain_text("Camera 0")
 
-    # Find the All Views camera button
+    # Find the All Views camera button (which should now be hidden/disabled)
     all_btn = page.locator("input[type='button'][value='All Views']")
-    expect(all_btn).to_be_visible()
-    all_btn.click()
-    expect(page.locator("#GameWorldHeader")).to_contain_text("All Views")
+    expect(all_btn).not_to_be_visible()
 
 
 def test_admin_vs_user_permissions_js(page: Page, harmony_servers):
