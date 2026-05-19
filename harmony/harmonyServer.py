@@ -1183,7 +1183,6 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
         ]
     )
     cameraButtons = f"""<input type="button" class="btn btn-info" value="Virtual Map" onclick="gameWorldClick('VirtualMap')">{cameraButtons}"""
-    cameraButtons += f""" <input type="button" class="btn btn-warning" value="All Views" onclick="gameWorldClick('All')">"""
 
     defaultCam = [camName for camName, cam in cc.cameras.items()]
     if len(defaultCam) == 0:
