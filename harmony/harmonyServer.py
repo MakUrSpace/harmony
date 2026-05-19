@@ -587,14 +587,12 @@ def render_composite_all(cc, cm):
 
 @harmony.get("/camWithChanges/{camName}/{viewId}")
 def cameraViewWithChangesResponse(camName: str, viewId: str):
-    cm = _get_cm()
-    cc = _get_cc()
     if camName == "VirtualMap":
-        broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(cm))
+        broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(_get_cm()))
     elif camName == "All":
-        broadcaster = get_broadcaster("All", lambda: render_composite_all(cc, cm))
+        broadcaster = get_broadcaster("All", lambda: render_composite_all(_get_cc(), _get_cm()))
     else:
-        broadcaster = get_broadcaster(camName, lambda c=camName: render_camera(cc, c))
+        broadcaster = get_broadcaster(camName, lambda c=camName: render_camera(_get_cc(), c))
 
     return StreamingResponse(
         broadcaster.subscribe(), media_type="multipart/x-mixed-replace; boundary=frame"
@@ -2110,8 +2108,7 @@ def selectAdditionalPixel(viewId: str):
 
 @harmony.get("/minimap/{viewId}")
 def minimapResponse(viewId: str):
-    cm = _get_cm()
-    broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(cm))
+    broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(_get_cm()))
     return StreamingResponse(
         broadcaster.subscribe(), media_type="multipart/x-mixed-replace; boundary=frame"
     )
@@ -2546,9 +2543,9 @@ def start_servers():
 
     # Pre-warm broadcasters
     try:
-        get_broadcaster("VirtualMap", lambda: render_minimap(_cm))
-        for camName in cc.cameras.keys():
-            get_broadcaster(camName, lambda c=camName: render_camera(cc, c))
+        get_broadcaster("VirtualMap", lambda: render_minimap(_get_cm()))
+        for camName in _get_cc().cameras.keys():
+            get_broadcaster(camName, lambda c=camName: render_camera(_get_cc(), c))
     except Exception as e:
         print(f"Failed to start broadcasters: {e}")
 
