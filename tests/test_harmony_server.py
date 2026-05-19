@@ -883,6 +883,50 @@ class TestHarmonyServer(unittest.TestCase):
         self.assertIn("objectCategoryDetailsListenerRegistered", html)
         self.assertIn("localStorage.setItem('collapse-'", html)
 
+    def test_dynamic_all_views_layout(self):
+        """Test dynamic grid layout and canvas data representation for 'All' views."""
+        original_cameras = harmonyServer._cc.cameras
+        original_render_minimap = harmonyServer.render_minimap
+        original_imencode = harmonyServer.cv2.imencode
+        import numpy as np
+        dummy_vmap = np.zeros((1200, 1200, 3), dtype=np.uint8)
+        
+        harmonyServer.render_minimap = lambda cm, encode=True: dummy_vmap
+        # Mock cv2.imencode to return a unpackable tuple
+        harmonyServer.cv2.imencode = mock.MagicMock(return_value=(True, np.array([1, 2, 3], dtype=np.uint8)))
+        harmonyServer.CANVAS_DATA_CACHE.clear()
+        try:
+            camA = mock.MagicMock()
+            camA.mostRecentFrame = None
+            camB = mock.MagicMock()
+            camB.mostRecentFrame = None
+            camC = mock.MagicMock()
+            camC.mostRecentFrame = None
+            camD = mock.MagicMock()
+            camD.mostRecentFrame = None
+            
+            harmonyServer._cc.cameras = {
+                "CamA": camA,
+                "CamB": camB,
+                "CamC": camC,
+                "CamD": camD
+            }
+            canvas_data = harmonyServer._get_canvas_data_dict("view_dynamic_layout_test_unique")
+            cameras_in_data = canvas_data["cameras"]
+            
+            # 4 cameras + 1 VirtualMap = 5 streams.
+            # No padding of No Camera is done now.
+            self.assertEqual(len(cameras_in_data), 5)
+            self.assertEqual(cameras_in_data[4], "VirtualMap")
+            
+            # Verify render_composite_all works without exception
+            frame_bytes = harmonyServer.render_composite_all(harmonyServer._cc, harmonyServer._cm)
+            self.assertIsNotNone(frame_bytes)
+        finally:
+            harmonyServer._cc.cameras = original_cameras
+            harmonyServer.render_minimap = original_render_minimap
+            harmonyServer.cv2.imencode = original_imencode
+
 
 if __name__ == "__main__":
     unittest.main()

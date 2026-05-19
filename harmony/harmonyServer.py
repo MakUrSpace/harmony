@@ -520,28 +520,46 @@ def render_composite_all(cc, cm):
             )
             sub_frames.append(vmap_resized)
 
-        # Ensure we have at least 4 sub-frames for 2x2 grid
-        while len(sub_frames) < 4:
-            placeholder = np.zeros((540, 960, 3), dtype=np.uint8)
+        import math
+        N = len(sub_frames)
+        if N == 0:
+            # Fallback
+            fallback = np.zeros((540, 960, 3), dtype=np.uint8)
             cv2.putText(
-                placeholder,
-                "No Camera",
-                (350, 270),
+                fallback,
+                "No Views Available",
+                (300, 270),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1.2,
-                (100, 100, 100),
+                (255, 255, 255),
                 2,
                 cv2.LINE_AA,
             )
-            sub_frames.append(placeholder)
+            ret, encoded = cv2.imencode(
+                ".jpg", fallback, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+            )
+            return encoded.tobytes()
 
-        # Limit to exactly 4 for 2x2 grid
-        grid_frames = sub_frames[:4]
+        cols = int(math.ceil(math.sqrt(N)))
+        rows = int(math.ceil(N / cols))
 
-        # Stitch 2x2
-        row1 = cv2.hconcat([grid_frames[0], grid_frames[1]])
-        row2 = cv2.hconcat([grid_frames[2], grid_frames[3]])
-        composite = cv2.vconcat([row1, row2])
+        # Stitch dynamically
+        row_images = []
+        for r in range(rows):
+            row_frames = sub_frames[r * cols : (r + 1) * cols]
+            num_in_row = len(row_frames)
+            if num_in_row == cols:
+                row_img = cv2.hconcat(row_frames)
+            else:
+                row_img_concated = cv2.hconcat(row_frames)
+                total_pad_w = (cols - num_in_row) * 960
+                left_pad_w = total_pad_w // 2
+                right_pad_w = total_pad_w - left_pad_w
+                left_pad = np.zeros((540, left_pad_w, 3), dtype=np.uint8)
+                right_pad = np.zeros((540, right_pad_w, 3), dtype=np.uint8)
+                row_img = cv2.hconcat([left_pad, row_img_concated, right_pad])
+            row_images.append(row_img)
+        composite = cv2.vconcat(row_images)
 
         ret, encoded = cv2.imencode(
             ".jpg", composite, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
@@ -887,9 +905,6 @@ def _get_canvas_data_dict(viewId: str):
 
     comp_cams = sorted(list(cc.cameras.keys()))
     comp_cams.append("VirtualMap")
-    while len(comp_cams) < 4:
-        comp_cams.append("No Camera")
-    comp_cams = comp_cams[:4]
 
     data = {
         "objects": objects,

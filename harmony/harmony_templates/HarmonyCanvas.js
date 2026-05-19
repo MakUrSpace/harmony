@@ -78,22 +78,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         }
     }
 
-    function translatePolyToQuadrant(poly, quadIndex) {
-        if (!poly || poly.length === 0) return null;
-        const half_w = 960;
-        const half_h = 540;
-        const offsetX = (quadIndex % 2) * half_w;
-        const offsetY = Math.floor(quadIndex / 2) * half_h;
-        
-        return poly.map(pt => {
-            const x = Array.isArray(pt) ? pt[0] : pt.x;
-            const y = Array.isArray(pt) ? pt[1] : pt.y;
-            return {
-                x: x * 0.5 + offsetX,
-                y: y * 0.5 + offsetY
-            };
-        });
-    }
+
 
     function drawGroup(group, r, g, b, drawnSet) {
         const scale = getScale(canvas, camName);
@@ -106,7 +91,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                     cams.forEach((cName, quadIdx) => {
                         const poly = data.objects[name][cName];
                         if (poly && poly.length > 0) {
-                            const translated = translatePolyToQuadrant(poly, quadIdx);
+                            const translated = translatePolyToQuadrant(poly, quadIdx, cName);
                             drawPoly(translated, scale, true, r, g, b);
                         }
                     });
@@ -170,7 +155,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                     cams.forEach((cName, quadIdx) => {
                         const poly = data.selection.firstCell[cName];
                         if (poly && poly.length > 0) {
-                            const translated = translatePolyToQuadrant(poly, quadIdx);
+                            const translated = translatePolyToQuadrant(poly, quadIdx, cName);
                             drawPoly(translated, scale, true, 255, 210, 70); // Gold for first
                             
                             // Calculate center
@@ -204,7 +189,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                         cams.forEach((cName, quadIdx) => {
                             const poly = cell[cName];
                             if (poly && poly.length > 0) {
-                                const translated = translatePolyToQuadrant(poly, quadIdx);
+                                const translated = translatePolyToQuadrant(poly, quadIdx, cName);
                                 drawPoly(translated, scale, true, 255, 0, 255); // Magenta for additional
                                 
                                 const fCenter = firstCenters[quadIdx];
@@ -345,10 +330,54 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     };
 }
 
+function getRowPaddingAndCams(quadIndex) {
+    const totalCams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras.length : 4;
+    const cols = Math.ceil(Math.sqrt(totalCams));
+    const rows = Math.ceil(totalCams / cols);
+    
+    const r = Math.floor(quadIndex / cols);
+    const start_idx = r * cols;
+    const end_idx = Math.min(totalCams, (r + 1) * cols);
+    const num_in_row = end_idx - start_idx;
+    
+    const left_pad = ((cols - num_in_row) * 960) / 2;
+    return { cols, rows, left_pad, r, idx_in_row: quadIndex % cols };
+}
+
+function translatePolyToQuadrant(poly, quadIndex, cName) {
+    if (!poly || poly.length === 0) return null;
+    const info = getRowPaddingAndCams(quadIndex);
+    const offsetX = info.left_pad + info.idx_in_row * 960;
+    const offsetY = info.r * 540;
+    
+    let scaleX = 0.5;
+    let scaleY = 0.5;
+    if (cName === "VirtualMap") {
+        scaleX = 960 / 1200;
+        scaleY = 540 / 1200;
+    }
+    
+    return poly.map(pt => {
+        const x = Array.isArray(pt) ? pt[0] : pt.x;
+        const y = Array.isArray(pt) ? pt[1] : pt.y;
+        return {
+            x: x * scaleX + offsetX,
+            y: y * scaleY + offsetY
+        };
+    });
+}
+
+
 function getNaturalDims(camName) {
     const currentCam = camName || document.getElementById('selectedCamera').value;
     if (currentCam === "VirtualMap") {
         return { w: 1200, h: 1200 };
+    }
+    if (currentCam === "All") {
+        const totalCams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras.length : 4;
+        const cols = Math.ceil(Math.sqrt(totalCams));
+        const rows = Math.ceil(totalCams / cols);
+        return { w: cols * 960, h: rows * 540 };
     }
     return { w: 1920, h: 1080 };
 }
@@ -413,6 +442,13 @@ function handlePixelSelection(event, camNameOverride) {
     if (camName === "VirtualMap") {
         natural_width = 1200
         natural_height = 1200
+    } else if (camName === "All") {
+        const cams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras : [];
+        const totalCams = cams.length || 4;
+        const cols = Math.ceil(Math.sqrt(totalCams));
+        const rows = Math.ceil(totalCams / cols);
+        natural_width = cols * 960;
+        natural_height = rows * 540;
     }
 
     // Safety check for div-by-zero
@@ -431,17 +467,37 @@ function handlePixelSelection(event, camNameOverride) {
     if (camName === "All") {
         const cams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras : [];
         if (cams.length > 0) {
-            const half_w = 960;
-            const half_h = 540;
-            const quad_col = Math.floor(image_x / half_w);
-            const quad_row = Math.floor(image_y / half_h);
-            const quad_idx = quad_row * 2 + quad_col;
-            if (quad_idx >= 0 && quad_idx < cams.length) {
-                finalCamName = cams[quad_idx];
-                final_x = (image_x % half_w) * 2;
-                final_y = (image_y % half_h) * 2;
+            const cols = Math.ceil(Math.sqrt(cams.length));
+            const rows = Math.ceil(cams.length / cols);
+            const sub_w = 960;
+            const sub_h = 540;
+            
+            const quad_row = Math.min(rows - 1, Math.floor(image_y / sub_h));
+            const start_idx = quad_row * cols;
+            const end_idx = Math.min(cams.length, (quad_row + 1) * cols);
+            const num_in_row = end_idx - start_idx;
+            
+            const left_pad = ((cols - num_in_row) * sub_w) / 2;
+            const active_x = image_x - left_pad;
+            
+            if (active_x >= 0 && active_x < num_in_row * sub_w) {
+                const idx_in_row = Math.floor(active_x / sub_w);
+                const quad_idx = start_idx + idx_in_row;
+                if (quad_idx >= 0 && quad_idx < cams.length) {
+                    finalCamName = cams[quad_idx];
+                    const local_x = active_x % sub_w;
+                    const local_y = image_y % sub_h;
+                    if (finalCamName === "VirtualMap") {
+                        final_x = local_x * (1200 / 960);
+                        final_y = local_y * (1200 / 540);
+                    } else {
+                        final_x = local_x * 2;
+                        final_y = local_y * 2;
+                    }
+                }
             } else {
-                finalCamName = cams[0];
+                // Clicked on padding areas of centered row, do nothing/ignore click
+                return;
             }
         }
     }
