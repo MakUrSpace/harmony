@@ -76,6 +76,9 @@ class HarmonyMachine(CalibratedObserver):
         self.reset()
         # TODO: Implement
 
+    def objectCouldInteract(self, obj):
+        return False
+
     def cycle(self):
         cycleStart = datetime.utcnow()
         try:
@@ -104,7 +107,10 @@ class HarmonyMachine(CalibratedObserver):
             x, y, w, h = cam.activeZoneBoundingBox
 
             # 2. Mask to AZ (using existing method)
-            maskedImage = cam.cropToActiveZone(cam.mostRecentFrame.copy())
+            frame = cam.mostRecentFrame
+            if frame is None:
+                frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+            maskedImage = cam.cropToActiveZone(frame.copy())
 
             # 3. Crop to Box
             croppedImage = maskedImage[y : y + h, x : x + w]

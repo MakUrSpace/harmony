@@ -194,8 +194,8 @@ describe('HarmonyCanvas.js Unit Tests', () => {
         Object.defineProperty(img, 'clientHeight', { value: 1080, configurable: true });
         img.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1920, height: 1080 });
 
-        // Under wide layout, click in the bottom row (y >= 540) is always VirtualMap.
-        // Let's click at (960, 810) which is in the bottom center.
+        // Under wide layout, click in the bottom row (y >= 540) is VirtualMap.
+        // Let's click at (960, 810) which is in the exact center of the 540x540 map.
         const mockEvent = {
             clientX: 960, 
             clientY: 810, // y offset in bottom row is 270 out of 540
@@ -203,12 +203,30 @@ describe('HarmonyCanvas.js Unit Tests', () => {
         };
 
         window.handlePixelSelection(mockEvent);
-
-        const pixelVal = JSON.parse(document.getElementById('selectedPixel').value);
-        // Under wide:
-        // final_x = (960 / 1920) * 1200 = 600
-        // final_y = (270 / 540) * 1200 = 600
+        let pixelVal = JSON.parse(document.getElementById('selectedPixel').value);
+        // Center maps to (600, 600)
         expect(pixelVal[0]).toEqual(600);
         expect(pixelVal[1]).toEqual(600);
+
+        // Click at left edge of centered map: clientX = 690, clientY = 540 (y = 0 in map space)
+        const mockLeftEdge = { clientX: 690, clientY: 540, shiftKey: false };
+        window.handlePixelSelection(mockLeftEdge);
+        pixelVal = JSON.parse(document.getElementById('selectedPixel').value);
+        expect(pixelVal[0]).toEqual(0);
+        expect(pixelVal[1]).toEqual(0);
+
+        // Click at right edge of centered map: clientX = 1230, clientY = 1080 (y = 1200 in map space)
+        const mockRightEdge = { clientX: 1230, clientY: 1080, shiftKey: false };
+        window.handlePixelSelection(mockRightEdge);
+        pixelVal = JSON.parse(document.getElementById('selectedPixel').value);
+        expect(pixelVal[0]).toEqual(1200);
+        expect(pixelVal[1]).toEqual(1200);
+
+        // Click in left margin (outside the map): clientX = 600, clientY = 810
+        const mockLeftMargin = { clientX: 600, clientY: 810, shiftKey: false };
+        window.handlePixelSelection(mockLeftMargin);
+        pixelVal = JSON.parse(document.getElementById('selectedPixel').value);
+        expect(pixelVal[0]).toEqual(-9999);
+        expect(pixelVal[1]).toEqual(-9999);
     });
 });

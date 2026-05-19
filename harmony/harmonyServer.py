@@ -543,10 +543,32 @@ def render_composite_all(cc, cm):
             )
 
         if num_real_cams == 2:
-            # --- 2-camera layout: VirtualMap spans full bottom row (1920×540) ---
+            # --- 2-camera layout: VirtualMap centered in bottom row (1920×540) with preserved aspect ratio ---
             row1 = cv2.hconcat([sub_frames[0], sub_frames[1]])
 
-            vmap_wide = cv2.resize(vmap_bgr, (1920, 540), interpolation=cv2.INTER_LINEAR)
+            # Create premium charcoal background
+            vmap_wide = np.zeros((540, 1920, 3), dtype=np.uint8)
+            vmap_wide[:] = (25, 25, 35)
+
+            # Resize the square minimap to 540x540
+            vmap_square = cv2.resize(vmap_bgr, (540, 540), interpolation=cv2.INTER_LINEAR)
+
+            # Place it centered horizontally
+            start_x = (1920 - 540) // 2 # 690
+            vmap_wide[:, start_x:start_x+540] = vmap_square
+
+            # Add premium tech-themed grid background lines on the dark margins
+            for gx in range(0, start_x, 40):
+                cv2.line(vmap_wide, (gx, 0), (gx, 540), (20, 20, 30), 1)
+            for gx in range(start_x + 540, 1920, 40):
+                cv2.line(vmap_wide, (gx, 0), (gx, 540), (20, 20, 30), 1)
+            for gy in range(0, 540, 40):
+                cv2.line(vmap_wide, (0, gy), (start_x, gy), (20, 20, 30), 1)
+                cv2.line(vmap_wide, (start_x + 540, gy), (1920, gy), (20, 20, 30), 1)
+
+            # Draw border around the active centered minimap
+            cv2.rectangle(vmap_wide, (start_x, 0), (start_x + 539, 539), highlight_color, 2)
+
             cv2.putText(
                 vmap_wide,
                 "Virtual Map",

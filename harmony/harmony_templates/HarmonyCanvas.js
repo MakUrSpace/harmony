@@ -86,14 +86,15 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         // Wide layout: VirtualMap spans the full bottom row when there are exactly 2 real cameras.
         const vmLayout = (window.harmonyCanvasData && window.harmonyCanvasData.vmLayout) || 'grid';
         if (cameraName === 'VirtualMap' && vmLayout === 'wide') {
-            // Bottom row: offsetX = 0, offsetY = 540, full-width scale
-            const scaleX = (1920 / 1200);
-            const scaleY = (half_h / 1200);
+            // Bottom row centered square: height=540, width=540, offset_x=690
+            const startX = (1920 - 540) / 2; // 690
+            const scaleX = (540 / 1200);
+            const scaleY = (540 / 1200);
             return poly.map(pt => {
                 const x = Array.isArray(pt) ? pt[0] : pt.x;
                 const y = Array.isArray(pt) ? pt[1] : pt.y;
                 return {
-                    x: x * scaleX,
+                    x: x * scaleX + startX,
                     y: y * scaleY + half_h
                 };
             });
@@ -464,9 +465,16 @@ function handlePixelSelection(event, camNameOverride) {
             if (vmLayout === 'wide' && image_y >= half_h) {
                 // Click is in the bottom VirtualMap strip
                 finalCamName = 'VirtualMap';
-                // Map from 1920×540 strip back to 1200×1200 VirtualMap space
-                final_x = (image_x / 1920) * 1200;
-                final_y = ((image_y - half_h) / half_h) * 1200;
+                // Center square x starts at 690 and has width 540
+                const startX = (1920 - 540) / 2; // 690
+                const widthVM = 540;
+                if (image_x >= startX && image_x <= startX + widthVM) {
+                    final_x = ((image_x - startX) / widthVM) * 1200;
+                    final_y = ((image_y - half_h) / half_h) * 1200;
+                } else {
+                    final_x = -9999;
+                    final_y = -9999;
+                }
             } else {
                 const quad_col = Math.floor(image_x / half_w);
                 const quad_row = Math.floor(image_y / half_h);
