@@ -614,8 +614,13 @@ class CalibratedObserver(Observer):
 
     def distinct_colors(self, n=15, new=False):
         """Generate n distinct colors that stand out against brown."""
-        if not new and n > 0 and len(getattr(self, "_colors", {n: []})[n]) == n:
-            return self._colors[n]
+        colors_dict = getattr(self, "_colors", None)
+        if colors_dict is None:
+            self._colors = {}
+            colors_dict = self._colors
+
+        if not new and n > 0 and n in colors_dict and len(colors_dict[n]) == n:
+            return colors_dict[n]
         colors = set()
         contrast_colors = [(139, 69, 19), (204, 100, 2), (0, 255, 0)]
         calc_contrast = (
@@ -638,9 +643,8 @@ class CalibratedObserver(Observer):
             if color is None:
                 raise Exception(f"Failed to generate color within 100 cycles")
             colors.add((r, g, b))
-        self._colors = getattr(self, "_colors", {})
-        self._colors[n] = list(colors)
-        return self._colors[n]
+        colors_dict[n] = list(colors)
+        return colors_dict[n]
 
     @property
     def objectsAndColors(self):
