@@ -2250,7 +2250,7 @@ def _build_fastapi_app(
         return Response(
             content,
             media_type="text/css",
-            headers={"Cache-Control": "public, max-age=31536000"},
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
         )
 
     @app.get("/HarmonyCanvas.js")
@@ -2262,7 +2262,7 @@ def _build_fastapi_app(
         return Response(
             content,
             media_type="application/javascript",
-            headers={"Cache-Control": "public, max-age=31536000"},
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
         )
 
     # Mount Flask calibrator/observer as WSGI sub-apps if needed
@@ -2376,7 +2376,7 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
         return Response(
             content,
             media_type="text/css",
-            headers={"Cache-Control": "public, max-age=31536000"},
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
         )
 
     @app.get("/HarmonyCanvas.js")
@@ -2388,7 +2388,7 @@ def create_harmony_app(template_name="Harmony.html") -> FastAPI:
         return Response(
             content,
             media_type="application/javascript",
-            headers={"Cache-Control": "public, max-age=31536000"},
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
         )
 
     APPS.append(app)
