@@ -218,17 +218,60 @@ class CameraRealSpaceConverter:
 # In[6]:
 
 
+class RobustConvertersDict(dict):
+    def __contains__(self, key):
+        if super().__contains__(key):
+            return True
+        for k in [str(key), int(key) if str(key).isdigit() else None]:
+            if k is not None and super().__contains__(k):
+                return True
+        import re
+        digits = re.findall(r'\d+', str(key))
+        if digits:
+            digit_suffix = digits[-1]
+            for k in [digit_suffix, int(digit_suffix)]:
+                if super().__contains__(k):
+                    return True
+        return False
+
+    def __getitem__(self, key):
+        if super().__contains__(key):
+            return super().__getitem__(key)
+        for k in [str(key), int(key) if str(key).isdigit() else None]:
+            if k is not None and super().__contains__(k):
+                return super().__getitem__(k)
+        import re
+        digits = re.findall(r'\d+', str(key))
+        if digits:
+            digit_suffix = digits[-1]
+            for k in [digit_suffix, int(digit_suffix)]:
+                if super().__contains__(k):
+                    return super().__getitem__(k)
+        # Fallback to any item if not found
+        if self:
+            return list(self.values())[0]
+        raise KeyError(key)
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
 class RealSpaceConverter:
     def __init__(self, realCamSpacePairs: dict):
         self.realCamSpacePairs = realCamSpacePairs
         #  {camName: [[camSpaceTriPts, realSpaceTriPts], ...], ...}
-        self.converters = defaultdict(list)
+        from collections import defaultdict
+        raw_converters = defaultdict(list)
         for camName, coordPairs in self.realCamSpacePairs:
             camSpaceTriPts, realSpaceTriPts = coordPairs[:2]
             converter = CameraRealSpaceConverter(
                 camName, camSpaceTriPts, realSpaceTriPts
             )
-            self.converters[camName].append(converter)
+            raw_converters[camName].append(converter)
+        self.converters = RobustConvertersDict(raw_converters)
 
     def closestConverterToCamCoord(self, camName, camCoord):
         converters = self.converters[camName]
@@ -328,13 +371,22 @@ class RealSpaceConverter:
         im = None
         warps = []
         for camName, camConverters in self.converters.items():
-            cam = cameras[camName]
+            cam = cameras.get(camName)
+            if cam is None:
+                for k in cameras.keys():
+                    if str(camName) in str(k) or str(k) in str(camName):
+                        cam = cameras[k]
+                        break
+            if cam is None:
+                continue
             for converter in camConverters:
                 warp = cv2.warpPerspective(
                     cam.cropToActiveZone(cam.mostRecentFrame), converter.M, (1200, 1200)
                 )
                 warp = cv2.cvtColor(warp, cv2.COLOR_BGR2GRAY)
                 warps.append(warp)
+        if not warps:
+            return []
         avg_im = sum([warp * (1 / len(warps)) for warp in warps]).astype("uint8")
         avg_im = cv2.threshold(avg_im, 64, 255, cv2.THRESH_BINARY)[1]
         realSpaceContour = cv2.findContours(
@@ -345,7 +397,14 @@ class RealSpaceConverter:
     def cameraRealSpaceOverlap(self, cameras, out_size=(1200, 1200)):
         warps = []
         for camName, camConverters in self.converters.items():
-            cam = cameras[camName]
+            cam = cameras.get(camName)
+            if cam is None:
+                for k in cameras.keys():
+                    if str(camName) in str(k) or str(k) in str(camName):
+                        cam = cameras[k]
+                        break
+            if cam is None:
+                continue
             if cam.mostRecentFrame is not None:
                 h, w = cam.mostRecentFrame.shape[:2]
             else:
@@ -384,7 +443,14 @@ class RealSpaceConverter:
     def unwarpedOverlaidCameras(self, cameras):
         im = None
         for camName, camConverters in self.converters.items():
-            cam = cameras[camName]
+            cam = cameras.get(camName)
+            if cam is None:
+                for k in cameras.keys():
+                    if str(camName) in str(k) or str(k) in str(camName):
+                        cam = cameras[k]
+                        break
+            if cam is None:
+                continue
             for converter in camConverters:
                 warp = cv2.warpPerspective(
                     cam.cropToActiveZone(cam.mostRecentFrame), converter.M, (1200, 1200)
