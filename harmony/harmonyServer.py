@@ -1233,6 +1233,7 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
     )
 
     resp = HTMLResponse(rendered)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     cookie_val = request.cookies.get("session_view_id")
     if cookie_val != viewId:
         resp.set_cookie("session_view_id", viewId)
