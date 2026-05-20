@@ -248,7 +248,7 @@ def render_camera(cc, camName):
         ):
             try:
                 grid_overlay = draw_dynamic_grid(cc, camName)
-                if grid_overlay == "PENDING":
+                if isinstance(grid_overlay, str) and grid_overlay == "PENDING":
                     target_w, target_h = perspective_res
                     pending_img = make_pending_image(target_w, target_h)
                     ret, encoded = cv2.imencode(
@@ -270,7 +270,7 @@ def render_camera(cc, camName):
             if getattr(cc, "show_grid", False):
                 try:
                     grid_overlay = draw_dynamic_grid(cc, camName)
-                    if grid_overlay is not None and grid_overlay != "PENDING":
+                    if grid_overlay is not None and not (isinstance(grid_overlay, str) and grid_overlay == "PENDING"):
                         if grid_overlay.shape[:2] == masked.shape[:2]:
                             cv2.addWeighted(
                                 grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
@@ -469,7 +469,7 @@ def render_composite_all(cc, cm):
             ):
                 try:
                     grid_overlay = draw_dynamic_grid(cc, name)
-                    if grid_overlay == "PENDING":
+                    if isinstance(grid_overlay, str) and grid_overlay == "PENDING":
                         pending_img = make_pending_image(
                             960, 540, text=f"{name}: Calibrating..."
                         )
@@ -2488,7 +2488,7 @@ def start_servers():
     admin_app.include_router(configurator)
 
     # Note: calibrator and observerServer Flask blueprints are abandoned.
-    # registerCaptureService(_CaptureServiceProxy())
+    registerCaptureService(_CaptureServiceProxy())
 
     # --- User App (port 7000) ---
     user_config = {"HARMONY_TEMPLATE": "HarmonyUser.html"}

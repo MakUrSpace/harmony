@@ -365,7 +365,7 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
                     try:
                         grid_overlay = draw_dynamic_grid(cc, camName)
 
-                        if grid_overlay == "PENDING":
+                        if isinstance(grid_overlay, str) and grid_overlay == "PENDING":
                             cv2.putText(
                                 img,
                                 "Dynamic Grid: Calibrating & Caching...",
