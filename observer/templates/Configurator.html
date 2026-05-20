@@ -55,15 +55,38 @@
                 onclick="window.location.href='{configuratorURL}new_camera'">
         </div>
 
-        <div class="row" align="left">
-            <div class="container border border-3 border-info" align="left">
-                <h3>Grid Configuration</h3>
-                <form hx-post="{configuratorURL}grid_configuration" hx-swap="outerHTML">
-                    <input type="number" class="form-check-input bg-info" name="size" min="10" max="60" value="{size}"
-                        style="width:4em">
-                    <label class="form-check-label" for="size">Size</label><br>
-                    <input type="submit" class="btn btn-primary bg-secondary" value="Submit Grid Configuration">
-                </form>
+        <div class="row mt-4 mb-4" align="left">
+            <div class="col-md-6 mb-3">
+                <div class="container border border-3 border-info p-3 rounded bg-dark text-white h-100">
+                    <h3>Grid Configuration</h3>
+                    <form hx-post="{configuratorURL}grid_configuration" hx-swap="outerHTML">
+                        <div class="d-flex align-items-center gap-2 mb-3">
+                            <input type="number" class="form-control bg-light text-dark fw-bold" name="size" min="10" max="60" value="{size}"
+                                style="width: 5em;">
+                            <label class="form-label mb-0 fw-bold" for="size">Size (px)</label>
+                        </div>
+                        <input type="submit" class="btn btn-primary" value="Submit Grid Configuration">
+                    </form>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="container border border-3 border-warning p-3 rounded bg-dark text-white h-100">
+                    <h3>Save & Restore Calibration</h3>
+                    <div class="d-flex flex-column gap-3">
+                        <div>
+                            <p class="text-muted small mb-2">Backup active cameras, active zones, converters, and nudges configuration to a local JSON file.</p>
+                            <a class="btn btn-warning w-100 fw-bold" href="{configuratorURL}export_calibration" download="harmony_grid_calibration.json">Export Grid Calibration</a>
+                        </div>
+                        <hr class="border-secondary my-1">
+                        <div>
+                            <p class="text-muted small mb-2">Upload a previously exported calibration file to restore all settings instantly.</p>
+                            <form action="{configuratorURL}import_calibration" method="POST" enctype="multipart/form-data" class="d-flex gap-2">
+                                <input class="form-control form-control-sm bg-secondary text-white" type="file" name="file" required accept=".json">
+                                <button type="submit" class="btn btn-success btn-sm fw-bold px-3">Restore</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -7,7 +7,7 @@ import time
 from typing import Optional
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Request, Response, Form, HTTPException
+from fastapi import APIRouter, Request, Response, Form, HTTPException, File, UploadFile
 from fastapi.responses import (
     HTMLResponse,
     StreamingResponse,
@@ -300,6 +300,16 @@ def draw_dynamic_grid(cc, camName):
 
                 for q in range(min_q - pad, max_q + pad + 1):
                     for r in range(min_r - pad, max_r + pad + 1):
+                        # Quick visibility check to filter out hexes completely outside camera viewport
+                        cx, cy = cc.axial_to_pixel(q, r)
+                        converter = rsc.closestConverterToRealCoord(str(camName), (cx, cy))
+                        ccx, ccy = converter.convertRealToCameraSpace((cx, cy))
+
+                        # Add generous padding (e.g. 3x hex size or 150px) to prevent clipping at boundaries
+                        padding = max(150.0, float(hex_grid.size) * 3.0)
+                        if ccx < -padding or ccx > w + padding or ccy < -padding or ccy > h + padding:
+                            continue
+
                         poly_cam = cc.cam_hex_at_axial(str(camName), q, r)
 
                         # Draw
@@ -710,10 +720,19 @@ async def deleteCamera(request: Request, camName: str):
 async def configureGrid(request: Request, size: float = Form(...)):
     cc = request.app.state.cc
     cc.hex = HexGridConfiguration(size=size)
+    cc.saveConfiguration()
+    if hasattr(cc, "_grid_cache"):
+        cc._grid_cache.clear()
+    eagerly_precalculate_grids(cc)
     return HTMLResponse(f"""
-        <input type="number" class="form-check-input bg-info" name="size" min="10" max="60" value="{cc.hex.size}" style="width:4em">
-        <label class="form-check-label" for="size">Size</label><br>
-        <input type="submit" class="btn btn-primary bg-secondary" value="Submit Grid Configuration">""")
+        <form hx-post="/configurator/grid_configuration" hx-swap="outerHTML">
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <input type="number" class="form-control bg-light text-dark fw-bold" name="size" min="10" max="60" value="{cc.hex.size}"
+                    style="width: 5em;">
+                <label class="form-label mb-0 fw-bold" for="size">Size (px)</label>
+            </div>
+            <input type="submit" class="btn btn-primary" value="Submit Grid Configuration">
+        </form>""")
 
 
 @configurator.get("/nudge_select/{camName}")
@@ -786,6 +805,46 @@ async def nudgeHex(request: Request, camName: str):
         return JSONResponse({"status": "success"})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@configurator.get("/export_calibration")
+async def exportCalibration(request: Request):
+    cc = request.app.state.cc
+    config_data = cc.buildConfiguration()
+    return JSONResponse(
+        content=config_data,
+        headers={"Content-Disposition": "attachment; filename=harmony_grid_calibration.json"}
+    )
+
+
+@configurator.post("/import_calibration")
+async def importCalibration(request: Request, file: UploadFile = File(...)):
+    cc = request.app.state.cc
+    try:
+        content = await file.read()
+        config_data = json.loads(content.decode("utf-8"))
+        
+        # Validation: must contain grid or camera calibration info
+        if "hex" not in config_data and "rsc" not in config_data:
+            return HTMLResponse("<script>alert('Error: Invalid calibration file format. Must contain grid or calibration data.'); window.location.href='/configurator/';</script>", status_code=400)
+        
+        config_path = "observerConfiguration.json"
+        with open(config_path, "w") as f:
+            json.dump(config_data, f, indent=2)
+            
+        # Reload configuration in place
+        cc.loadConfiguration(config_path)
+        
+        # Clear grid overlay cache
+        if hasattr(cc, "_grid_cache"):
+            cc._grid_cache.clear()
+            
+        # Eagerly precalculate grids
+        eagerly_precalculate_grids(cc)
+        
+        return HTMLResponse("<script>alert('Calibration restored successfully!'); window.location.href='/configurator/';</script>")
+    except Exception as e:
+        return HTMLResponse(f"<script>alert('Error restoring calibration: {e}'); window.location.href='/configurator/';</script>", status_code=500)
 
 
 if __name__ == "__main__":

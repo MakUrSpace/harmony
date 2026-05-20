@@ -169,13 +169,33 @@ class FrameBroadcaster:
                 self.clients -= 1
 
 
-def render_minimap(cm, encode=True):
+def render_minimap(cm, encode=True, viewId=None):
     try:
         if not cm:
             print("render_minimap: cm is None")
             return None
 
-        camImage = cm.buildMiniMap(objectsAndColors=cm.objectsAndColors)
+        # Resolve toggles for this view/session
+        show_grid = False
+        show_objects = True
+        cc = _get_cc()
+        if viewId and viewId in SESSIONS:
+            show_grid = SESSIONS[viewId].show_grid
+            show_objects = SESSIONS[viewId].show_objects
+        else:
+            show_grid = getattr(cc, "show_grid", False)
+            show_objects = getattr(cc, "show_objects", True)
+
+        # Set show_grid temporarily on HexObserver so buildMiniMap renders it accordingly
+        orig_show_grid = getattr(cm, "show_grid", False)
+        cm.show_grid = show_grid
+
+        objects_and_colors = cm.objectsAndColors if show_objects else []
+        camImage = cm.buildMiniMap(objectsAndColors=objects_and_colors)
+
+        # Restore show_grid
+        cm.show_grid = orig_show_grid
+
         if camImage is None:
             return None
 
@@ -234,15 +254,22 @@ def make_pending_image(width=1920, height=1080, text="Harmony: Calibrating grid.
     return img
 
 
-def render_camera(cc, camName):
+def render_camera(cc, camName, viewId=None):
     try:
         cam = cc.cameras.get(camName)
         if not cam:
             return None
 
+        # Resolve show_grid for this view/session
+        show_grid = False
+        if viewId and viewId in SESSIONS:
+            show_grid = SESSIONS[viewId].show_grid
+        else:
+            show_grid = getattr(cc, "show_grid", False)
+
         # Check if show_grid is enabled and grid is pending
         if (
-            getattr(cc, "show_grid", False)
+            show_grid
             and hasattr(cc, "rsc")
             and cc.rsc is not None
         ):
@@ -267,7 +294,7 @@ def render_camera(cc, camName):
         masked = frame.copy()
 
         if hasattr(cc, "rsc") and cc.rsc is not None:
-            if getattr(cc, "show_grid", False):
+            if show_grid:
                 try:
                     grid_overlay = draw_dynamic_grid(cc, camName)
                     if grid_overlay is not None and not (isinstance(grid_overlay, str) and grid_overlay == "PENDING"):
@@ -296,11 +323,20 @@ def render_camera(cc, camName):
 
 @harmony.post("/set_overlays")
 async def setHarmonyOverlays(
-    request: Request, show_grid: bool = Form(...), show_objects: bool = Form(...)
+    request: Request,
+    show_grid: bool = Form(...),
+    show_objects: bool = Form(...),
+    viewId: Optional[str] = Form(None),
 ):
     cc = _get_cc()
-    cc.show_grid = show_grid
-    cc.show_objects = show_objects
+    if viewId:
+        if viewId not in SESSIONS:
+            SESSIONS[viewId] = SessionConfig()
+        SESSIONS[viewId].show_grid = show_grid
+        SESSIONS[viewId].show_objects = show_objects
+    else:
+        cc.show_grid = show_grid
+        cc.show_objects = show_objects
     return Response("Success")
 
 
@@ -423,6 +459,8 @@ class SessionConfig:
     targetable: list = field(default_factory=list)
     selection: CellSelection = field(default_factory=CellSelection)
     selected_oid: str | None = None
+    show_grid: bool = False
+    show_objects: bool = True
 
 
 SESSIONS = {}
@@ -434,8 +472,15 @@ APPS = []
 # ---------------------------------------------------------------------------
 
 
-def render_composite_all(cc, cm):
+def render_composite_all(cc, cm, viewId=None):
     try:
+        # Resolve show_grid for this view/session
+        show_grid = False
+        if viewId and viewId in SESSIONS:
+            show_grid = SESSIONS[viewId].show_grid
+        else:
+            show_grid = getattr(cc, "show_grid", False)
+
         # Get sorted list of cameras (excluding VirtualMap)
         cams = sorted(list(cc.cameras.keys()))
         sub_frames = []
@@ -463,7 +508,7 @@ def render_composite_all(cc, cm):
 
             # Draw hex grid if show_grid is true
             if (
-                getattr(cc, "show_grid", False)
+                show_grid
                 and hasattr(cc, "rsc")
                 and cc.rsc is not None
             ):
@@ -501,7 +546,7 @@ def render_composite_all(cc, cm):
             sub_frames.append(resized)
 
         # Get VirtualMap frame and append to sub_frames before placeholders
-        vmap_frame = render_minimap(cm, encode=False)
+        vmap_frame = render_minimap(cm, encode=False, viewId=viewId)
         if vmap_frame is not None:
             # Convert back to BGR from RGB
             vmap_bgr = cv2.cvtColor(vmap_frame, cv2.COLOR_RGB2BGR)
@@ -572,11 +617,11 @@ def cameraViewWithChangesResponse(camName: str, viewId: str):
     cm = _get_cm()
     cc = _get_cc()
     if camName == "VirtualMap":
-        broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(cm))
+        broadcaster = get_broadcaster(f"VirtualMap_{viewId}", lambda: render_minimap(cm, viewId=viewId))
     elif camName == "All":
-        broadcaster = get_broadcaster("All", lambda: render_composite_all(cc, cm))
+        broadcaster = get_broadcaster(f"All_{viewId}", lambda: render_composite_all(cc, cm, viewId=viewId))
     else:
-        broadcaster = get_broadcaster(camName, lambda c=camName: render_camera(cc, c))
+        broadcaster = get_broadcaster(f"{camName}_{viewId}", lambda c=camName: render_camera(cc, c, viewId=viewId))
 
     return StreamingResponse(
         broadcaster.subscribe(), media_type="multipart/x-mixed-replace; boundary=frame"
@@ -785,11 +830,12 @@ def axial_to_ui_object(q, r):
 # ---------------------------------------------------------------------------
 
 
-def _get_canvas_data_dict(viewId: str):
+def _get_canvas_data_dict(viewId: str, is_admin: bool = False):
     cm = _get_cm()
     cc = _get_cc()
 
     session_config = SESSIONS.get(viewId, SessionConfig())
+    memory_oids = tuple(obj.oid for obj in cm.memory) if cm else ()
     # Create a hashable key for session_config to cache canvas data
     config_key = (
         tuple(session_config.selectable),
@@ -802,6 +848,8 @@ def _get_canvas_data_dict(viewId: str):
         tuple(session_config.selection.additionalCells) if session_config.selection else None,
         session_config.selected_oid,
         getattr(session_config, "showObjects", True),
+        memory_oids,
+        is_admin,
     )
     cycle_num = cm.cycleCounter if cm else 0
     cache_key = (viewId, cycle_num, config_key)
@@ -909,16 +957,20 @@ def _get_canvas_data_dict(viewId: str):
             obj.oid: _get_constituent_axials(obj, cc) for obj in cm.memory
         },
     }
+
+    # Admin sees every object as moveable/editable on the canvas
+    if is_admin:
+        data["moveable"] = [obj.oid for obj in cm.memory]
     
     CANVAS_DATA_CACHE[cache_key] = data
     return data
 
 
-def _get_canvas_update_script(viewId: str):
+def _get_canvas_update_script(viewId: str, is_admin: bool = False):
     import json
 
     try:
-        canvas_data = _get_canvas_data_dict(viewId)
+        canvas_data = _get_canvas_data_dict(viewId, is_admin=is_admin)
         canvas_json = json.dumps(canvas_data)
         return f"""
         <script>
@@ -936,8 +988,9 @@ def _get_canvas_update_script(viewId: str):
 
 
 @harmony.get("/canvas_data/{viewId}")
-def getCanvasData(viewId: str):
-    return JSONResponse(_get_canvas_data_dict(viewId))
+def getCanvasData(request: Request, viewId: str):
+    is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
+    return JSONResponse(_get_canvas_data_dict(viewId, is_admin=is_admin))
 
 
 # ---------------------------------------------------------------------------
@@ -1205,8 +1258,9 @@ async def buildHarmony(request: Request, viewId: Optional[str] = Query(default=N
                 break
         SESSIONS[viewId] = SessionConfig()
 
-    showGridChecked = "checked" if getattr(cc, "show_grid", False) else ""
-    showObjectsChecked = "checked" if getattr(cc, "show_objects", True) else ""
+    session_config = SESSIONS.get(viewId)
+    showGridChecked = "checked" if (session_config and session_config.show_grid) else ""
+    showObjectsChecked = "checked" if (session_config and session_config.show_objects) else ""
 
     rendered = (
         template.replace("{viewId}", viewId)
@@ -1351,7 +1405,7 @@ def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
     return changeRow
 
 
-def buildObjectTable(viewId=None):
+def buildObjectTable(viewId=None, is_admin=False):
     cm = _get_cm()
     changeRows = []
     print(f"Structure object table for viewId: {viewId}")
@@ -1371,7 +1425,7 @@ def buildObjectTable(viewId=None):
         for group_name, oids in groups:
             group_rows = []
             color = GROUP_COLORS.get(group_name)
-            is_moveable_group = group_name == "moveable"
+            is_moveable_group = (group_name == "moveable") or is_admin
             for oid in oids:
                 if oid not in seen_oids:
                     for capture in cm.memory:
@@ -1403,7 +1457,12 @@ def buildObjectTable(viewId=None):
     for capture in cm.memory:
         if capture.oid not in seen_oids:
             selectable_rows.append(
-                captureToChangeRow(capture, selectable_color, viewId=viewId)
+                captureToChangeRow(
+                    capture,
+                    selectable_color,
+                    is_moveable=is_admin,
+                    viewId=viewId,
+                )
             )
             seen_oids.add(capture.oid)
 
@@ -1411,7 +1470,7 @@ def buildObjectTable(viewId=None):
         changeRows.append(
             f'<details id="category-selectable" class="object-category-details" open style="border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; padding: 6px 10px; background: rgba(255, 255, 255, 0.03); text-align: left;">'
             f'  <summary style="cursor: pointer; user-select: none; font-size: 1.15rem; font-weight: 600; outline: none; margin-bottom: 0; color: #ffca28; padding: 4px 0;">'
-            f'    <span style="margin-left: 4px;">Selectable</span>'
+                    f'    <span style="margin-left: 4px;">Selectable</span>'
             f"  </summary>"
             f'  <div class="category-content" style="padding-top: 8px;">'
             f"    {' '.join(selectable_rows)}"
@@ -1457,8 +1516,9 @@ def buildObjectTable(viewId=None):
 
 
 @harmony.get("/objects")
-def getObjectTable(viewId: Optional[str] = Query(default=None)):
-    return HTMLResponse(buildObjectTable(viewId))
+def getObjectTable(request: Request, viewId: Optional[str] = Query(default=None)):
+    is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
+    return HTMLResponse(buildObjectTable(viewId, is_admin=is_admin))
 
 
 def getInteractor():
@@ -1523,6 +1583,8 @@ def updateObjectSettings(request: Request, objectId: str, objectName: str = Form
         with DATA_LOCK:
             cap.oid = new_name
             for sid, sess in SESSIONS.items():
+                if sess.selected_oid == objectId:
+                    sess.selected_oid = new_name
                 for lst in [
                     sess.moveable,
                     sess.selectable,
@@ -1534,7 +1596,7 @@ def updateObjectSettings(request: Request, objectId: str, objectName: str = Form
                     if objectId in lst:
                         lst[lst.index(objectId)] = new_name
 
-    return HTMLResponse(buildObjectTable(viewId))
+    return HTMLResponse(buildObjectTable(viewId, is_admin=is_admin))
 
 
 @harmony.delete("/objects/{objectId}")
@@ -1565,7 +1627,7 @@ def deleteObjectSettings(request: Request, objectId: str):
                 if objectId in lst:
                     lst.remove(objectId)
 
-    return HTMLResponse(buildObjectTable(viewId))
+    return HTMLResponse(buildObjectTable(viewId, is_admin=is_admin))
 
 
 def buildObjectSettings(cap, objType=None):
@@ -1631,7 +1693,7 @@ def buildObjectFactory(request: Request, viewId: str):
     """)
 
 
-def _render_factory_error(viewId, error_message, axials):
+def _render_factory_error(viewId, error_message, axials, is_admin=False):
     cells_display = ", ".join(str(c) for c in axials) if axials else "(none)"
     cell_count = len(axials)
     html_content = interactor_template.format(
@@ -1654,7 +1716,7 @@ def _render_factory_error(viewId, error_message, axials):
         <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
         """,
     )
-    html_content += _get_canvas_update_script(viewId)
+    html_content += _get_canvas_update_script(viewId, is_admin=is_admin)
     return HTMLResponse(html_content)
 
 
@@ -1670,9 +1732,10 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
     if not axials:
         return Response("No cells selected", status_code=400)
 
+    is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
     # 1. Validation: Don't allow empty object name
     if not objectName:
-        return _render_factory_error(viewId, "Object name cannot be empty.", axials)
+        return _render_factory_error(viewId, "Object name cannot be empty.", axials, is_admin=is_admin)
 
     # 2. Validation: Don't allow overwriting existing object name
     if any(mem.oid.lower() == objectName.lower() for mem in cm.memory):
@@ -1680,6 +1743,7 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
             viewId,
             f"Object name <strong>{objectName}</strong> already exists. Please choose a unique name.",
             axials,
+            is_admin=is_admin,
         )
 
     # 3. Validation: Don't allow overlapping cells with existing objects
@@ -1702,6 +1766,7 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
             viewId,
             f"Selected cells overlap with an existing object at coordinates: {overlapping_str}.",
             axials,
+            is_admin=is_admin,
         )
 
     if len(axials) == 1:
@@ -1722,7 +1787,7 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
         <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="/harmony/object_factory/{viewId}" hx-target="#interactor">
         """,
     )
-    html_content += _get_canvas_update_script(viewId)
+    html_content += _get_canvas_update_script(viewId, is_admin=is_admin)
     return HTMLResponse(html_content)
 
 
@@ -1742,7 +1807,7 @@ def deleteObject(request: Request, viewId: str):
     if mem:
         cm.memory.remove(mem)
     SESSIONS[viewId].selection = CellSelection()
-    return HTMLResponse("Success" + _get_canvas_update_script(viewId))
+    return HTMLResponse("Success" + _get_canvas_update_script(viewId, is_admin=True))
 
 
 # ---------------------------------------------------------------------------
@@ -1766,7 +1831,8 @@ def moveObjectDefinition(request: Request, oid: str, viewId: str):
     except Exception as e:
         return Response("500", status_code=500)
 
-    if oid not in session.moveable:
+    is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
+    if not is_admin and oid not in session.moveable:
         return Response("403", status_code=403)
 
     # Find the object and compute its constituent cells.
@@ -1794,7 +1860,7 @@ def moveObjectDefinition(request: Request, oid: str, viewId: str):
         cm.memory.remove(existing)
         cm.commitChanges(trackedObject)
         SESSIONS[viewId].selection = CellSelection()
-    return HTMLResponse("Success" + _get_canvas_update_script(viewId))
+    return HTMLResponse("Success" + _get_canvas_update_script(viewId, is_admin=is_admin))
 
 
 # ---------------------------------------------------------------------------
@@ -1803,12 +1869,13 @@ def moveObjectDefinition(request: Request, oid: str, viewId: str):
 
 
 @harmony.get("/clear_pixel/{viewId}")
-def clearPixel(viewId: str):
+def clearPixel(request: Request, viewId: str):
+    is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
     if viewId in SESSIONS:
         with DATA_LOCK:
             SESSIONS[viewId].selection = CellSelection()
             SESSIONS[viewId].selected_oid = None
-    return HTMLResponse(_get_canvas_update_script(viewId))
+    return HTMLResponse(_get_canvas_update_script(viewId, is_admin=is_admin))
 
 
 @harmony.post("/select_pixel")
@@ -2078,7 +2145,7 @@ def render_interactor(request, viewId, axial_coord):
     """
 
     html_content = interactor_template.format(info=info_html, actions=actions_html)
-    html_content += _get_canvas_update_script(viewId)
+    html_content += _get_canvas_update_script(viewId, is_admin=is_admin)
     return HTMLResponse(html_content)
 
 

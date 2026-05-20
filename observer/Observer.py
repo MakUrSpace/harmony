@@ -8,6 +8,8 @@
 # In[1]:
 
 
+import os
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay"
 import asyncio, nest_asyncio
 import json
 import cv2
@@ -513,6 +515,13 @@ class RTSPCamera(RemoteCamera):
         user, pw = self.auth
         return f"rtsp://{user}:{pw}@{self.address}"
 
+    @property
+    def mostRecentFrame(self):
+        with self._lock:
+            if self._latest_frame is not None:
+                return self._latest_frame
+        return self.imageBuffer[0]
+
     # ---- internal runtime state (not part of init) ----
     _cap_thread: threading.Thread = None
     _stop_evt: threading.Event = threading.Event()
@@ -589,9 +598,31 @@ class RTSPCamera(RemoteCamera):
                     cap = self._open_cap()
                     continue
 
-                ok, frame = cap.read()
+                # Discard buffered/backlog frames using a fast grab loop
+                while True:
+                    grab_start = time()
+                    ok = cap.grab()
+                    if not ok:
+                        break
+                    grab_duration = time() - grab_start
+                    # If it took more than 3ms to grab, it blocked waiting for the next fresh camera frame.
+                    # This means we successfully emptied the buffer!
+                    if grab_duration > 0.003:
+                        break
+
+                if not ok:
+                    # If grabbing failed, we handle reconnect
+                    if time() - last_ok > 2.0:
+                        cap.release()
+                        sleep(0.25)
+                        cap = self._open_cap()
+                        last_ok = time()
+                    else:
+                        sleep(0.01)
+                    continue
+
+                ok, frame = cap.retrieve()
                 if not ok or frame is None or not frame.size:
-                    # If we fail for a while, reopen the stream
                     if time() - last_ok > 2.0:
                         cap.release()
                         sleep(0.25)

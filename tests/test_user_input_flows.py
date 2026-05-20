@@ -368,10 +368,14 @@ class TestMoveRequest:
         r = harmony_client.get(f"/harmony/request_move/Mover/{view_id}")
         assert r.status_code == 200
 
-    def test_move_object_not_moveable(self, harmony_client):
+    def test_move_object_not_moveable(self, harmony_app):
+        from fastapi.testclient import TestClient
         import harmony.harmonyServer as hs
         from harmony.harmonyServer import SessionConfig, CellSelection
 
+        # Use the user app — users without moveable permission should get 403
+        user_app = hs.create_harmony_app(template_name="HarmonyUser.html")
+        uc = TestClient(user_app)
         view_id = "move2"
         _setup_session(hs, view_id, moveable=[])
         hs.SESSIONS[view_id].selection = CellSelection(
@@ -381,7 +385,7 @@ class TestMoveRequest:
         hs._cm.findObject.side_effect = (
             lambda oid: obj if oid == "ImmovableObj" else None
         )
-        r = harmony_client.get(f"/harmony/request_move/ImmovableObj/{view_id}")
+        r = uc.get(f"/harmony/request_move/ImmovableObj/{view_id}")
         assert r.status_code == 403
 
     def test_move_object_not_found(self, harmony_client):

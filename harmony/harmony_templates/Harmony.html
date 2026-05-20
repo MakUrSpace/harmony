@@ -74,8 +74,10 @@
                         let formData = new FormData();
                         let showGrid = document.getElementById('showGridHarmony').checked;
                         let showObjects = document.getElementById('showObjectsHarmony').checked;
+                        let viewId = document.getElementById('viewId').value;
                         formData.append('show_grid', showGrid);
                         formData.append('show_objects', showObjects);
+                        formData.append('viewId', viewId);
                         fetch('{harmonyURL}set_overlays', { method: 'POST', body: formData });
                         
                         // Instead of hiding the canvas, re-render it so that

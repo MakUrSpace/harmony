@@ -884,5 +884,472 @@ class TestHarmonyServer(unittest.TestCase):
         self.assertIn("localStorage.setItem('collapse-'", html)
 
 
+
+class TestCameraImageUpdates(unittest.TestCase):
+    """Verify that camera images update when the underlying frame changes.
+
+    These tests exercise render_camera() directly to confirm:
+    - A new frame produces different JPEG bytes than the previous frame.
+    - A None frame returns None (no crash, no stale data).
+    - An unknown camera name returns None gracefully.
+    - The /camWithChanges streaming endpoint responds with multipart content.
+    """
+
+    def _make_cc(self, frame=None):
+        """Return a minimal mock cc with one camera."""
+        import numpy as np
+
+        cc = mock.MagicMock()
+        cam = mock.MagicMock()
+        cam.mostRecentFrame = (
+            frame if frame is not None else np.zeros((480, 640, 3), dtype=np.uint8)
+        )
+        cam.activeZoneBoundingBox = (0, 0, 640, 480)
+        cam.cropToActiveZone = mock.MagicMock(side_effect=lambda f: f)
+        cc.cameras = {"Camera 0": cam}
+        cc.show_grid = False
+        cc.rsc = None  # disable grid overlay path
+        return cc, cam
+
+    # ------------------------------------------------------------------
+    # render_camera unit tests
+    # ------------------------------------------------------------------
+
+    def test_render_camera_returns_jpeg_bytes(self):
+        """render_camera should return non-empty bytes for a valid frame."""
+        import numpy as np
+
+        cc, cam = self._make_cc(frame=np.zeros((480, 640, 3), dtype=np.uint8))
+
+        with mock.patch.object(harmonyServer, "cv2") as mock_cv2:
+            mock_cv2.imencode.return_value = (True, np.frombuffer(b"JPEG_FRAME_A", dtype=np.uint8))
+            mock_cv2.resize.return_value = cam.mostRecentFrame
+            mock_cv2.addWeighted = mock.MagicMock()
+
+            result = harmonyServer.render_camera(cc, "Camera 0")
+
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, bytes)
+        self.assertGreater(len(result), 0)
+
+    def test_render_camera_changes_when_frame_changes(self):
+        """render_camera output must differ when mostRecentFrame changes.
+
+        This is the core regression test: if render_camera caches stale data
+        and ignores frame updates, the two results would be identical.
+        """
+        import numpy as np
+
+        cc, cam = self._make_cc()
+
+        frame_a = np.zeros((480, 640, 3), dtype=np.uint8)   # all-black
+        frame_b = np.full((480, 640, 3), 128, dtype=np.uint8)  # mid-gray
+
+        results = []
+        for frame_content, jpeg_bytes in [(frame_a, b"JPEG_FRAME_A"), (frame_b, b"JPEG_FRAME_B")]:
+            cam.mostRecentFrame = frame_content
+            cam.cropToActiveZone.side_effect = lambda f: f
+
+            with mock.patch.object(harmonyServer, "cv2") as mock_cv2:
+                mock_cv2.imencode.return_value = (
+                    True,
+                    np.frombuffer(jpeg_bytes, dtype=np.uint8),
+                )
+                mock_cv2.resize.return_value = frame_content
+                mock_cv2.addWeighted = mock.MagicMock()
+
+                results.append(harmonyServer.render_camera(cc, "Camera 0"))
+
+        self.assertIsNotNone(results[0])
+        self.assertIsNotNone(results[1])
+        self.assertNotEqual(
+            results[0],
+            results[1],
+            "render_camera returned identical bytes for two different frames — camera is not updating",
+        )
+
+    def test_render_camera_none_frame_returns_none(self):
+        """render_camera must return None when mostRecentFrame is None."""
+        cc, cam = self._make_cc()
+        cam.mostRecentFrame = None  # simulate camera not yet ready
+
+        result = harmonyServer.render_camera(cc, "Camera 0")
+        self.assertIsNone(result)
+
+    def test_render_camera_unknown_camera_returns_none(self):
+        """render_camera must return None gracefully for a missing camera name."""
+        cc, _ = self._make_cc()
+
+        result = harmonyServer.render_camera(cc, "NonExistentCamera")
+        self.assertIsNone(result)
+
+    def test_render_camera_encode_failure_returns_none(self):
+        """If cv2.imencode fails, render_camera must not crash and must return None."""
+        import numpy as np
+
+        cc, cam = self._make_cc(frame=np.zeros((480, 640, 3), dtype=np.uint8))
+
+        with mock.patch.object(harmonyServer, "cv2") as mock_cv2:
+            mock_cv2.imencode.return_value = (False, None)   # encode failure
+            mock_cv2.resize.return_value = cam.mostRecentFrame
+
+            # Should not raise; any exception is caught and None returned
+            result = harmonyServer.render_camera(cc, "Camera 0")
+
+        # result may be None or raise AttributeError on .tobytes() — either way no unhandled crash
+        # The try/except in render_camera should catch it and return None
+        self.assertIsNone(result)
+
+    # ------------------------------------------------------------------
+    # /camWithChanges streaming endpoint
+    # ------------------------------------------------------------------
+
+    def test_camwithchanges_endpoint_returns_multipart_stream(self):
+        """GET /camWithChanges/{camName}/{viewId} must respond 200 with multipart content-type."""
+        from fastapi.testclient import TestClient
+
+        def _fake_broadcaster(*args, **kwargs):
+            broadcaster = mock.MagicMock()
+            broadcaster.subscribe.side_effect = mock_gen
+            return broadcaster
+
+        patchers = [
+            mock.patch.object(harmonyServer, "get_broadcaster", side_effect=_fake_broadcaster),
+            mock.patch("harmony.harmonyServer.HexCaptureConfiguration"),
+        ]
+        started = [p.start() for p in patchers]
+        try:
+            app = harmonyServer.create_harmony_app()
+            client = TestClient(app)
+            resp = client.get("/harmony/camWithChanges/Camera 0/test_view")
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn("multipart/x-mixed-replace", resp.headers["content-type"])
+        finally:
+            for p in patchers:
+                p.stop()
+
+    def test_camwithchanges_virtualmap_uses_minimap_broadcaster(self):
+        """VirtualMap camera name must route to the minimap broadcaster."""
+        from fastapi.testclient import TestClient
+
+        broadcaster_keys = []
+
+        def _capture_broadcaster(key, render_func):
+            broadcaster_keys.append(key)
+            b = mock.MagicMock()
+            b.subscribe.side_effect = mock_gen
+            return b
+
+        patchers = [
+            mock.patch.object(harmonyServer, "get_broadcaster", side_effect=_capture_broadcaster),
+            mock.patch("harmony.harmonyServer.HexCaptureConfiguration"),
+        ]
+        started = [p.start() for p in patchers]
+        try:
+            app = harmonyServer.create_harmony_app()
+            client = TestClient(app)
+            client.get("/harmony/camWithChanges/VirtualMap/vm_view")
+            self.assertTrue(
+                any("VirtualMap" in k for k in broadcaster_keys),
+                f"Expected a VirtualMap broadcaster key, got: {broadcaster_keys}",
+            )
+        finally:
+            for p in patchers:
+                p.stop()
+
+
+
+class TestSaveRestoreGameState(unittest.TestCase):
+    """Verify that game state is faithfully persisted and restored.
+
+    Tests cover:
+    - Round-trip: objects and sessions survive a save → load cycle.
+    - Memory replacement: cm.memory is fully replaced on load.
+    - Session merging: existing sessions are preserved and saved ones merged in.
+    - Missing file: load of a non-existent file returns an error, no crash.
+    - Admin-only guard: user clients receive 403 on both save and load.
+    - HTTP endpoints: POST /save and POST /load route correctly.
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _make_client(self):
+        """Return a fresh admin TestClient with generator mocks pre-applied."""
+        from fastapi.testclient import TestClient
+
+        patchers = [
+            mock.patch.object(harmonyServer, "get_broadcaster"),
+            mock.patch("harmony.harmonyServer.HexCaptureConfiguration"),
+        ]
+        started = [p.start() for p in patchers]
+        app = harmonyServer.create_harmony_app()
+        client = TestClient(app)
+        return client, patchers, started
+
+    def _teardown(self, patchers, started):
+        for p in patchers:
+            p.stop()
+
+    # ------------------------------------------------------------------
+    # _save_harmony / _load_harmony unit tests (bypass HTTP)
+    # ------------------------------------------------------------------
+
+    def test_save_writes_pickle_with_memory_and_sessions(self):
+        """_save_harmony must write a pickle containing memory and sessions."""
+        import io, pickle as pkl
+        from harmony.harmonyServer import SessionConfig
+
+        obj_a = mock.MagicMock()
+        obj_a.oid = "Alpha"
+        harmonyServer._cm.memory = [obj_a]
+        harmonyServer.SESSIONS["sess1"] = SessionConfig(allies=["Alpha"])
+
+        written = {}
+
+        def fake_open(path, mode="r", **kw):
+            buf = io.BytesIO()
+            written["buf"] = buf
+            written["path"] = path
+            m = mock.MagicMock()
+            m.__enter__ = mock.MagicMock(return_value=buf)
+            m.__exit__ = mock.MagicMock(return_value=False)
+            return m
+
+        with (
+            mock.patch("builtins.open", side_effect=fake_open),
+            mock.patch.object(harmonyServer._cm, "saveGame"),
+            mock.patch("harmony.harmonyServer.pickle.dump") as mock_dump,
+        ):
+            resp = harmonyServer._save_harmony("test_save_unit")
+
+        self.assertIn("saved", resp.body.decode().lower())
+        mock_dump.assert_called_once()
+        save_data = mock_dump.call_args[0][0]
+        self.assertIn("memory", save_data)
+        self.assertIn("sessions", save_data)
+        self.assertIn(obj_a, save_data["memory"])
+
+    def test_load_restores_memory_from_pickle(self):
+        """_load_harmony must replace cm.memory with objects from the pickle."""
+        import pickle as pkl
+        from harmony.harmonyServer import SessionConfig
+
+        obj_b = mock.MagicMock()
+        obj_b.oid = "Bravo"
+        save_data = {"memory": [obj_b], "sessions": {}}
+
+        harmonyServer._cm.memory = []  # start empty
+
+        with (
+            mock.patch("os.path.exists", return_value=True),
+            mock.patch("builtins.open", mock.mock_open()),
+            mock.patch("harmony.harmonyServer.pickle.load", return_value=save_data),
+        ):
+            resp = harmonyServer._load_harmony("test_load_unit")
+
+        self.assertIn("loaded", resp.body.decode().lower())
+        self.assertIn(obj_b, harmonyServer._cm.memory)
+
+    def test_load_merges_sessions_without_losing_existing(self):
+        """Loaded sessions must be merged: existing sessions stay, saved ones added."""
+        import pickle as pkl
+        from harmony.harmonyServer import SessionConfig
+
+        # Pre-existing session that should survive the load
+        harmonyServer.SESSIONS["live_session"] = SessionConfig(allies=["X"])
+
+        saved_session = SessionConfig(enemies=["Y"])
+        save_data = {"memory": [], "sessions": {"restored_session": saved_session}}
+
+        with (
+            mock.patch("os.path.exists", return_value=True),
+            mock.patch("builtins.open", mock.mock_open()),
+            mock.patch("harmony.harmonyServer.pickle.load", return_value=save_data),
+        ):
+            harmonyServer._load_harmony("test_merge")
+
+        # Both sessions must now exist
+        self.assertIn("live_session", harmonyServer.SESSIONS)
+        self.assertIn("restored_session", harmonyServer.SESSIONS)
+        self.assertEqual(harmonyServer.SESSIONS["restored_session"].enemies, ["Y"])
+
+    def test_load_missing_file_returns_error_response(self):
+        """_load_harmony on a non-existent file must return an error, not crash."""
+        with mock.patch("os.path.exists", return_value=False):
+            resp = harmonyServer._load_harmony("definitely_not_there")
+
+        body = resp.body.decode().lower()
+        self.assertTrue(
+            "not found" in body or "error" in body,
+            f"Expected error message, got: {body}",
+        )
+
+    def test_full_round_trip_save_and_load(self):
+        """Objects present at save time must be present after load."""
+        import copy, pickle as pkl
+        from harmony.harmonyServer import SessionConfig
+
+        obj_c = mock.MagicMock()
+        obj_c.oid = "Charlie"
+        harmonyServer._cm.memory = [obj_c]
+        harmonyServer.SESSIONS["round_trip"] = SessionConfig(moveable=["Charlie"])
+
+        # --- SAVE: capture what gets pickled ---
+        # Use a deepcopy so the SESSIONS reference in the captured data is independent
+        # of the live SESSIONS dict (which we wipe before the load step).
+        captured_save_data = {}
+
+        def fake_dump(data, fh):
+            captured_save_data.update({
+                "memory": list(data["memory"]),
+                "sessions": copy.deepcopy(data["sessions"]),
+            })
+
+        with (
+            mock.patch("builtins.open", mock.mock_open()),
+            mock.patch.object(harmonyServer._cm, "saveGame"),
+            mock.patch("harmony.harmonyServer.pickle.dump", side_effect=fake_dump),
+        ):
+            save_resp = harmonyServer._save_harmony("round_trip_game")
+
+        self.assertIn("saved", save_resp.body.decode().lower())
+        self.assertIn("memory", captured_save_data)
+        self.assertIn("round_trip", captured_save_data["sessions"])
+
+        # --- LOAD: restore from the captured data ---
+        harmonyServer._cm.memory = []  # wipe state
+        harmonyServer.SESSIONS.pop("round_trip", None)
+        # Confirm it's gone before load
+        self.assertNotIn("round_trip", harmonyServer.SESSIONS)
+
+        with (
+            mock.patch("os.path.exists", return_value=True),
+            mock.patch("builtins.open", mock.mock_open()),
+            mock.patch("harmony.harmonyServer.pickle.load", return_value=captured_save_data),
+        ):
+            load_resp = harmonyServer._load_harmony("round_trip_game")
+
+        self.assertIn("loaded", load_resp.body.decode().lower())
+        loaded_oids = [o.oid for o in harmonyServer._cm.memory]
+        self.assertIn("Charlie", loaded_oids)
+        # Session must be restored with its moveable list intact
+        self.assertIn("round_trip", harmonyServer.SESSIONS)
+        self.assertEqual(harmonyServer.SESSIONS["round_trip"].moveable, ["Charlie"])
+
+    # ------------------------------------------------------------------
+    # Admin-only guards
+    # ------------------------------------------------------------------
+
+    def test_save_forbidden_for_user(self):
+        """POST /save must return 403 for user (non-admin) apps."""
+        from fastapi.testclient import TestClient
+
+        patchers = [
+            mock.patch.object(harmonyServer, "get_broadcaster"),
+            mock.patch("harmony.harmonyServer.HexCaptureConfiguration"),
+        ]
+        started = [p.start() for p in patchers]
+        try:
+            user_app = harmonyServer.create_harmony_app(template_name="HarmonyUser.html")
+            uc = TestClient(user_app)
+            resp = uc.post("/harmony/save", data={"game_name": "test"})
+            self.assertEqual(resp.status_code, 403)
+        finally:
+            for p in patchers:
+                p.stop()
+
+    def test_load_forbidden_for_user(self):
+        """POST /load must return 403 for user (non-admin) apps."""
+        from fastapi.testclient import TestClient
+
+        patchers = [
+            mock.patch.object(harmonyServer, "get_broadcaster"),
+            mock.patch("harmony.harmonyServer.HexCaptureConfiguration"),
+        ]
+        started = [p.start() for p in patchers]
+        try:
+            user_app = harmonyServer.create_harmony_app(template_name="HarmonyUser.html")
+            uc = TestClient(user_app)
+            resp = uc.post("/harmony/load", data={"game_name": "test"})
+            self.assertEqual(resp.status_code, 403)
+        finally:
+            for p in patchers:
+                p.stop()
+
+    # ------------------------------------------------------------------
+    # HTTP endpoint routing
+    # ------------------------------------------------------------------
+
+    def test_post_save_endpoint_calls_save_harmony(self):
+        """POST /harmony/save must delegate to _save_harmony and return 200."""
+        client, patchers, started = self._make_client()
+        try:
+            with (
+                mock.patch.object(
+                    harmonyServer, "_save_harmony",
+                    return_value=mock.MagicMock(body=b"Game saved as mygame"),
+                ) as mock_save,
+            ):
+                resp = client.post("/harmony/save", data={"game_name": "mygame"})
+
+            self.assertEqual(resp.status_code, 200)
+            mock_save.assert_called_once_with("mygame")
+        finally:
+            self._teardown(patchers, started)
+
+    def test_post_load_endpoint_calls_load_harmony(self):
+        """POST /harmony/load must delegate to _load_harmony and return 200."""
+        client, patchers, started = self._make_client()
+        try:
+            with (
+                mock.patch.object(
+                    harmonyServer, "_load_harmony",
+                    return_value=mock.MagicMock(body=b"Game mygame loaded. Objects: 0"),
+                ) as mock_load,
+            ):
+                resp = client.post("/harmony/load", data={"game_name": "mygame"})
+
+            self.assertEqual(resp.status_code, 200)
+            mock_load.assert_called_once_with("mygame")
+        finally:
+            self._teardown(patchers, started)
+
+    def test_get_save_game_endpoint(self):
+        """GET /harmony/save_game/{name} must call _save_harmony."""
+        client, patchers, started = self._make_client()
+        try:
+            with (
+                mock.patch.object(
+                    harmonyServer, "_save_harmony",
+                    return_value=mock.MagicMock(body=b"Game saved as quicksave"),
+                ) as mock_save,
+            ):
+                resp = client.get("/harmony/save_game/quicksave")
+
+            self.assertEqual(resp.status_code, 200)
+            mock_save.assert_called_once_with("quicksave")
+        finally:
+            self._teardown(patchers, started)
+
+    def test_get_load_game_endpoint(self):
+        """GET /harmony/load_game/{name} must call _load_harmony."""
+        client, patchers, started = self._make_client()
+        try:
+            with (
+                mock.patch.object(
+                    harmonyServer, "_load_harmony",
+                    return_value=mock.MagicMock(body=b"Game quicksave loaded. Objects: 1"),
+                ) as mock_load,
+            ):
+                resp = client.get("/harmony/load_game/quicksave")
+
+            self.assertEqual(resp.status_code, 200)
+            mock_load.assert_called_once_with("quicksave")
+        finally:
+            self._teardown(patchers, started)
+
+
 if __name__ == "__main__":
     unittest.main()
