@@ -2614,17 +2614,31 @@ def start_servers():
         config = Config()
         config.bind = ["0.0.0.0:7000"]
         config.loglevel = "warning"
+        config.graceful_timeout = 3.0  # forcibly drop open connections after 3 s
 
         async def wait_for_shutdown():
             while not SHUTDOWN_EVENT.is_set():
                 await asyncio.sleep(0.1)
-        
+
         asyncio.run(serve(user_app, config, shutdown_trigger=wait_for_shutdown))
 
     t = threading.Thread(target=run_user, daemon=True)
     t.start()
 
-    # Launch admin server (blocking)
+    # Register SIGTERM so `kill <pid>` triggers the same clean shutdown as Ctrl+C
+    def _handle_sigterm(signum, frame):
+        print("SIGTERM received, initiating shutdown...")
+        SHUTDOWN_EVENT.set()
+        # Wake sleeping broadcaster subscribers immediately
+        for broadcaster in BROADCASTERS.values():
+            broadcaster.stop()
+            with broadcaster.condition:
+                broadcaster.condition.notify_all()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
+    # Launch admin server (blocking) with its own shutdown trigger
     import asyncio
     from hypercorn.config import Config
     from hypercorn.asyncio import serve
@@ -2634,15 +2648,20 @@ def start_servers():
     config = Config()
     config.bind = ["0.0.0.0:7001"]
     config.loglevel = "info"
+    config.graceful_timeout = 3.0  # forcibly drop open connections after 3 s
+
+    async def wait_for_admin_shutdown():
+        while not SHUTDOWN_EVENT.is_set():
+            await asyncio.sleep(0.1)
 
     try:
-        asyncio.run(serve(admin_app, config))
+        asyncio.run(serve(admin_app, config, shutdown_trigger=wait_for_admin_shutdown))
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:
         print("Server exit triggered, setting shutdown event.")
         SHUTDOWN_EVENT.set()
-        # Trigger cleanup for broadcasters immediately
+        # Wake all broadcaster subscribers so their generators exit promptly
         for broadcaster in BROADCASTERS.values():
             broadcaster.stop()
             with broadcaster.condition:
