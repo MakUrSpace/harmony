@@ -456,6 +456,34 @@ function handlePixelSelection(event, camNameOverride) {
         appendPixelField.value = "false";
     }
 
+    // Client-side optimistic update
+    if (window.gridPolys && window.gridPolys[finalCamName]) {
+        let clickedHex = null;
+        for (let hex of window.gridPolys[finalCamName]) {
+            if (pointInPolygon([final_x, final_y], hex.poly)) {
+                clickedHex = hex;
+                break;
+            }
+        }
+        
+        if (clickedHex) {
+            let sel = window.harmonyCanvasData.selection || {};
+            if (appendPixelField.value === "true") {
+                sel.additionalCells = sel.additionalCells || [];
+                let polyObj = {};
+                polyObj[finalCamName] = clickedHex.poly;
+                sel.additionalCells.push(polyObj);
+            } else {
+                sel.additionalCells = [];
+                let polyObj = {};
+                polyObj[finalCamName] = clickedHex.poly;
+                sel.firstCell = polyObj;
+            }
+            window.harmonyCanvasData.selection = sel;
+            if (window.harmonyEditor) window.harmonyEditor.render();
+        }
+    }
+
     const selectPixelForm = document.getElementById(`selectPixelForm`)
 
     // Temporarily set the selectedCamera form field to the clicked camera
@@ -463,7 +491,13 @@ function handlePixelSelection(event, camNameOverride) {
     selectedCameraInput.value = finalCamName;
 
     pixelField.value = JSON.stringify([~~final_x, ~~final_y])
-    selectPixelForm.requestSubmit()
+    
+    // Use HTMX api if available, otherwise fallback to requestSubmit
+    if (typeof htmx !== 'undefined') {
+        htmx.trigger(selectPixelForm, 'submit');
+    } else {
+        selectPixelForm.requestSubmit();
+    }
 
     // Restore if needed
     if (camNameOverride) {
@@ -471,6 +505,31 @@ function handlePixelSelection(event, camNameOverride) {
     } else if (camName === 'All') {
         selectedCameraInput.value = 'All';
     }
+}
+
+function pointInPolygon(point, vs) {
+    var x = point[0], y = point[1];
+    var inside = false;
+    for (var i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        var xi = vs[i][0], yi = vs[i][1];
+        var xj = vs[j][0], yj = vs[j][1];
+        var intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+window.gridPolys = window.gridPolys || {};
+
+function fetchGridPolys(camName) {
+    if (!camName || camName === "All") return;
+    if (window.gridPolys[camName]) return;
+    fetch(`/harmony/grid_polys/${camName}`)
+        .then(r => r.json())
+        .then(data => {
+            window.gridPolys[camName] = data;
+        })
+        .catch(e => console.error("Failed to fetch grid polys", e));
 }
 
 // Initialization function to be called from the HTML
@@ -498,6 +557,8 @@ function initHarmonyCanvas() {
     // 'gameWorldClick' needs to update 'canvasData.cameraName'.
     // So let's attach it to the window or return it.
     window.harmonyCanvasData = canvasData;
+    
+    fetchGridPolys(canvasData.cameraName);
 }
 
 function gameWorldClick(camNum) {

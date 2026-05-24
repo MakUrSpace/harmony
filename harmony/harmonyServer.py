@@ -267,23 +267,22 @@ def render_camera(cc, camName, viewId=None):
         else:
             show_grid = getattr(cc, "show_grid", False)
 
-        # Check if show_grid is enabled and grid is pending
-        if (
-            show_grid
-            and hasattr(cc, "rsc")
-            and cc.rsc is not None
-        ):
+        # Always eagerly generate/fetch the grid overlay
+        grid_overlay = None
+        if hasattr(cc, "rsc") and cc.rsc is not None:
             try:
                 grid_overlay = draw_dynamic_grid(cc, camName)
-                if isinstance(grid_overlay, str) and grid_overlay == "PENDING":
-                    target_w, target_h = perspective_res
-                    pending_img = make_pending_image(target_w, target_h)
-                    ret, encoded = cv2.imencode(
-                        ".jpg", pending_img, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
-                    )
-                    return encoded.tobytes()
             except Exception as e:
                 print(f"Grid overlay check error: {e}")
+
+        # Check if show_grid is enabled and grid is pending
+        if show_grid and isinstance(grid_overlay, str) and grid_overlay == "PENDING":
+            target_w, target_h = perspective_res
+            pending_img = make_pending_image(target_w, target_h)
+            ret, encoded = cv2.imencode(
+                ".jpg", pending_img, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+            )
+            return encoded.tobytes()
 
         x, y, w, h = cam.activeZoneBoundingBox
 
@@ -293,17 +292,11 @@ def render_camera(cc, camName, viewId=None):
 
         masked = frame.copy()
 
-        if hasattr(cc, "rsc") and cc.rsc is not None:
-            if show_grid:
-                try:
-                    grid_overlay = draw_dynamic_grid(cc, camName)
-                    if grid_overlay is not None and not (isinstance(grid_overlay, str) and grid_overlay == "PENDING"):
-                        if grid_overlay.shape[:2] == masked.shape[:2]:
-                            cv2.addWeighted(
-                                grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
-                            )
-                except Exception as e:
-                    print(f"Grid blend error: {e}")
+        if show_grid and grid_overlay is not None and not isinstance(grid_overlay, str):
+            if grid_overlay.shape[:2] == masked.shape[:2]:
+                cv2.addWeighted(
+                    grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
+                )
 
         masked = cam.cropToActiveZone(masked)
 
@@ -506,27 +499,26 @@ def render_composite_all(cc, cm, viewId=None):
             x, y, w, h = cam.activeZoneBoundingBox
             masked = cam.mostRecentFrame.copy()
 
-            # Draw hex grid if show_grid is true
-            if (
-                show_grid
-                and hasattr(cc, "rsc")
-                and cc.rsc is not None
-            ):
+            # Always eagerly generate/fetch the grid overlay
+            grid_overlay = None
+            if hasattr(cc, "rsc") and cc.rsc is not None:
                 try:
                     grid_overlay = draw_dynamic_grid(cc, name)
-                    if isinstance(grid_overlay, str) and grid_overlay == "PENDING":
-                        pending_img = make_pending_image(
-                            960, 540, text=f"{name}: Calibrating..."
-                        )
-                        sub_frames.append(pending_img)
-                        continue
-                    elif grid_overlay is not None:
-                        if grid_overlay.shape[:2] == masked.shape[:2]:
-                            cv2.addWeighted(
-                                grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
-                            )
                 except Exception as e:
-                    print(f"Composite grid blend error for {name}: {e}")
+                    print(f"Composite grid generation error for {name}: {e}")
+
+            # Draw hex grid if show_grid is true
+            if show_grid and isinstance(grid_overlay, str) and grid_overlay == "PENDING":
+                pending_img = make_pending_image(
+                    960, 540, text=f"{name}: Calibrating..."
+                )
+                sub_frames.append(pending_img)
+                continue
+            elif show_grid and grid_overlay is not None and not isinstance(grid_overlay, str):
+                if grid_overlay.shape[:2] == masked.shape[:2]:
+                    cv2.addWeighted(
+                        grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
+                    )
 
             masked = cam.cropToActiveZone(masked)
             cropped = masked[y : y + h, x : x + w]
@@ -1867,6 +1859,57 @@ def moveObjectDefinition(request: Request, oid: str, viewId: str):
 # Pixel selection
 # ---------------------------------------------------------------------------
 
+@harmony.get("/grid_polys/{camName}")
+def getGridPolys(request: Request, camName: str):
+    cc = _get_cc()
+    if not hasattr(cc, "rsc") or cc.rsc is None:
+        return JSONResponse({})
+    
+    if camName not in cc.cameras:
+        return JSONResponse({})
+    
+    cam = cc.cameras[camName]
+    h, w = cam.mostRecentFrame.shape[:2] if cam.mostRecentFrame is not None else (1080, 1920)
+
+    # Convert to Axial to find range
+    qs = []
+    rs = []
+    if hasattr(cc.rsc, "realCamSpacePairs"):
+        for cName, coordPairs in cc.rsc.realCamSpacePairs:
+            if cName == camName and len(coordPairs) > 2:
+                for pt in coordPairs[2]:
+                    if hasattr(pt, "__iter__") and len(pt) >= 2:
+                        qs.append(int(pt[0]))
+                        rs.append(int(pt[1]))
+    if qs and rs:
+        min_q, max_q = int(min(qs)) - 15, int(max(qs)) + 15
+        min_r, max_r = int(min(rs)) - 10, int(max(rs)) + 10
+    else:
+        min_q, max_q = -5, 5
+        min_r, max_r = -5, 5
+
+    pad = 2
+    hex_polys = []
+
+    for q in range(min_q - pad, max_q + pad + 1):
+        for r in range(min_r - pad, max_r + pad + 1):
+            cx, cy = cc.axial_to_pixel(q, r)
+            converter = cc.rsc.closestConverterToRealCoord(camName, (cx, cy))
+            ccx, ccy = converter.convertRealToCameraSpace((cx, cy))
+            
+            padding = max(150.0, float(cc.hex.size) * 3.0) if hasattr(cc, "hex") else 150.0
+            if ccx < -padding or ccx > w + padding or ccy < -padding or ccy > h + padding:
+                continue
+            
+            poly_cam = cc.cam_hex_at_axial(camName, q, r)
+            hex_polys.append({
+                "q": q,
+                "r": r,
+                "poly": poly_cam.reshape(-1, 2).tolist()
+            })
+
+    return JSONResponse(hex_polys)
+
 
 @harmony.get("/clear_pixel/{viewId}")
 def clearPixel(request: Request, viewId: str):
@@ -2021,6 +2064,81 @@ def selectUnitInTable(request: Request, oid: str, viewId: str):
     return render_interactor(request, viewId, origin_cell)
 
 
+@harmony.post("/draw_region/{viewId}")
+def drawRegion(request: Request, viewId: str, radius: int = Form(1), region_type: str = Form(...)):
+    session = SESSIONS.get(viewId)
+    if not session or not session.selection.firstCell:
+        return HTMLResponse("No cell selected")
+    
+    q0, r0 = session.selection.firstCell
+    radius = max(1, min(20, radius))
+    cells = []
+    
+    if region_type == "Burst":
+        for dq in range(-radius, radius + 1):
+            for dr in range(max(-radius, -dq - radius), min(radius, -dq + radius) + 1):
+                if dq == 0 and dr == 0:
+                    continue
+                cells.append((q0 + dq, r0 + dr))
+    elif region_type == "Cone":
+        if not session.selection.additionalCells:
+            return HTMLResponse("Select an additional cell to indicate direction")
+        q1, r1 = session.selection.additionalCells[0]
+        dq1, dr1 = q1 - q0, r1 - r0
+        if abs(dq1) > 1 or abs(dr1) > 1 or (dq1 == 0 and dr1 == 0):
+            dist = max(abs(dq1), abs(dr1), abs(dq1+dr1))
+            if dist > 0:
+                dq1, dr1 = int(round(dq1/dist)), int(round(dr1/dist))
+            else:
+                dq1, dr1 = 1, 0
+        
+        # d2 is clockwise adjacent direction
+        dq2, dr2 = -dr1, dq1 + dr1
+        
+        for k in range(1, radius + 1):
+            for i in range(k + 1):
+                q = q0 + i * dq1 + (k - i) * dq2
+                r = r0 + i * dr1 + (k - i) * dr2
+                cells.append((q, r))
+
+    with DATA_LOCK:
+        # Keep the first/second cells if cone, otherwise just first cell
+        if region_type == "Cone":
+            session.selection.additionalCells = [session.selection.additionalCells[0]] + [c for c in cells if c != session.selection.additionalCells[0]]
+        else:
+            session.selection.additionalCells = cells
+        SESSIONS[viewId] = session
+    
+    is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
+    return HTMLResponse(render_interactor(request, viewId, (q0, r0)).body.decode() + _get_canvas_update_script(viewId, is_admin=is_admin))
+
+@harmony.post("/rotate_object/{viewId}/{objectId}")
+def rotateObject(request: Request, viewId: str, objectId: str):
+    cm = _get_cm()
+    target = next((obj for obj in cm.memory if obj.oid == objectId), None)
+    if not target:
+        return HTMLResponse("Object not found")
+        
+    axials = _get_constituent_axials(target, _get_cc())
+    if len(axials) > 1:
+        q0, r0 = axials[0]
+        new_axials = [(q0, r0)]
+        for q, r in axials[1:]:
+            dq, dr = q - q0, r - r0
+            # 60 degrees clockwise
+            new_dq, new_dr = -dr, dq + dr
+            new_axials.append((q0 + new_dq, r0 + new_dr))
+            
+        with DATA_LOCK:
+            target.constituent_axials = new_axials
+            cm.commitChanges(target)
+            
+    is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
+    session = SESSIONS.get(viewId)
+    origin_cell = session.selection.firstCell if session else axials[0]
+    return HTMLResponse(render_interactor(request, viewId, origin_cell).body.decode() + _get_canvas_update_script(viewId, is_admin=is_admin))
+
+
 def render_interactor(request, viewId, axial_coord):
     """Refactored core rendering logic for the interactor panel."""
     cm = _get_cm()
@@ -2139,8 +2257,23 @@ def render_interactor(request, viewId, axial_coord):
                 </div>
             """
 
+    if first_obj and (is_admin or is_moveable):
+        axials = _get_constituent_axials(first_obj, _get_cc())
+        if len(axials) > 1:
+            actions_html += f"""
+                <input type="button" class="btn btn-warning mt-2 mb-2" value="Rotate Object" hx-post="/harmony/rotate_object/{viewId}/{first_obj.oid}" hx-target="#interactor">
+            """
+
     actions_html += f"""
         <hr>
+        <form hx-post="/harmony/draw_region/{viewId}" hx-target="#interactor" class="mb-2">
+            <div class="input-group">
+                <span class="input-group-text bg-secondary text-white border-secondary">Radius</span>
+                <input type="number" class="form-control bg-dark text-white border-secondary" name="radius" value="1" min="1" max="20" style="max-width: 80px;">
+                <input type="submit" name="region_type" class="btn btn-outline-info" value="Burst">
+                <input type="submit" name="region_type" class="btn btn-outline-info" value="Cone">
+            </div>
+        </form>
         <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
     """
 

@@ -432,6 +432,63 @@ class TestVirtualMapSelection:
         assert r.status_code == 200
         assert hs.SESSIONS[view_id].selection.firstCell == (3, 7)
 
+# ---------------------------------------------------------------------------
+# Region Drawing and Rotation
+# ---------------------------------------------------------------------------
+
+class TestRegionAndRotate:
+    def test_draw_burst(self, harmony_client):
+        import harmony.harmonyServer as hs
+        from harmony.harmonyServer import CellSelection
+        
+        view_id = "burst_test"
+        _setup_session(hs, view_id)
+        hs.SESSIONS[view_id].selection = CellSelection(firstCell=(0, 0))
+        r = harmony_client.post(
+            f"/harmony/draw_region/{view_id}",
+            data={"radius": 1, "region_type": "Burst"}
+        )
+        assert r.status_code == 200
+        # A radius 1 burst should select the 6 surrounding cells
+        assert len(hs.SESSIONS[view_id].selection.additionalCells) == 6
+        
+    def test_draw_cone(self, harmony_client):
+        import harmony.harmonyServer as hs
+        from harmony.harmonyServer import CellSelection
+        
+        view_id = "cone_test"
+        _setup_session(hs, view_id)
+        # Origin (0,0), direction cell (1,0)
+        hs.SESSIONS[view_id].selection = CellSelection(firstCell=(0, 0), additionalCells=[(1, 0)])
+        r = harmony_client.post(
+            f"/harmony/draw_region/{view_id}",
+            data={"radius": 2, "region_type": "Cone"}
+        )
+        assert r.status_code == 200
+        # Radius 2 cone with 2-3-4 pattern:
+        # Distance 1: 2 cells
+        # Distance 2: 3 cells
+        assert len(hs.SESSIONS[view_id].selection.additionalCells) == 5
+
+    def test_rotate_object(self, harmony_client):
+        import harmony.harmonyServer as hs
+        from harmony.harmonyServer import CellSelection
+        
+        obj = _mock_obj("RotObj")
+        obj.constituent_axials = [(0, 0), (1, 0)]  # Length 2 object
+        hs._cm.memory = [obj]
+        
+        view_id = "rot_test"
+        _setup_session(hs, view_id)
+        hs.SESSIONS[view_id].selection = CellSelection(firstCell=(0, 0))
+        
+        r = harmony_client.post(f"/harmony/rotate_object/{view_id}/RotObj")
+        assert r.status_code == 200
+        
+        # Original (1,0) relative to (0,0) is (1,0)
+        # Rotated 60 degrees clockwise: (-r, q+r) = (0, 1+0) = (0,1)
+        assert obj.constituent_axials == [(0, 0), (0, 1)]
+
 
 # ---------------------------------------------------------------------------
 # Toggle selection cycling

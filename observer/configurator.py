@@ -298,6 +298,8 @@ def draw_dynamic_grid(cc, camName):
                 # Use white color for grid lines, typical for overlay
                 grid_color = (255, 255, 255)
 
+                all_polys = []
+
                 for q in range(min_q - pad, max_q + pad + 1):
                     for r in range(min_r - pad, max_r + pad + 1):
                         # Quick visibility check to filter out hexes completely outside camera viewport
@@ -311,11 +313,12 @@ def draw_dynamic_grid(cc, camName):
                             continue
 
                         poly_cam = cc.cam_hex_at_axial(str(camName), q, r)
+                        all_polys.append(poly_cam)
 
-                        # Draw
-                        cv2.polylines(
-                            overlay, [poly_cam], True, grid_color, 1, cv2.LINE_AA
-                        )
+                if all_polys:
+                    cv2.polylines(
+                        overlay, all_polys, True, grid_color, 1, cv2.LINE_AA
+                    )
 
                 # Cache the result and clear from generating set
                 with cc._grid_cache_lock:
