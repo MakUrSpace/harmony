@@ -22,6 +22,10 @@ import random
 import re
 from collections import defaultdict
 
+# Suppress OpenCV FFmpeg HEVC decoding warnings
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"
+os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+
 import cv2
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -221,7 +225,8 @@ def render_minimap(cm, encode=True, viewId=None):
         )
         return encoded.tobytes()
     except Exception as e:
-        print(f"Minimap render error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -255,6 +260,7 @@ def make_pending_image(width=1920, height=1080, text="Harmony: Calibrating grid.
 
 
 def render_camera(cc, camName, viewId=None):
+    cm = _get_cm()
     try:
         cam = cc.cameras.get(camName)
         if not cam:
@@ -271,7 +277,8 @@ def render_camera(cc, camName, viewId=None):
         grid_overlay = None
         if hasattr(cc, "rsc") and cc.rsc is not None:
             try:
-                grid_overlay = draw_dynamic_grid(cc, camName)
+                if show_grid:
+                    grid_overlay = draw_dynamic_grid(cm, camName)
             except Exception as e:
                 print(f"Grid overlay check error: {e}")
 
@@ -503,7 +510,8 @@ def render_composite_all(cc, cm, viewId=None):
             grid_overlay = None
             if hasattr(cc, "rsc") and cc.rsc is not None:
                 try:
-                    grid_overlay = draw_dynamic_grid(cc, name)
+                    if getattr(cc, "show_grid", False):
+                        grid_overlay = draw_dynamic_grid(cm, name)
                 except Exception as e:
                     print(f"Composite grid generation error for {name}: {e}")
 
@@ -1865,11 +1873,14 @@ def getGridPolys(request: Request, camName: str):
     if not hasattr(cc, "rsc") or cc.rsc is None:
         return JSONResponse({})
     
-    if camName not in cc.cameras:
+    if camName != "VirtualMap" and camName not in cc.cameras:
         return JSONResponse({})
     
-    cam = cc.cameras[camName]
-    h, w = cam.mostRecentFrame.shape[:2] if cam.mostRecentFrame is not None else (1080, 1920)
+    if camName == "VirtualMap":
+        h, w = 1200, 1200
+    else:
+        cam = cc.cameras[camName]
+        h, w = cam.mostRecentFrame.shape[:2] if cam.mostRecentFrame is not None else (1080, 1920)
 
     # Convert to Axial to find range
     qs = []
@@ -1894,18 +1905,35 @@ def getGridPolys(request: Request, camName: str):
     for q in range(min_q - pad, max_q + pad + 1):
         for r in range(min_r - pad, max_r + pad + 1):
             cx, cy = cc.axial_to_pixel(q, r)
-            converter = cc.rsc.closestConverterToRealCoord(camName, (cx, cy))
-            ccx, ccy = converter.convertRealToCameraSpace((cx, cy))
+            
+            if camName == "VirtualMap":
+                ccx, ccy = cx, cy
+            else:
+                converter = cc.rsc.closestConverterToRealCoord(camName, (cx, cy))
+                ccx, ccy = converter.convertRealToCameraSpace((cx, cy))
             
             padding = max(150.0, float(cc.hex.size) * 3.0) if hasattr(cc, "hex") else 150.0
             if ccx < -padding or ccx > w + padding or ccy < -padding or ccy > h + padding:
                 continue
             
-            poly_cam = cc.cam_hex_at_axial(camName, q, r)
+            if camName == "VirtualMap":
+                raw_vm_points = cc.hex_at_axial(q, r)
+                scale_x, scale_y, off_x_base, off_y_base = get_conversion_params("VirtualMap")
+                poly_list = []
+                for raw_pt in raw_vm_points:
+                    pt = safe_point(raw_pt)
+                    scaled_x = (pt[0] - off_x_base) * scale_x
+                    scaled_y = (pt[1] - off_y_base) * scale_y
+                    poly_list.append((scaled_x, scaled_y))
+            else:
+                poly_cam = cc.cam_hex_at_axial(camName, q, r)
+                conv_params = get_conversion_params(camName)
+                poly_list = [scale_point_new(safe_point(pt), conv_params) for pt in poly_cam.reshape(-1, 2)]
+
             hex_polys.append({
                 "q": q,
                 "r": r,
-                "poly": poly_cam.reshape(-1, 2).tolist()
+                "poly": poly_list
             })
 
     return JSONResponse(hex_polys)

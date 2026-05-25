@@ -36,7 +36,7 @@
         <div class="row" style="min-width: 500px">
             <div class="container justify-content-center" align="center">
                 <h3 id="GameWorldHeader">Game World View -- {defaultCamera}</h3>
-                <form id="selectPixelForm" hx-post="{harmonyURL}select_pixel" hx-target="#interactor" hx-sync="this:queue">
+                <form id="selectPixelForm" hx-post="{harmonyURL}select_pixel" hx-target="#interactor" hx-sync="this:queue all">
                     <input type="hidden" name="selectedCamera" id="selectedCamera" value="{defaultCamera}">
                     <input type="hidden" name="selectedPixel" id="selectedPixel" value="">
                     <input type="hidden" name="appendPixel" id="appendPixel" value="false">

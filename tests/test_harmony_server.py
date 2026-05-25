@@ -741,11 +741,11 @@ class TestHarmonyServer(unittest.TestCase):
         self.assertFalse(getattr(cc, "show_grid", False))
 
     def test_form_contains_hx_sync(self):
-        """Verify that the selectPixelForm contains hx-sync='this:queue' in the rendered HTML."""
+        """Verify that the selectPixelForm contains hx-sync='this:queue all' in the rendered HTML."""
         resp = self.client.get("/harmony/?viewId=Calm-Sun")
         self.assertEqual(resp.status_code, 200)
         html_content = resp.content.decode()
-        self.assertIn('hx-sync="this:queue"', html_content)
+        self.assertIn('hx-sync="this:queue all"', html_content)
 
     def test_camera_space_contour_union(self):
         """Verify that the camera space polygon union is used for multi-cell objects."""

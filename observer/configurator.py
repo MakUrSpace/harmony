@@ -342,9 +342,6 @@ def eagerly_precalculate_grids(cc):
     """
     Eagerly triggers background calculations and caches the hex grids for all cameras on boot/reconfiguration.
     """
-    if cc is None:
-        return
-
     import threading
 
     if not hasattr(cc, "_grid_cache_lock"):
@@ -722,6 +719,7 @@ async def deleteCamera(request: Request, camName: str):
 @configurator.post("/grid_configuration")
 async def configureGrid(request: Request, size: float = Form(...)):
     cc = request.app.state.cc
+    cm = getattr(request.app.state, "cm", None)
     cc.hex = HexGridConfiguration(size=size)
     cc.saveConfiguration()
     if hasattr(cc, "_grid_cache"):
@@ -841,8 +839,6 @@ async def importCalibration(request: Request, file: UploadFile = File(...)):
         # Clear grid overlay cache
         if hasattr(cc, "_grid_cache"):
             cc._grid_cache.clear()
-            
-        # Eagerly precalculate grids
         eagerly_precalculate_grids(cc)
         
         return HTMLResponse("<script>alert('Calibration restored successfully!'); window.location.href='/configurator/';</script>")

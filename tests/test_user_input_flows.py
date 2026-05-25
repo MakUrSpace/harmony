@@ -215,9 +215,8 @@ class TestObjectCRUD:
         hs._cm.deleteObject = mock.MagicMock()
         view_id = "admin_del"
         hs.SESSIONS[view_id] = SessionConfig()
-        r = harmony_client.request(
-            "DELETE", "/harmony/objects/Target", cookies={"session_view_id": view_id}
-        )
+        harmony_client.cookies.set("session_view_id", view_id)
+        r = harmony_client.request("DELETE", "/harmony/objects/Target")
         assert r.status_code == 200
         hs._cm.deleteObject.assert_called_once_with("Target")
 

@@ -144,6 +144,7 @@
             tmux attach -t "$SESSION_NAME"
           '';
         };
+
         packages.tests = writeShellApplication {
           name = "run-tests";
           runtimeInputs = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver ];

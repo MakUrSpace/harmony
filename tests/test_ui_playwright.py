@@ -37,12 +37,20 @@ def harmony_servers(mock_cv2):
     mock_cam.activeZone = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], dtype=np.float32)
     mock_cam.activeZoneBoundingBox = (0, 0, 640, 480)
     mock_cam.cropToActiveZone.return_value = np.zeros((480, 640, 3), dtype=np.uint8)
+    mock_cam.convertRealToCameraSpace.return_value = (10, 10)
 
     mock_cc = MockHexCC.return_value
     mock_cc.cameras = {"Camera 0": mock_cam}
+    mock_cc.rsc = mock.MagicMock()
+    mock_cc.rsc.closestConverterToRealCoord.return_value = mock_cam
     mock_cc.hex = mock.MagicMock()
     mock_cc.hex.size = 10.0
+    mock_cc.hex.width = 1600.0
+    mock_cc.hex.height = 1600.0
     mock_cc.hex.hex_nudges = {}
+    mock_cc.camCoordToAxial.return_value = (0, 0)
+    mock_cc.axial_to_pixel.return_value = (10, 10)
+    mock_cc.cam_hex_at_axial.return_value = np.array([[10, 10], [20, 10], [25, 20], [20, 30], [10, 30], [5, 20]])
     mock_cc.show_grid = True
     mock_cc.show_objects = True
     mock_cc.memory = []
@@ -235,3 +243,37 @@ def test_ui_latency(page: Page, harmony_server):
     assert response.ok
     api_time = time.time() - start_time
     assert api_time < 0.5, f"Canvas data API response is too slow: {api_time}s"
+
+def test_ui_cell_selection_drawing_sub100ms(page: Page, harmony_server):
+    import time
+    page.add_init_script("HTMLImageElement.prototype.decode = () => Promise.resolve();")
+    page.goto(f"{harmony_server}/harmony/?viewId=perf_test")
+    expect(page.locator("body")).to_be_visible()
+    
+    # Measure Selection API
+    start = time.time()
+    resp = page.request.post(
+        f"{harmony_server}/harmony/select_pixel",
+        form={
+            "viewId": "perf_test",
+            "selectedPixel": "[100, 200]",
+            "selectedCamera": "Camera 0",
+            "appendPixel": ""
+        }
+    )
+    assert resp.ok
+    sel_time = time.time() - start
+    assert sel_time < 0.1, f"Selection took {sel_time}s, expected <0.1s"
+    
+    # Measure Draw API
+    start = time.time()
+    resp = page.request.post(
+        f"{harmony_server}/harmony/draw_region/perf_test",
+        form={
+            "radius": "2",
+            "region_type": "Burst"
+        }
+    )
+    assert resp.ok
+    draw_time = time.time() - start
+    assert draw_time < 0.1, f"Drawing took {draw_time}s, expected <0.1s"

@@ -78,19 +78,22 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         }
     }
 
-    function translatePolyToQuadrant(poly, quadIndex) {
+    function translatePolyToQuadrant(poly, quadIndex, cName) {
         if (!poly || poly.length === 0) return null;
         const half_w = 960;
         const half_h = 540;
         const offsetX = (quadIndex % 2) * half_w;
         const offsetY = Math.floor(quadIndex / 2) * half_h;
         
+        const scaleX = (cName === "VirtualMap") ? (960 / 1200) : 0.5;
+        const scaleY = (cName === "VirtualMap") ? (540 / 1200) : 0.5;
+        
         return poly.map(pt => {
             const x = Array.isArray(pt) ? pt[0] : pt.x;
             const y = Array.isArray(pt) ? pt[1] : pt.y;
             return {
-                x: x * 0.5 + offsetX,
-                y: y * 0.5 + offsetY
+                x: x * scaleX + offsetX,
+                y: y * scaleY + offsetY
             };
         });
     }
@@ -106,7 +109,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                     cams.forEach((cName, quadIdx) => {
                         const poly = data.objects[name][cName];
                         if (poly && poly.length > 0) {
-                            const translated = translatePolyToQuadrant(poly, quadIdx);
+                            const translated = translatePolyToQuadrant(poly, quadIdx, cName);
                             drawPoly(translated, scale, true, r, g, b);
                         }
                     });
@@ -170,7 +173,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                     cams.forEach((cName, quadIdx) => {
                         const poly = data.selection.firstCell[cName];
                         if (poly && poly.length > 0) {
-                            const translated = translatePolyToQuadrant(poly, quadIdx);
+                            const translated = translatePolyToQuadrant(poly, quadIdx, cName);
                             drawPoly(translated, scale, true, 255, 210, 70); // Gold for first
                             
                             // Calculate center
@@ -204,7 +207,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                         cams.forEach((cName, quadIdx) => {
                             const poly = cell[cName];
                             if (poly && poly.length > 0) {
-                                const translated = translatePolyToQuadrant(poly, quadIdx);
+                                const translated = translatePolyToQuadrant(poly, quadIdx, cName);
                                 drawPoly(translated, scale, true, 255, 0, 255); // Magenta for additional
                                 
                                 const fCenter = firstCenters[quadIdx];
@@ -438,23 +441,23 @@ function handlePixelSelection(event, camNameOverride) {
             const quad_idx = quad_row * 2 + quad_col;
             if (quad_idx >= 0 && quad_idx < cams.length) {
                 finalCamName = cams[quad_idx];
-                final_x = (image_x % half_w) * 2;
-                final_y = (image_y % half_h) * 2;
+                if (finalCamName === "VirtualMap") {
+                    final_x = (image_x % half_w) * (1200 / 960);
+                    final_y = (image_y % half_h) * (1200 / 540);
+                } else {
+                    final_x = (image_x % half_w) * 2;
+                    final_y = (image_y % half_h) * 2;
+                }
             } else {
                 finalCamName = cams[0];
             }
         }
     }
 
-    const pixelField = document.getElementById(`selectedPixel`)
-    const appendPixelField = document.getElementById(`appendPixel`)
-
-    // Check for modifier keys
-    if (event.shiftKey || event.ctrlKey || event.metaKey) {
-        appendPixelField.value = "true";
-    } else {
-        appendPixelField.value = "false";
-    }
+    const pixelField = document.getElementById(`selectedPixel`);
+    const appendPixelField = document.getElementById(`appendPixel`);
+    const isAppend = (event.shiftKey || event.ctrlKey || event.metaKey);
+    if (appendPixelField) appendPixelField.value = isAppend ? "true" : "false";
 
     // Client-side optimistic update
     if (window.gridPolys && window.gridPolys[finalCamName]) {
@@ -468,34 +471,55 @@ function handlePixelSelection(event, camNameOverride) {
         
         if (clickedHex) {
             let sel = window.harmonyCanvasData.selection || {};
-            if (appendPixelField.value === "true") {
-                sel.additionalCells = sel.additionalCells || [];
-                let polyObj = {};
-                polyObj[finalCamName] = clickedHex.poly;
-                sel.additionalCells.push(polyObj);
+            let polyObj = {};
+            // Optimistically populate polygon for ALL cameras using axial coordinates (q, r)
+            for (let cName in window.gridPolys) {
+                const hexArr = window.gridPolys[cName];
+                const matchingHex = hexArr.find(h => h.q === clickedHex.q && h.r === clickedHex.r);
+                if (matchingHex) {
+                    polyObj[cName] = matchingHex.poly;
+                }
+            }
+            
+            if (sel.firstCell) {
+                if (appendPixelField.value === "true") {
+                    sel.additionalCells = sel.additionalCells || [];
+                    // Insert at front to match server's insert(0, ...)
+                    sel.additionalCells.unshift(polyObj);
+                } else {
+                    sel.additionalCells = [polyObj];
+                }
             } else {
                 sel.additionalCells = [];
-                let polyObj = {};
-                polyObj[finalCamName] = clickedHex.poly;
                 sel.firstCell = polyObj;
             }
+            
             window.harmonyCanvasData.selection = sel;
             if (window.harmonyEditor) window.harmonyEditor.render();
         }
     }
 
-    const selectPixelForm = document.getElementById(`selectPixelForm`)
+    const selectPixelForm = document.getElementById(`selectPixelForm`);
+    const viewIdVal = document.getElementById(`viewId`) ? document.getElementById(`viewId`).value : "";
 
-    // Temporarily set the selectedCamera form field to the clicked camera
+    // Temporarily set the selectedCamera form field to the clicked camera (fallback only)
     const selectedCameraInput = document.getElementById('selectedCamera');
-    selectedCameraInput.value = finalCamName;
-
-    pixelField.value = JSON.stringify([~~final_x, ~~final_y])
     
     // Use HTMX api if available, otherwise fallback to requestSubmit
     if (typeof htmx !== 'undefined') {
-        htmx.trigger(selectPixelForm, 'submit');
+        htmx.ajax('POST', selectPixelForm.getAttribute('hx-post'), {
+            target: '#interactor',
+            source: '#selectPixelForm',
+            values: {
+                viewId: viewIdVal,
+                selectedPixel: JSON.stringify([~~final_x, ~~final_y]),
+                selectedCamera: finalCamName,
+                appendPixel: isAppend ? "true" : "false"
+            }
+        });
     } else {
+        pixelField.value = JSON.stringify([~~final_x, ~~final_y]);
+        selectedCameraInput.value = finalCamName;
         selectPixelForm.requestSubmit();
     }
 
@@ -522,7 +546,19 @@ function pointInPolygon(point, vs) {
 window.gridPolys = window.gridPolys || {};
 
 function fetchGridPolys(camName) {
-    if (!camName || camName === "All") return;
+    if (!camName) return;
+    if (camName === "All") {
+        const cams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras : [];
+        for (let c of cams) {
+            if (c && c !== "No Camera" && !window.gridPolys[c]) {
+                fetch(`/harmony/grid_polys/${c}`)
+                    .then(r => r.json())
+                    .then(data => { window.gridPolys[c] = data; })
+                    .catch(e => console.error(e));
+            }
+        }
+        return;
+    }
     if (window.gridPolys[camName]) return;
     fetch(`/harmony/grid_polys/${camName}`)
         .then(r => r.json())
@@ -624,14 +660,18 @@ function gameWorldClick(camNum) {
 }
 
 let isSyncingCanvas = false;
+let queuedSyncCanvas = false;
 
 function syncCanvasData(viewId) {
-    if (isSyncingCanvas) return; // Prevent request stacking over high-latency connections
-
-    // viewId can be passed or retrieved from DOM
     if (!viewId) {
         const val = document.getElementById("viewId");
         if (val) viewId = val.value;
+    }
+    if (!viewId) return;
+
+    if (isSyncingCanvas) {
+        queuedSyncCanvas = true;
+        return; // Prevent request stacking over high-latency connections
     }
 
     if (!viewId) return;
@@ -643,6 +683,9 @@ function syncCanvasData(viewId) {
             if (data && data.cameras) {
                 if (window.harmonyCanvasData) {
                     window.harmonyCanvasData.cameras = data.cameras;
+                    if (window.harmonyCanvasData.cameraName === "All") {
+                        fetchGridPolys("All");
+                    }
                 }
             }
             if (window.harmonyEditor) {
@@ -652,5 +695,9 @@ function syncCanvasData(viewId) {
         .catch(err => console.error("Error syncing canvas data:", err))
         .finally(() => {
             isSyncingCanvas = false;
+            if (queuedSyncCanvas) {
+                queuedSyncCanvas = false;
+                syncCanvasData(viewId);
+            }
         });
 }

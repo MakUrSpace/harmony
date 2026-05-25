@@ -614,7 +614,7 @@ class CalibratedObserver(Observer):
 
     def distinct_colors(self, n=15, new=False):
         """Generate n distinct colors that stand out against brown."""
-        if not new and n > 0 and len(getattr(self, "_colors", {n: []})[n]) == n:
+        if not new and n > 0 and len(getattr(self, "_colors", {}).get(n, [])) == n:
             return self._colors[n]
         colors = set()
         contrast_colors = [(139, 69, 19), (204, 100, 2), (0, 255, 0)]
