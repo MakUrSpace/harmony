@@ -340,6 +340,39 @@ class TestHexConfigSerialization:
             cfg = cc.buildConfiguration()
         assert "hex" not in cfg
 
+    def test_grid_overlays_serialization(self):
+        from observer.HexObserver import HexCaptureConfiguration
+        import numpy as np
+        
+        cc = object.__new__(HexCaptureConfiguration)
+        cc.hex = None
+        cc.cameras = {}
+        # Provide a fake image in the cache
+        fake_img = np.zeros((10, 10, 3), dtype=np.uint8)
+        cc._grid_cache = {("Cam 1", "rsc", 1.0, 10, 10): fake_img}
+        
+        with mock.patch(
+            "observer.CalibratedObserver.CalibratedCaptureConfiguration.buildConfiguration",
+            return_value={"cameras": {}},
+        ):
+            cfg = cc.buildConfiguration()
+            
+        assert "grid_overlays" in cfg
+        assert "Cam 1" in cfg["grid_overlays"]
+        assert isinstance(cfg["grid_overlays"]["Cam 1"], str)
+        
+        # Test loading it back
+        import json
+        with mock.patch("observer.Observer.open", mock.mock_open(read_data=json.dumps(cfg))):
+            with mock.patch("observer.CalibratedObserver.CalibratedCaptureConfiguration.loadConfiguration"):
+                import cv2
+                cv2.imdecode.return_value = np.zeros((10, 10, 3), dtype=np.uint8)
+                new_cc = HexCaptureConfiguration()
+                new_cc.loadConfiguration("fake.json")
+                assert new_cc.grid_overlays is not None
+                assert "Cam 1" in new_cc.grid_overlays
+                assert new_cc.grid_overlays["Cam 1"].shape == (10, 10, 3)
+
 
 # ---------------------------------------------------------------------------
 # axial_distance used as static method

@@ -20,6 +20,8 @@ def mock_cv2():
     mock_cv2_module = mock.MagicMock()
     mock_cap = mock.MagicMock()
     mock_cap.read.return_value = (True, np.zeros((480, 640, 3), dtype=np.uint8))
+    mock_cap.retrieve.return_value = (True, np.zeros((480, 640, 3), dtype=np.uint8))
+    mock_cap.grab.return_value = True
     mock_cap.isOpened.return_value = True
 
     mock_cv2_module.VideoCapture.return_value = mock_cap
@@ -78,7 +80,7 @@ def configurator_app(mock_cv2):
     """Fixture to create the Configurator app with mocked hardware."""
     # Patch where it is used in configuratorServer
     with mock.patch(
-        "observer.configuratorServer.CalibratedCaptureConfiguration"
+        "observer.configuratorServer.HexCaptureConfiguration"
     ) as MockCC:
         mock_cc = MockCC.return_value
         mock_cc.cameras = {"Camera 0": mock.MagicMock()}

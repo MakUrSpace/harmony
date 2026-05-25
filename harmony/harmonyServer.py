@@ -278,7 +278,7 @@ def render_camera(cc, camName, viewId=None):
         if hasattr(cc, "rsc") and cc.rsc is not None:
             try:
                 if show_grid:
-                    grid_overlay = draw_dynamic_grid(cm, camName)
+                    grid_overlay = draw_dynamic_grid(cc, camName)
             except Exception as e:
                 print(f"Grid overlay check error: {e}")
 
@@ -301,9 +301,8 @@ def render_camera(cc, camName, viewId=None):
 
         if show_grid and grid_overlay is not None and not isinstance(grid_overlay, str):
             if grid_overlay.shape[:2] == masked.shape[:2]:
-                cv2.addWeighted(
-                    grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
-                )
+                mask = grid_overlay[:, :, 1] > 0
+                masked[mask] = grid_overlay[mask]
 
         masked = cam.cropToActiveZone(masked)
 
@@ -510,8 +509,8 @@ def render_composite_all(cc, cm, viewId=None):
             grid_overlay = None
             if hasattr(cc, "rsc") and cc.rsc is not None:
                 try:
-                    if getattr(cc, "show_grid", False):
-                        grid_overlay = draw_dynamic_grid(cm, name)
+                    if show_grid:
+                        grid_overlay = draw_dynamic_grid(cc, name)
                 except Exception as e:
                     print(f"Composite grid generation error for {name}: {e}")
 
@@ -524,9 +523,8 @@ def render_composite_all(cc, cm, viewId=None):
                 continue
             elif show_grid and grid_overlay is not None and not isinstance(grid_overlay, str):
                 if grid_overlay.shape[:2] == masked.shape[:2]:
-                    cv2.addWeighted(
-                        grid_overlay, 0.5, masked, 1.0, 0.0, dst=masked
-                    )
+                    mask = grid_overlay[:, :, 1] > 0
+                    masked[mask] = grid_overlay[mask]
 
             masked = cam.cropToActiveZone(masked)
             cropped = masked[y : y + h, x : x + w]
@@ -758,6 +756,8 @@ def scale_point(pt, scale):
 # ---------------------------------------------------------------------------
 
 
+_AXIAL_CACHE = {}
+
 def _get_constituent_axials(obj, cc):
     """
     Return the canonical ordered list of axial cells for *obj*.
@@ -770,12 +770,23 @@ def _get_constituent_axials(obj, cc):
     # and against legacy objects that never had the field set.
     if isinstance(axials, list) and axials:
         return list(axials)
+        
+    cm = _get_cm()
+    cycle = getattr(cm, 'cycleCounter', 0)
+    cache_key = (id(obj), cycle)
+    
+    if cache_key in _AXIAL_CACHE:
+        return _AXIAL_CACHE[cache_key]
+
     # Legacy fallback
     try:
         coord = cc.changeSetToAxialCoord(obj)
-        return [coord]
-    except Exception:
-        return []
+        res = [coord]
+    except Exception as e:
+        res = []
+        
+    _AXIAL_CACHE[cache_key] = res
+    return res
 
 
 def _find_objects_for_axial(axial_coord):
@@ -974,7 +985,7 @@ def _get_canvas_update_script(viewId: str, is_admin: bool = False):
         canvas_json = json.dumps(canvas_data)
         return f"""
         <script>
-            if (window.harmonyEditor) {{
+            if (window.harmonyEditor && (typeof queuedClicks === 'undefined' || queuedClicks <= 1)) {{
                 window.harmonyEditor.updateData({canvas_json});
             }}
             if (window.harmonyEditors) {{
@@ -1983,12 +1994,17 @@ def selectPixel(
         raw_y = (y / scale_y) + offset_y
         axial_coord = cm.cc.camCoordToAxial(cam, (raw_x, raw_y))
 
+    import time
+    t0 = time.time()
     print(
         f"viewId {viewId} || Received: Pixel {pixel} on Cam {cam} || Translated to Axial: {axial_coord}"
     )
     print(f"INTERNAL SESSIONS ID: {id(SESSIONS)}")
+    t1 = time.time()
     # Find all objects at *axial_coord* to support cycling.
     all_at_cell = _find_objects_for_axial(axial_coord)
+
+    t2 = time.time()
 
     with DATA_LOCK:
         session = SESSIONS.get(viewId, SessionConfig())
@@ -2038,8 +2054,13 @@ def selectPixel(
             session.selected_oid = all_at_cell[0][0].oid
 
     SESSIONS[viewId] = session
-
-    return render_interactor(request, viewId, axial_coord)
+    t3 = time.time()
+    
+    html_resp = render_interactor(request, viewId, axial_coord)
+    t4 = time.time()
+    html_resp.headers["X-Timing"] = f"find_objects={t2-t1:.3f}s, lock_logic={t3-t2:.3f}s, render={t4-t3:.3f}s"
+    print(html_resp.headers["X-Timing"], flush=True)
+    return html_resp
 
 
 @harmony.post("/toggle_selection/{viewId}")
@@ -2193,8 +2214,23 @@ def render_interactor(request, viewId, axial_coord):
             return "Terrain"
         return "Selectable"
 
+    # Precompute axial -> objects map for this render pass to avoid O(N*M) performance penalty
+    axial_to_objs = {}
+    for obj in cm.memory:
+        axials = _get_constituent_axials(obj, _get_cc())
+        for ax in axials:
+            if ax not in axial_to_objs:
+                axial_to_objs[ax] = []
+            axial_to_objs[ax].append((obj, axials[0]))
+            
+    for k in axial_to_objs:
+        axial_to_objs[k].sort(key=lambda x: x[0].oid)
+
+    def _fast_find(ax):
+        return axial_to_objs.get(ax, [])
+
     # Find ALL objects at the first selected cell to display "Object X of Y"
-    all_at_first = _find_objects_for_axial(first)
+    all_at_first = _fast_find(first)
 
     # Identify the specific object we are showing (the one in session.selected_oid)
     first_obj = None

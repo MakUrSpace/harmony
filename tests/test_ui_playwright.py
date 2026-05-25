@@ -250,6 +250,17 @@ def test_ui_cell_selection_drawing_sub100ms(page: Page, harmony_server):
     page.goto(f"{harmony_server}/harmony/?viewId=perf_test")
     expect(page.locator("body")).to_be_visible()
     
+    # Warmup
+    page.request.post(
+        f"{harmony_server}/harmony/select_pixel",
+        form={
+            "viewId": "perf_test",
+            "selectedPixel": "[0, 0]",
+            "selectedCamera": "Camera 0",
+            "appendPixel": ""
+        }
+    )
+    
     # Measure Selection API
     start = time.time()
     resp = page.request.post(
@@ -262,6 +273,7 @@ def test_ui_cell_selection_drawing_sub100ms(page: Page, harmony_server):
         }
     )
     assert resp.ok
+    print(f"Timing Header: {resp.headers.get('x-timing')}")
     sel_time = time.time() - start
     assert sel_time < 0.1, f"Selection took {sel_time}s, expected <0.1s"
     

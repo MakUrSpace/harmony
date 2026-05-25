@@ -477,18 +477,26 @@ class CalibratedCaptureConfiguration(CaptureConfiguration):
         return config
 
     def loadConfiguration(self, path="observerConfiguration.json"):
-        super().loadConfiguration(path="observerConfiguration.json")
+        super().loadConfiguration(path=path)
         try:
-            config = self.readConfigFile()
+            config = self.readConfigFile(path)
         except Exception:
             config = {}
-        self.rsc = config.get("rsc", None)
+        rsc_data = config.get("rsc", None)
+        if rsc_data is not None:
+            try:
+                parsed_rsc = [
+                    [cN, [[np.array(pt, dtype="int32") for pt in cL] for cL in coordList]]
+                    for cN, coordList in rsc_data
+                ]
+                self.rsc = RealSpaceConverter(parsed_rsc)
+            except Exception as e:
+                print(f"Failed to load RealSpaceConverter: {e}")
+                self.rsc = None
+        else:
+            self.rsc = None
+
         if self.rsc is not None:
-            self.rsc = [
-                [cN, [[np.array(pt, dtype="int32") for pt in cL] for cL in coordList]]
-                for cN, coordList in self.rsc
-            ]
-            self.rsc = RealSpaceConverter(self.rsc)
             self.realSpaceContours = self.rsc.cameraRealSpaceOverlap(self.cameras)
 
             # Calculate _realSpaceBoundingBox once

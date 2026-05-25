@@ -344,6 +344,9 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         updateData: function (newData) {
             Object.assign(data, newData);
             draw();
+        },
+        getData: function () {
+            return data;
         }
     };
 }
@@ -470,7 +473,12 @@ function handlePixelSelection(event, camNameOverride) {
         }
         
         if (clickedHex) {
-            let sel = window.harmonyCanvasData.selection || {};
+            let sel = {};
+            if (window.harmonyEditor && window.harmonyEditor.getData) {
+                sel = window.harmonyEditor.getData().selection || {};
+            } else {
+                sel = window.harmonyCanvasData.selection || {};
+            }
             let polyObj = {};
             // Optimistically populate polygon for ALL cameras using axial coordinates (q, r)
             for (let cName in window.gridPolys) {
@@ -481,19 +489,23 @@ function handlePixelSelection(event, camNameOverride) {
                 }
             }
             
-            if (sel.firstCell) {
-                if (appendPixelField.value === "true") {
+            if (appendPixelField.value === "true") {
+                if (sel.firstCell) {
                     sel.additionalCells = sel.additionalCells || [];
                     // Insert at front to match server's insert(0, ...)
                     sel.additionalCells.unshift(polyObj);
                 } else {
-                    sel.additionalCells = [polyObj];
+                    sel.firstCell = polyObj;
+                    sel.additionalCells = [];
                 }
             } else {
-                sel.additionalCells = [];
                 sel.firstCell = polyObj;
+                sel.additionalCells = [];
             }
             
+            if (window.harmonyEditor && window.harmonyEditor.getData) {
+                window.harmonyEditor.getData().selection = sel;
+            }
             window.harmonyCanvasData.selection = sel;
             if (window.harmonyEditor) window.harmonyEditor.render();
         }
@@ -507,6 +519,7 @@ function handlePixelSelection(event, camNameOverride) {
     
     // Use HTMX api if available, otherwise fallback to requestSubmit
     if (typeof htmx !== 'undefined') {
+        queuedClicks++;
         htmx.ajax('POST', selectPixelForm.getAttribute('hx-post'), {
             target: '#interactor',
             source: '#selectPixelForm',
@@ -530,6 +543,16 @@ function handlePixelSelection(event, camNameOverride) {
         selectedCameraInput.value = 'All';
     }
 }
+
+document.addEventListener('htmx:afterRequest', function(evt) {
+    if (evt.detail.elt.id === 'selectPixelForm') {
+        if (queuedClicks > 0) queuedClicks--;
+        if (queuedClicks === 0 && queuedSyncCanvas) {
+            queuedSyncCanvas = false;
+            syncCanvasData(document.getElementById("viewId") ? document.getElementById("viewId").value : null);
+        }
+    }
+});
 
 function pointInPolygon(point, vs) {
     var x = point[0], y = point[1];
@@ -628,6 +651,7 @@ function gameWorldClick(camNum) {
                                    <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>`;
             if (window.harmonyCanvasData) {
                 window.harmonyCanvasData.cameraName = camNum;
+                fetchGridPolys(camNum);
                 setTimeout(() => {
                     window.harmonyEditor = initCanvasEditor("GameWorldOverlay", window.harmonyCanvasData,
                         function (updatedData) { console.log("Data updated", updatedData); },
@@ -650,6 +674,7 @@ function gameWorldClick(camNum) {
 
             if (window.harmonyCanvasData) {
                 window.harmonyCanvasData.cameraName = camNum;
+                fetchGridPolys(camNum);
             }
             if (window.harmonyEditor) window.harmonyEditor.render();
             window.harmonyEditors = []; // clear multi-view mode
@@ -661,6 +686,7 @@ function gameWorldClick(camNum) {
 
 let isSyncingCanvas = false;
 let queuedSyncCanvas = false;
+let queuedClicks = 0;
 
 function syncCanvasData(viewId) {
     if (!viewId) {
@@ -669,12 +695,10 @@ function syncCanvasData(viewId) {
     }
     if (!viewId) return;
 
-    if (isSyncingCanvas) {
+    if (isSyncingCanvas || queuedClicks > 0) {
         queuedSyncCanvas = true;
         return; // Prevent request stacking over high-latency connections
     }
-
-    if (!viewId) return;
 
     isSyncingCanvas = true;
     fetch(`/harmony/canvas_data/${viewId}`)
@@ -688,7 +712,7 @@ function syncCanvasData(viewId) {
                     }
                 }
             }
-            if (window.harmonyEditor) {
+            if (window.harmonyEditor && queuedClicks === 0) {
                 window.harmonyEditor.updateData(data);
             }
         })

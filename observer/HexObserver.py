@@ -41,15 +41,34 @@ class HexGridConfiguration:
 
 class HexCaptureConfiguration(CalibratedCaptureConfiguration):
     def loadConfiguration(self, path="observerConfiguration.json"):
-        super().loadConfiguration()
+        super().loadConfiguration(path=path)
         try:
-            config = self.readConfigFile()
+            config = self.readConfigFile(path)
         except Exception:
             config = {}
         self.hex = config.get("hex", None)
         if self.hex is not None:
             self.hex = HexGridConfiguration(**self.hex)
+        self.show_grid = config.get("show_grid", False)
+        self.show_objects = config.get("show_objects", False)
         self.grid_overlays = None
+        if "grid_overlays" in config:
+            import cv2
+            import base64
+            import numpy as np
+            self.grid_overlays = {}
+            for cam_name, b64_str in config["grid_overlays"].items():
+                try:
+                    img_data = base64.b64decode(b64_str)
+                    np_arr = np.frombuffer(img_data, np.uint8)
+                    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    if img is not None:
+                        self.grid_overlays[cam_name] = img
+                except Exception as e:
+                    print(f"Failed to decode grid overlay for {cam_name}: {e}")
+            
+            if not self.grid_overlays:
+                self.grid_overlays = None
         self.camera_realspace_contours = []
         self.camera_realspace_union_contours = []
 
@@ -57,6 +76,33 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
         config = super().buildConfiguration()
         if self.hex is not None:
             config["hex"] = asdict(self.hex)
+        
+        config["show_grid"] = getattr(self, "show_grid", False)
+        config["show_objects"] = getattr(self, "show_objects", False)
+            
+        import cv2
+        import base64
+        import numpy as np
+        
+        encoded_overlays = {}
+        
+        if getattr(self, "grid_overlays", None):
+            for cam_name, overlay in self.grid_overlays.items():
+                success, buffer = cv2.imencode('.png', overlay)
+                if success:
+                    encoded_overlays[cam_name] = base64.b64encode(buffer).decode('utf-8')
+                    
+        if hasattr(self, "_grid_cache"):
+            for cache_key, overlay in self._grid_cache.items():
+                cam_name = cache_key[0]
+                if isinstance(overlay, np.ndarray):
+                    success, buffer = cv2.imencode('.png', overlay)
+                    if success:
+                        encoded_overlays[cam_name] = base64.b64encode(buffer).decode('utf-8')
+                        
+        if encoded_overlays:
+            config["grid_overlays"] = encoded_overlays
+            
         return config
 
     def realSpaceBoundingBox(self):

@@ -17,7 +17,7 @@ PORT = int(os.getenv("OBSERVER_PORT", "7000"))
 
 def create_configurator_app():
     app = FastAPI()
-    app.state.cc = CalibratedCaptureConfiguration()
+    app.state.cc = HexCaptureConfiguration()
     app.state.cc.capture()
 
     # Initialize calibration observer

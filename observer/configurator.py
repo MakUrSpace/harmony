@@ -209,6 +209,13 @@ def draw_dynamic_grid(cc, camName):
 
         cache_key = (camName, id(rsc), hex_grid.size, w, h)
 
+        # 0. Fast pre-loaded saved configuration overlays
+        if getattr(cc, "grid_overlays", None) is not None:
+            if camName in cc.grid_overlays:
+                overlay = cc.grid_overlays[camName]
+                if overlay is not None and overlay.shape[:2] == (h, w):
+                    return overlay
+
         # 1. Fast cache path
         with cc._grid_cache_lock:
             if cache_key in cc._grid_cache:
@@ -351,6 +358,10 @@ def eagerly_precalculate_grids(cc):
         if not hasattr(cc, "_grid_cache"):
             cc._grid_cache = {}
         cc._grid_cache.clear()
+
+        if hasattr(cc, "grid_overlays") and cc.grid_overlays:
+            cc.grid_overlays.clear()
+
         if not hasattr(cc, "_grid_generating"):
             cc._grid_generating = set()
         cc._grid_generating.clear()
@@ -670,6 +681,9 @@ async def manualCalibration(request: Request):
                 ]
             )
         cc.saveConfiguration()
+        if hasattr(cc, "_grid_cache"):
+            cc._grid_cache.clear()
+        eagerly_precalculate_grids(cc)
         return Response(f"Added manual calibration for {added_count} cameras")
     else:
         return Response("No valid calibration points found", status_code=400)
@@ -698,6 +712,9 @@ async def deleteCalibrationEndpoint(request: Request, index: int):
             else:
                 cc.rsc = None
             cc.saveConfiguration()
+            if hasattr(cc, "_grid_cache"):
+                cc._grid_cache.clear()
+            eagerly_precalculate_grids(cc)
             return Response("Success")
         else:
             return Response("Invalid index", status_code=400)
@@ -799,9 +816,9 @@ async def nudgeHex(request: Request, camName: str):
                     cc.hex.hex_nudges[camName][nudge_key] = [curr_dx + dx, curr_dy + dy]
 
         cc.saveConfiguration()
-        # Clear grid overlay cache
         if hasattr(cc, "_grid_cache"):
             cc._grid_cache.clear()
+        eagerly_precalculate_grids(cc)
 
         return JSONResponse({"status": "success"})
     except Exception as e:
@@ -849,9 +866,10 @@ async def importCalibration(request: Request, file: UploadFile = File(...)):
 if __name__ == "__main__":
     import uvicorn
     from fastapi import FastAPI
+    from observer.HexObserver import HexCaptureConfiguration
 
     app = FastAPI()
-    app.state.cc = CalibratedCaptureConfiguration()
+    app.state.cc = HexCaptureConfiguration()
     app.state.cc.capture()
     app.state.cm = CalibrationObserver(app.state.cc)
     app.include_router(configurator)
