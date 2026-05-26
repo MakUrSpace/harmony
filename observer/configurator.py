@@ -257,7 +257,7 @@ def draw_dynamic_grid(cc, camName):
                     and hasattr(cc.rsc, "realCamSpacePairs")
                 ):
                     for cName, coordPairs in cc.rsc.realCamSpacePairs:
-                        if cName == camName:
+                        if str(cName) == str(camName):
                             if len(coordPairs) > 2:
                                 axials = coordPairs[2]
                                 for pt in axials:

@@ -871,78 +871,91 @@ def _get_canvas_data_dict(viewId: str, is_admin: bool = False):
     if cache_key in CANVAS_DATA_CACHE:
         return CANVAS_DATA_CACHE[cache_key]
 
-    objects = {}
-    for obj in cm.memory:
-        vm_params = get_conversion_params("VirtualMap")
-        hull = cm.cc.objectToHull(obj)
-        if hull is not None and len(hull) > 0:
-            raw_vm_pts = hull.reshape(-1, 2)
-            vm_pts = [
-                scale_point_new((float(pt[0]), float(pt[1])), vm_params)
-                for pt in raw_vm_pts
-            ]
-        else:
-            vm_pts = []
+    global OBJECTS_GEOMETRY_CACHE
+    if 'OBJECTS_GEOMETRY_CACHE' not in globals():
+        OBJECTS_GEOMETRY_CACHE = {}
 
-        cam_objs = {}
-        for camName in cc.cameras.keys():
-            cam_pts = []
-            axials = _get_constituent_axials(obj, cc)
-            if axials:
-                polys = []
-                for q, r in axials:
-                    try:
-                        poly = cm.cc.cam_hex_at_axial(camName, q, r)
-                        polys.append(poly)
-                    except Exception as e:
-                        print(
-                            f"Failed to get cam_hex_at_axial for {camName} ({q}, {r}): {e}"
+    objects_cache_key = (cycle_num, memory_oids)
+    if len(OBJECTS_GEOMETRY_CACHE) > 50:
+        OBJECTS_GEOMETRY_CACHE.clear()
+
+    if objects_cache_key in OBJECTS_GEOMETRY_CACHE:
+        objects = OBJECTS_GEOMETRY_CACHE[objects_cache_key]
+    else:
+        objects = {}
+        for obj in cm.memory:
+            vm_params = get_conversion_params("VirtualMap")
+            hull = cm.cc.objectToHull(obj)
+            if hull is not None and len(hull) > 0:
+                raw_vm_pts = hull.reshape(-1, 2)
+                vm_pts = [
+                    scale_point_new((float(pt[0]), float(pt[1])), vm_params)
+                    for pt in raw_vm_pts
+                ]
+            else:
+                vm_pts = []
+
+            cam_objs = {}
+            for camName in cc.cameras.keys():
+                cam_pts = []
+                axials = _get_constituent_axials(obj, cc)
+                if axials:
+                    polys = []
+                    for q, r in axials:
+                        try:
+                            poly = cm.cc.cam_hex_at_axial(camName, q, r)
+                            polys.append(poly)
+                        except Exception as e:
+                            print(
+                                f"Failed to get cam_hex_at_axial for {camName} ({q}, {r}): {e}"
+                            )
+
+                    if polys:
+                        try:
+                            mask = np.zeros((1080, 1920), dtype=np.uint8)
+                            cv2.fillPoly(mask, polys, 255)
+                            contours, _ = cv2.findContours(
+                                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                            )
+                            if contours:
+                                largest_contour = max(contours, key=cv2.contourArea)
+                                raw_cam_pts = largest_contour.reshape(-1, 2)
+                                try:
+                                    if isinstance(largest_contour, np.ndarray) and len(largest_contour) > 2:
+                                        peri = cv2.arcLength(largest_contour, True)
+                                        if isinstance(peri, (int, float)):
+                                            approx = cv2.approxPolyDP(largest_contour, 0.002 * peri, True)
+                                            if approx is not None and isinstance(approx, np.ndarray) and len(approx) > 0:
+                                                raw_cam_pts = approx.reshape(-1, 2)
+                                except Exception:
+                                    pass
+                                cam_pts = [
+                                    scale_point_new(
+                                        (float(pt[0]), float(pt[1])),
+                                        get_conversion_params(camName),
+                                    )
+                                    for pt in raw_cam_pts
+                                ]
+                        except Exception as e:
+                            print(f"Camera polygon union failed for {camName}: {e}")
+
+                if not cam_pts:
+                    points = obj.changeSet[camName].changePoints
+                    if len(points) > 0:
+                        hull = cv2.convexHull(np.array(points, dtype=np.float32)).reshape(
+                            -1, 2
                         )
+                        cam_pts = [
+                            scale_point_new(
+                                (float(pt[0]), float(pt[1])), get_conversion_params(camName)
+                            )
+                            for pt in hull
+                        ]
+                cam_objs[camName] = cam_pts
 
-                if polys:
-                    try:
-                        mask = np.zeros((1080, 1920), dtype=np.uint8)
-                        cv2.fillPoly(mask, polys, 255)
-                        contours, _ = cv2.findContours(
-                            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-                        )
-                        if contours:
-                            largest_contour = max(contours, key=cv2.contourArea)
-                            raw_cam_pts = largest_contour.reshape(-1, 2)
-                            try:
-                                if isinstance(largest_contour, np.ndarray) and len(largest_contour) > 2:
-                                    peri = cv2.arcLength(largest_contour, True)
-                                    if isinstance(peri, (int, float)):
-                                        approx = cv2.approxPolyDP(largest_contour, 0.002 * peri, True)
-                                        if approx is not None and isinstance(approx, np.ndarray) and len(approx) > 0:
-                                            raw_cam_pts = approx.reshape(-1, 2)
-                            except Exception:
-                                pass
-                            cam_pts = [
-                                scale_point_new(
-                                    (float(pt[0]), float(pt[1])),
-                                    get_conversion_params(camName),
-                                )
-                                for pt in raw_cam_pts
-                            ]
-                    except Exception as e:
-                        print(f"Camera polygon union failed for {camName}: {e}")
-
-            if not cam_pts:
-                points = obj.changeSet[camName].changePoints
-                if len(points) > 0:
-                    hull = cv2.convexHull(np.array(points, dtype=np.float32)).reshape(
-                        -1, 2
-                    )
-                    cam_pts = [
-                        scale_point_new(
-                            (float(pt[0]), float(pt[1])), get_conversion_params(camName)
-                        )
-                        for pt in hull
-                    ]
-            cam_objs[camName] = cam_pts
-
-        objects[obj.oid] = {"VirtualMap": vm_pts, **cam_objs}
+            objects[obj.oid] = {"VirtualMap": vm_pts, **cam_objs}
+        
+    OBJECTS_GEOMETRY_CACHE[objects_cache_key] = objects
 
     comp_cams = sorted(list(cc.cameras.keys()))
     comp_cams.append("VirtualMap")
@@ -1709,6 +1722,7 @@ def _render_factory_error(viewId, error_message, axials, is_admin=False):
     cell_count = len(axials)
     html_content = interactor_template.format(
         info=f"""
+        <input type="button" class="btn btn-danger mb-3" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
         <h2 class="text-danger">Definition Error</h2>
         <div class="alert alert-danger" role="alert" style="margin-top: 10px; padding: 10px; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 4px;">
             {error_message}
@@ -1724,7 +1738,6 @@ def _render_factory_error(viewId, error_message, axials, is_admin=False):
         </form>
         """,
         actions=f"""
-        <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
         """,
     )
     html_content += _get_canvas_update_script(viewId, is_admin=is_admin)
@@ -1788,13 +1801,12 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
     cell_summary = ", ".join(str(c) for c in axials)
     html_content = interactor_template.format(
         info=f"""
+        <input type="button" class="btn btn-danger mb-3" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
         <h2>Object Defined</h2>
         <h3>Name: {trackedObject.oid}</h3>
         <p><small>Cells ({len(axials)}): <code>{cell_summary}</code></small></p>
         """,
         actions=f"""
-        <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
-        <hr>
         <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="/harmony/object_factory/{viewId}" hx-target="#interactor">
         """,
     )
@@ -1898,7 +1910,7 @@ def getGridPolys(request: Request, camName: str):
     rs = []
     if hasattr(cc.rsc, "realCamSpacePairs"):
         for cName, coordPairs in cc.rsc.realCamSpacePairs:
-            if cName == camName and len(coordPairs) > 2:
+            if str(cName) == str(camName) and len(coordPairs) > 2:
                 for pt in coordPairs[2]:
                     if hasattr(pt, "__iter__") and len(pt) >= 2:
                         qs.append(int(pt[0]))
@@ -1957,7 +1969,20 @@ def clearPixel(request: Request, viewId: str):
         with DATA_LOCK:
             SESSIONS[viewId].selection = CellSelection()
             SESSIONS[viewId].selected_oid = None
-    return HTMLResponse(_get_canvas_update_script(viewId, is_admin=is_admin))
+    # Client owns selection state, so we must explicitly clear it via script
+    clear_script = """
+    <script>
+        var emptySel = { firstCell: null, additionalCells: [] };
+        if (window.harmonyEditor && window.harmonyEditor.getData) {
+            window.harmonyEditor.getData().selection = emptySel;
+        }
+        if (window.harmonyCanvasData) {
+            window.harmonyCanvasData.selection = emptySel;
+        }
+        if (window.harmonyEditor) window.harmonyEditor.render();
+    </script>
+    """
+    return HTMLResponse(clear_script)
 
 
 @harmony.post("/select_pixel")
@@ -2056,7 +2081,7 @@ def selectPixel(
     SESSIONS[viewId] = session
     t3 = time.time()
     
-    html_resp = render_interactor(request, viewId, axial_coord)
+    html_resp = render_interactor(request, viewId, axial_coord, skip_canvas_update=True)
     t4 = time.time()
     html_resp.headers["X-Timing"] = f"find_objects={t2-t1:.3f}s, lock_logic={t3-t2:.3f}s, render={t4-t3:.3f}s"
     print(html_resp.headers["X-Timing"], flush=True)
@@ -2188,7 +2213,7 @@ def rotateObject(request: Request, viewId: str, objectId: str):
     return HTMLResponse(render_interactor(request, viewId, origin_cell).body.decode() + _get_canvas_update_script(viewId, is_admin=is_admin))
 
 
-def render_interactor(request, viewId, axial_coord):
+def render_interactor(request: Request, viewId: str, cell: tuple, skip_canvas_update: bool = False):
     """Refactored core rendering logic for the interactor panel."""
     cm = _get_cm()
     session = SESSIONS.get(viewId, SessionConfig())
@@ -2245,7 +2270,10 @@ def render_interactor(request, viewId, axial_coord):
         first_obj = all_at_first[0][0]
         session.selected_oid = first_obj.oid
 
-    info_html = f"<h2>Selected First Cell: {first}</h2>"
+    info_html = f"""
+        <input type="button" class="btn btn-danger mb-3" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
+        <h2>Selected First Cell: {first}</h2>
+    """
 
     if all_at_first:
         obj_count = len(all_at_first)
@@ -2271,7 +2299,7 @@ def render_interactor(request, viewId, axial_coord):
             dist = cm.cc.axial_distance(first, cell)
 
             # Find ALL objects at this additional cell
-            cell_objs = _find_objects_for_axial(cell)
+            cell_objs = _fast_find(cell)
             obj_str = ""
             for obj, _origin in cell_objs:
                 o_type = get_object_type(obj.oid, viewId)
@@ -2338,11 +2366,11 @@ def render_interactor(request, viewId, axial_coord):
                 <input type="submit" name="region_type" class="btn btn-outline-info" value="Cone">
             </div>
         </form>
-        <input type="button" class="btn btn-danger" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
     """
 
     html_content = interactor_template.format(info=info_html, actions=actions_html)
-    html_content += _get_canvas_update_script(viewId, is_admin=is_admin)
+    if not skip_canvas_update:
+        html_content += _get_canvas_update_script(viewId, is_admin=is_admin)
     return HTMLResponse(html_content)
 
 

@@ -226,9 +226,9 @@ class RealSpaceConverter:
         for camName, coordPairs in self.realCamSpacePairs:
             camSpaceTriPts, realSpaceTriPts = coordPairs[:2]
             converter = CameraRealSpaceConverter(
-                camName, camSpaceTriPts, realSpaceTriPts
+                str(camName), camSpaceTriPts, realSpaceTriPts
             )
-            self.converters[camName].append(converter)
+            self.converters[str(camName)].append(converter)
 
     def closestConverterToCamCoord(self, camName, camCoord):
         converters = self.converters[camName]

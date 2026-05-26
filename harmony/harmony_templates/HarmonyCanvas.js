@@ -342,7 +342,10 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     return {
         render: draw,
         updateData: function (newData) {
+            // Client owns selection state — never let server overwrite it
+            var clientSelection = data.selection;
             Object.assign(data, newData);
+            data.selection = clientSelection;
             draw();
         },
         getData: function () {
@@ -462,53 +465,71 @@ function handlePixelSelection(event, camNameOverride) {
     const isAppend = (event.shiftKey || event.ctrlKey || event.metaKey);
     if (appendPixelField) appendPixelField.value = isAppend ? "true" : "false";
 
-    // Client-side optimistic update
-    if (window.gridPolys && window.gridPolys[finalCamName]) {
-        let clickedHex = null;
-        for (let hex of window.gridPolys[finalCamName]) {
-            if (pointInPolygon([final_x, final_y], hex.poly)) {
-                clickedHex = hex;
-                break;
-            }
-        }
-        
-        if (clickedHex) {
-            let sel = {};
-            if (window.harmonyEditor && window.harmonyEditor.getData) {
-                sel = window.harmonyEditor.getData().selection || {};
-            } else {
-                sel = window.harmonyCanvasData.selection || {};
-            }
-            let polyObj = {};
-            // Optimistically populate polygon for ALL cameras using axial coordinates (q, r)
-            for (let cName in window.gridPolys) {
-                const hexArr = window.gridPolys[cName];
-                const matchingHex = hexArr.find(h => h.q === clickedHex.q && h.r === clickedHex.r);
-                if (matchingHex) {
-                    polyObj[cName] = matchingHex.poly;
+    // Client-side cell selection — this is the ONLY place selection state is set.
+    // The server sync (syncCanvasData) never touches selection.
+    console.time('cellSelect');
+    try {
+        if (window.gridPolys && window.gridPolys[finalCamName] && Array.isArray(window.gridPolys[finalCamName])) {
+            let clickedHex = null;
+            const polys = window.gridPolys[finalCamName];
+            for (let i = 0; i < polys.length; i++) {
+                if (polys[i] && polys[i].poly && pointInPolygon([final_x, final_y], polys[i].poly)) {
+                    clickedHex = polys[i];
+                    break;
                 }
             }
-            
-            if (appendPixelField.value === "true") {
-                if (sel.firstCell) {
-                    sel.additionalCells = sel.additionalCells || [];
-                    // Insert at front to match server's insert(0, ...)
-                    sel.additionalCells.unshift(polyObj);
+
+            if (clickedHex) {
+                // Build the polygon object for all loaded cameras at this axial coord
+                let polyObj = {};
+                for (let cName of Object.keys(window.gridPolys)) {
+                    const hexArr = window.gridPolys[cName];
+                    if (Array.isArray(hexArr)) {
+                        const match = hexArr.find(h => h.q === clickedHex.q && h.r === clickedHex.r);
+                        if (match) polyObj[cName] = match.poly;
+                    }
+                }
+
+                // Read current client-owned selection
+                let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : window.harmonyCanvasData;
+                let sel = editorData.selection || {};
+
+                if (isAppend) {
+                    if (sel.firstCell) {
+                        let adds = sel.additionalCells ? [...sel.additionalCells] : [];
+                        adds.unshift(polyObj);
+                        sel = { firstCell: sel.firstCell, additionalCells: adds };
+                    } else {
+                        sel = { firstCell: polyObj, additionalCells: [] };
+                    }
                 } else {
-                    sel.firstCell = polyObj;
-                    sel.additionalCells = [];
+                    if (sel.firstCell) {
+                        sel = { firstCell: sel.firstCell, additionalCells: [polyObj] };
+                    } else {
+                        sel = { firstCell: polyObj, additionalCells: [] };
+                    }
                 }
+
+                // Write selection to both references so draw() sees it immediately
+                if (window.harmonyEditor && window.harmonyEditor.getData) {
+                    window.harmonyEditor.getData().selection = sel;
+                }
+                window.harmonyCanvasData.selection = sel;
+
+                // Draw immediately — no server round-trip needed
+                if (window.harmonyEditor) window.harmonyEditor.render();
+                console.timeEnd('cellSelect');
             } else {
-                sel.firstCell = polyObj;
-                sel.additionalCells = [];
+                console.timeEnd('cellSelect');
+                console.log('No hex found at click coordinates', final_x, final_y);
             }
-            
-            if (window.harmonyEditor && window.harmonyEditor.getData) {
-                window.harmonyEditor.getData().selection = sel;
-            }
-            window.harmonyCanvasData.selection = sel;
-            if (window.harmonyEditor) window.harmonyEditor.render();
+        } else {
+            console.timeEnd('cellSelect');
+            console.warn('gridPolys not loaded for', finalCamName, '— available:', Object.keys(window.gridPolys || {}));
         }
+    } catch (err) {
+        console.timeEnd('cellSelect');
+        console.error('Client cell selection error:', err);
     }
 
     const selectPixelForm = document.getElementById(`selectPixelForm`);
@@ -697,23 +718,25 @@ function syncCanvasData(viewId) {
 
     if (isSyncingCanvas || queuedClicks > 0) {
         queuedSyncCanvas = true;
-        return; // Prevent request stacking over high-latency connections
+        return;
     }
 
     isSyncingCanvas = true;
     fetch(`/harmony/canvas_data/${viewId}`)
         .then(response => response.json())
-        .then(data => {
-            if (data && data.cameras) {
+        .then(serverData => {
+            if (serverData && serverData.cameras) {
                 if (window.harmonyCanvasData) {
-                    window.harmonyCanvasData.cameras = data.cameras;
+                    window.harmonyCanvasData.cameras = serverData.cameras;
                     if (window.harmonyCanvasData.cameraName === "All") {
                         fetchGridPolys("All");
                     }
                 }
             }
-            if (window.harmonyEditor && queuedClicks === 0) {
-                window.harmonyEditor.updateData(data);
+            // Strip selection from server data — client owns selection exclusively
+            delete serverData.selection;
+            if (window.harmonyEditor) {
+                window.harmonyEditor.updateData(serverData);
             }
         })
         .catch(err => console.error("Error syncing canvas data:", err))
