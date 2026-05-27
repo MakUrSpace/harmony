@@ -591,6 +591,12 @@ class RTSPCamera(RemoteCamera):
 
     def _capture_loop(self) -> None:
         cap = self._open_cap()
+        
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if not fps or fps <= 0 or fps > 120:
+            fps = 30.0
+        threshold = max(0.015, (1.0 / fps) * 0.8)
+        
         last_ok = time()
         last_clear = time()
 
@@ -599,6 +605,10 @@ class RTSPCamera(RemoteCamera):
                 if not cap.isOpened():
                     cap.release()
                     cap = self._open_cap()
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    if not fps or fps <= 0 or fps > 120:
+                        fps = 30.0
+                    threshold = max(0.015, (1.0 / fps) * 0.8)
                     continue
 
                 now = time()
@@ -619,14 +629,15 @@ class RTSPCamera(RemoteCamera):
                         break
                     grab_duration = time() - grab_start
                     
-                    # If it took more than 15ms to grab, it blocked waiting for the next fresh camera frame.
-                    # 15ms is used instead of 3ms to avoid false positives from OS thread scheduling jitter.
-                    if grab_duration > 0.015:
+                    # If it took more than the threshold to grab, it blocked waiting for the next fresh camera frame.
+                    # A dynamic threshold based on FPS allows us to skip backlog frames properly even on slower CPUs.
+                    if grab_duration > threshold:
                         break
                         
                     grab_count += 1
                     # Prevent starvation if there's a massive backlog; yield a frame occasionally
-                    if grab_count >= 30:
+                    # Increased to 90 to clear deep backlogs much faster without yielding stale frames as often
+                    if grab_count >= 90:
                         break
 
                 if not ok:

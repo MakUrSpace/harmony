@@ -57,11 +57,14 @@ def buildConfigurator(request: Request):
                     <button class="btn btn-sm btn-info" onclick="advanceColumn('{cam.camName}')">Next Column</button>
                     <span class="d-inline-flex align-items-center gap-1 ms-2" title="Axial coordinate increment per click within a column, and per new column">
                         <small class="text-muted">Row&nbsp;&Delta;(q,r):</small>
-                        <input type="number" id="rowIncrQ_{cam.camName}" value="8" style="width:4em" class="form-control form-control-sm d-inline-block">
-                        <input type="number" id="rowIncrR_{cam.camName}" value="0" style="width:4em" class="form-control form-control-sm d-inline-block">
+                        <input type="number" id="rowIncrQ_{cam.camName}" value="8" style="width:4em" class="form-control form-control-sm d-inline-block" onchange="updateNextClickDisplay('{cam.camName}')">
+                        <input type="number" id="rowIncrR_{cam.camName}" value="0" style="width:4em" class="form-control form-control-sm d-inline-block" onchange="updateNextClickDisplay('{cam.camName}')">
                         <small class="text-muted ms-2">Col&nbsp;&Delta;(q,r):</small>
-                        <input type="number" id="colIncrQ_{cam.camName}" value="-2" style="width:4em" class="form-control form-control-sm d-inline-block">
-                        <input type="number" id="colIncrR_{cam.camName}" value="4" style="width:4em" class="form-control form-control-sm d-inline-block">
+                        <input type="number" id="colIncrQ_{cam.camName}" value="-2" style="width:4em" class="form-control form-control-sm d-inline-block" onchange="updateNextClickDisplay('{cam.camName}')">
+                        <input type="number" id="colIncrR_{cam.camName}" value="4" style="width:4em" class="form-control form-control-sm d-inline-block" onchange="updateNextClickDisplay('{cam.camName}')">
+                    </span>
+                    <span class="d-inline-flex align-items-center ms-2 text-info fw-bold" id="nextClickCoords_{cam.camName}">
+                        Next: (0, 0)
                     </span>
                     <!-- AZ controls below -->
                 </div>
