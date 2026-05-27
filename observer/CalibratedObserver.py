@@ -638,14 +638,13 @@ class CalibratedObserver(Observer):
                 contrasts = [
                     calc_contrast(r, g, b, c) for c in contrast_colors + list(colors)
                 ]
-                if sum([contrast > 200 for contrast in contrasts]) >= len(
-                    contrast_colors + list(colors)
-                ):  # Ensure high contrast
+                threshold = max(20, 200 - (len(colors) * 5) - i)
+                if all(contrast > threshold for contrast in contrasts):
                     color = (r, g, b)
                     break
             if color is None:
-                raise Exception(f"Failed to generate color within 100 cycles")
-            colors.add((r, g, b))
+                color = (r, g, b) # Fallback to last generated
+            colors.add(color)
         self._colors = getattr(self, "_colors", {})
         self._colors[n] = list(colors)
         return self._colors[n]
