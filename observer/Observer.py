@@ -975,7 +975,7 @@ class CaptureConfiguration:
                 cameras[name] = RTSPCamera(
                     address=addr, activeZone=az, camName=name, auth=auth
                 )
-            elif str(camName) not in ["rsc", "calibrationPlan", "hex", "grid_overlays", "show_grid", "show_objects"]:
+            elif str(camName) not in ["rsc", "calibrationPlan", "hex", "grid_overlays", "grid_polys", "show_grid", "show_objects"]:
                 addr = camDef["addr"]
                 rot = camDef["rot"]
                 auth = camDef.get("auth", None)
