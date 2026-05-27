@@ -20,6 +20,8 @@
             <div class="col" align="left">
                 <input type="button" class="btn btn-primary" value="Save State" hx-post="{configuratorURL}"
                     hx-swap="none">
+                <input type="button" class="btn btn-warning ms-2" value="Calibrate Data" hx-post="{configuratorURL}calibrate" hx-swap="none" onclick="clearPendingFlag()">
+                <span id="calibrationPendingFlag" class="badge bg-danger ms-2" style="display: none;">Calibration Pending</span>
                 <div class="btn-group ms-2">
                     <button type="button" class="btn btn-warning" onclick="clearShape()">Clear All</button>
                     <button type="button" class="btn btn-success" onclick="submitShape()">Submit Shape</button>
@@ -501,6 +503,7 @@
             body: JSON.stringify(payload)
         }).then(function(res) { return res.json(); }).then(function(data) {
             if (data.status === 'success') {
+                showPendingFlag();
                 allNudges[camName] = {};
                 selectedNudgeHexes[camName] = {};
                 resetNudgeShift(camName);
@@ -581,6 +584,17 @@
         setTimeout(function () { el.innerText = ""; }, 5000);
     }
 
+    function showPendingFlag() {
+        var el = document.getElementById('calibrationPendingFlag');
+        if (el) el.style.display = 'inline-block';
+    }
+
+    function clearPendingFlag() {
+        var el = document.getElementById('calibrationPendingFlag');
+        if (el) el.style.display = 'none';
+        showStatus("Calibration grids regenerating...", false);
+    }
+
     function submitShape() {
         var validData = {};
         var count = 0;
@@ -610,6 +624,7 @@
         }).then(response => {
             if (response.ok) {
                 showStatus("Calibration submitted successfully!", false);
+                showPendingFlag();
                 // Optionally reload page to update table? or just update local list if we knew the return format
                 // For now, let's just leave it. If user refreshes, they see the new data.
                 setTimeout(() => location.reload(), 1000);
@@ -618,13 +633,25 @@
             }
         }).catch(e => showStatus("Network error: " + e, true));
     }
-
+    function undoLastPoint(camName) {
+        if (manualPoints[camName] && manualPoints[camName].length > 0) {
+            manualPoints[camName].pop();
+            axialPoints[camName].pop();
+            if (currentRow[camName] > 0) {
+                currentRow[camName]--;
+            }
+            drawPoints(camName);
+            renderActiveCalibrationTable(camName);
+            showPendingFlag();
+        }
+    }
 
 
     function renderActiveCalibrationTable(camName) {
         var container = document.getElementById('activeCalibTableContainer_' + camName);
+        var latestContainer = document.getElementById('latestCalibPoint_' + camName);
         var tbody = document.querySelector('#activeCalibTable_' + camName + ' tbody');
-        if (!container || !tbody) return;
+        if (!container || !tbody || !latestContainer) return;
 
         var points = manualPoints[camName];
         var axials = axialPoints[camName];
@@ -632,29 +659,42 @@
         if (!points || points.length === 0) {
             container.style.display = 'none';
             tbody.innerHTML = '';
+            latestContainer.innerHTML = '';
             return;
         }
 
         container.style.display = 'block';
         tbody.innerHTML = '';
+        latestContainer.innerHTML = '';
 
-        points.forEach((pt, i) => {
-            var row = document.createElement('tr');
-
+        for (let i = points.length - 1; i >= 0; i--) {
+            var pt = points[i];
             var px = pt[0].toFixed(4);
             var py = pt[1].toFixed(4);
             var q = axials[i] ? axials[i][0] : 0;
             var r = axials[i] ? axials[i][1] : 0;
 
-            row.innerHTML = `
+            var rowHtml = `
                 <td>P${i + 1}</td>
                 <td><input type="number" step="0.0001" class="form-control form-control-sm text-center" value="${px}" onchange="updateManualPoint('${camName}', ${i}, 'x', this.value)"></td>
                 <td><input type="number" step="0.0001" class="form-control form-control-sm text-center" value="${py}" onchange="updateManualPoint('${camName}', ${i}, 'y', this.value)"></td>
                 <td><input type="number" class="form-control form-control-sm text-center" value="${q}" onchange="updateAxialPoint('${camName}', ${i}, 'q', this.value)"></td>
                 <td><input type="number" class="form-control form-control-sm text-center" value="${r}" onchange="updateAxialPoint('${camName}', ${i}, 'r', this.value)"></td>
             `;
-            tbody.appendChild(row);
-        });
+
+            if (i === points.length - 1) {
+                // Latest point
+                var latestTable = document.createElement('table');
+                latestTable.className = 'table table-sm table-bordered table-success text-center mb-0';
+                latestTable.innerHTML = `<thead><tr><th>Latest Point</th><th>Pixel X</th><th>Pixel Y</th><th>Axial Q</th><th>Axial R</th></tr></thead><tbody><tr>${rowHtml}</tr></tbody>`;
+                latestContainer.appendChild(latestTable);
+            } else {
+                // Older points
+                var row = document.createElement('tr');
+                row.innerHTML = rowHtml;
+                tbody.appendChild(row);
+            }
+        }
     }
 
     function updateManualPoint(camName, index, axis, value) {

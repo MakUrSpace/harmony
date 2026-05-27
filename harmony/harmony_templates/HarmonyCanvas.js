@@ -341,11 +341,13 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
 
     return {
         render: draw,
-        updateData: function (newData) {
+        updateData: function (newData, forceSelection) {
             // Client owns selection state — never let server overwrite it
             var clientSelection = data.selection;
             Object.assign(data, newData);
-            data.selection = clientSelection;
+            if (!forceSelection) {
+                data.selection = clientSelection;
+            }
             draw();
         },
         getData: function () {
@@ -389,7 +391,7 @@ function dist(p1, p2) {
 
 
 // Existing logic adapted for external call
-function handlePixelSelection(event, camNameOverride) {
+async function handlePixelSelection(event, camNameOverride) {
     console.log("Canvas clicked!!", event);
     // Event is the mouse event derived from canvas
 
@@ -438,15 +440,26 @@ function handlePixelSelection(event, camNameOverride) {
     let final_y = image_y;
 
     if (camName === "All") {
-        const cams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras : [];
         if (cams.length > 0) {
-            const half_w = 960;
-            const half_h = 540;
-            const quad_col = Math.floor(image_x / half_w);
-            const quad_row = Math.floor(image_y / half_h);
-            const quad_idx = quad_row * 2 + quad_col;
-            if (quad_idx >= 0 && quad_idx < cams.length) {
-                finalCamName = cams[quad_idx];
+            const numCams = cams.length;
+            const w = event.target.width;
+            const h = event.target.height;
+            const half_w = w / 2;
+            const half_h = h / 2;
+            
+            let cIndex = -1;
+            if (numCams === 2) {
+                cIndex = image_x < half_w ? 0 : 1;
+            } else if (numCams > 2) {
+                if (image_y < half_h) {
+                    cIndex = image_x < half_w ? 0 : 1;
+                } else {
+                    cIndex = image_x < half_w ? 2 : 3;
+                }
+            }
+            
+            if (cIndex >= 0 && cIndex < cams.length) {
+                finalCamName = cams[cIndex];
                 if (finalCamName === "VirtualMap") {
                     final_x = (image_x % half_w) * (1200 / 960);
                     final_y = (image_y % half_h) * (1200 / 540);
@@ -469,6 +482,18 @@ function handlePixelSelection(event, camNameOverride) {
     // The server sync (syncCanvasData) never touches selection.
     console.time('cellSelect');
     try {
+        if (!window.gridPolys || !window.gridPolys[finalCamName] || !Array.isArray(window.gridPolys[finalCamName]) || window.gridPolys[finalCamName].length === 0) {
+            console.log("Grid polygons not loaded yet. Fetching synchronously for click...");
+            try {
+                const response = await fetch(`/harmony/grid_polys/${finalCamName}`);
+                const data = await response.json();
+                window.gridPolys = window.gridPolys || {};
+                window.gridPolys[finalCamName] = data;
+            } catch (err) {
+                console.error("Failed to fetch grid polys during click", err);
+            }
+        }
+
         if (window.gridPolys && window.gridPolys[finalCamName] && Array.isArray(window.gridPolys[finalCamName])) {
             let clickedHex = null;
             const polys = window.gridPolys[finalCamName];
@@ -489,10 +514,31 @@ function handlePixelSelection(event, camNameOverride) {
                         if (match) polyObj[cName] = match.poly;
                     }
                 }
+                polyObj._q = clickedHex.q;
+                polyObj._r = clickedHex.r;
 
                 // Read current client-owned selection
                 let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : window.harmonyCanvasData;
                 let sel = editorData.selection || {};
+
+                // Prevent repeatedly selecting the same cell
+                let alreadySelected = false;
+                if (sel.firstCell && sel.firstCell._q === clickedHex.q && sel.firstCell._r === clickedHex.r) {
+                    alreadySelected = true;
+                }
+                if (sel.additionalCells) {
+                    for (let cell of sel.additionalCells) {
+                        if (cell._q === clickedHex.q && cell._r === clickedHex.r) {
+                            alreadySelected = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (alreadySelected) {
+                    console.timeEnd('cellSelect');
+                    return;
+                }
 
                 if (isAppend) {
                     if (sel.firstCell) {
@@ -522,6 +568,7 @@ function handlePixelSelection(event, camNameOverride) {
             } else {
                 console.timeEnd('cellSelect');
                 console.log('No hex found at click coordinates', final_x, final_y);
+                return;
             }
         } else {
             console.timeEnd('cellSelect');
@@ -589,12 +636,12 @@ function pointInPolygon(point, vs) {
 
 window.gridPolys = window.gridPolys || {};
 
-function fetchGridPolys(camName) {
+function fetchGridPolys(camName, force = false) {
     if (!camName) return;
     if (camName === "All") {
         const cams = (window.harmonyCanvasData && window.harmonyCanvasData.cameras) ? window.harmonyCanvasData.cameras : [];
         for (let c of cams) {
-            if (c && c !== "No Camera" && !window.gridPolys[c]) {
+            if (c && c !== "No Camera" && (force || !window.gridPolys[c] || !Array.isArray(window.gridPolys[c]) || window.gridPolys[c].length === 0)) {
                 fetch(`/harmony/grid_polys/${c}`)
                     .then(r => r.json())
                     .then(data => { window.gridPolys[c] = data; })
@@ -603,7 +650,7 @@ function fetchGridPolys(camName) {
         }
         return;
     }
-    if (window.gridPolys[camName]) return;
+    if (!force && window.gridPolys[camName] && Array.isArray(window.gridPolys[camName]) && window.gridPolys[camName].length > 0) return;
     fetch(`/harmony/grid_polys/${camName}`)
         .then(r => r.json())
         .then(data => {
@@ -728,8 +775,17 @@ function syncCanvasData(viewId) {
             if (serverData && serverData.cameras) {
                 if (window.harmonyCanvasData) {
                     window.harmonyCanvasData.cameras = serverData.cameras;
+                    
+                    let refetchAll = false;
+                    if (serverData.grid_cache_key && serverData.grid_cache_key !== window.gridCacheKey) {
+                        window.gridCacheKey = serverData.grid_cache_key;
+                        refetchAll = true;
+                    }
+                    
                     if (window.harmonyCanvasData.cameraName === "All") {
-                        fetchGridPolys("All");
+                        fetchGridPolys("All", refetchAll);
+                    } else if (refetchAll) {
+                        fetchGridPolys(window.harmonyCanvasData.cameraName, true);
                     }
                 }
             }
@@ -748,3 +804,59 @@ function syncCanvasData(viewId) {
             }
         });
 }
+
+window.clearSelectionFrontEnd = function(viewId) {
+    var emptySel = { firstCell: null, additionalCells: [] };
+    if (window.harmonyEditor && window.harmonyEditor.getData) {
+        window.harmonyEditor.getData().selection = emptySel;
+    }
+    if (window.harmonyCanvasData) {
+        window.harmonyCanvasData.selection = emptySel;
+    }
+    if (window.harmonyEditor) window.harmonyEditor.render();
+    
+    // Also tell the backend
+    if (typeof htmx !== 'undefined') {
+        htmx.ajax('GET', `/harmony/clear_pixel/${viewId}`, {target: '#interactor'});
+    }
+};
+
+window.rotateObjectFrontEnd = function(viewId, oid) {
+    if (window.harmonyCanvasData && window.harmonyCanvasData.objects && window.harmonyCanvasData.objects[oid]) {
+        let axials = window.harmonyCanvasData.constituent_axials ? window.harmonyCanvasData.constituent_axials[oid] : null;
+        if (axials && axials.length > 1) {
+            let q0 = axials[0][0], r0 = axials[0][1];
+            let newAxials = [[q0, r0]];
+            for (let i = 1; i < axials.length; i++) {
+                let q = axials[i][0], r = axials[i][1];
+                let dq = q - q0, dr = r - r0;
+                let new_dq = -dr, new_dr = dq + dr;
+                newAxials.push([q0 + new_dq, r0 + new_dr]);
+            }
+            window.harmonyCanvasData.constituent_axials[oid] = newAxials;
+            
+            // Now update the objects geometry from gridPolys
+            let objMap = window.harmonyCanvasData.objects[oid];
+            for (let cName in objMap) {
+                if (window.gridPolys && window.gridPolys[cName]) {
+                    let newPoly = [];
+                    newAxials.forEach(ax => {
+                        let hex = window.gridPolys[cName].find(h => h.q === ax[0] && h.r === ax[1]);
+                        if (hex && hex.poly) {
+                            newPoly.push(...hex.poly);
+                        }
+                    });
+                    if (newPoly.length > 0) {
+                        objMap[cName] = newPoly;
+                    }
+                }
+            }
+            if (window.harmonyEditor) window.harmonyEditor.render();
+        }
+        
+        // Tell the backend
+        if (typeof htmx !== 'undefined') {
+            htmx.ajax('POST', `/harmony/rotate_object/${viewId}/${oid}`, {target: '#interactor'});
+        }
+    }
+};

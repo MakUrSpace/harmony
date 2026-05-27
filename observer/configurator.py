@@ -53,6 +53,7 @@ def buildConfigurator(request: Request):
                 </div>
                 <div class="text-center mt-2 d-flex flex-wrap justify-content-center align-items-center gap-2">
                     <button class="btn btn-sm btn-warning" onclick="clearShape('{cam.camName}')">Clear Manual Points</button>
+                    <button class="btn btn-sm btn-secondary" onclick="undoLastPoint('{cam.camName}')">Undo Last</button>
                     <button class="btn btn-sm btn-info" onclick="advanceColumn('{cam.camName}')">Next Column</button>
                     <span class="d-inline-flex align-items-center gap-1 ms-2" title="Axial coordinate increment per click within a column, and per new column">
                         <small class="text-muted">Row&nbsp;&Delta;(q,r):</small>
@@ -73,8 +74,9 @@ def buildConfigurator(request: Request):
                 </div>
                 
                 <div class="mt-3" id="activeCalibTableContainer_{cam.camName}" style="display:none; max-width: 600px; margin: auto;">
+                    <div id="latestCalibPoint_{cam.camName}" class="mb-2"></div>
                     <details>
-                        <summary class="h5" style="cursor: pointer;">Calibration Points (Editable)</summary>
+                        <summary class="h5" style="cursor: pointer;">Older Calibration Points (Editable)</summary>
                         <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
                             <table class="table table-sm table-bordered text-center" id="activeCalibTable_{cam.camName}">
                                 <thead><tr><th>Point</th><th>Pixel X</th><th>Pixel Y</th><th>Axial Q</th><th>Axial R</th></tr></thead>
@@ -230,6 +232,9 @@ def draw_dynamic_grid(cc, camName):
 
         # 4. Spawn background computation thread
         def calculate_grid_thread():
+            import time
+            start_time = time.time()
+            print(f"INFO: [Calibration] Starting grid and poly generation for Camera {camName}...")
             try:
                 overlay = np.zeros((h, w, 3), dtype=np.uint8)
 
@@ -306,6 +311,14 @@ def draw_dynamic_grid(cc, camName):
                 grid_color = (255, 255, 255)
 
                 all_polys = []
+                data_polys = []
+                
+                try:
+                    from harmony.harmonyServer import get_conversion_params, scale_point_new
+                    conv_params = get_conversion_params(str(camName))
+                except ImportError:
+                    conv_params = (1.0, 1.0, 0, 0)
+                    scale_point_new = lambda pt, p: pt
 
                 for q in range(min_q - pad, max_q + pad + 1):
                     for r in range(min_r - pad, max_r + pad + 1):
@@ -321,6 +334,18 @@ def draw_dynamic_grid(cc, camName):
 
                         poly_cam = cc.cam_hex_at_axial(str(camName), q, r)
                         all_polys.append(poly_cam)
+                        
+                        # Generate JSON poly payload
+                        poly_list = []
+                        for pt in poly_cam.reshape(-1, 2):
+                            spt = scale_point_new((float(pt[0]), float(pt[1])), conv_params)
+                            poly_list.append([spt[0], spt[1]])
+                            
+                        data_polys.append({
+                            "q": q,
+                            "r": r,
+                            "poly": poly_list
+                        })
 
                 if all_polys:
                     cv2.polylines(
@@ -330,10 +355,16 @@ def draw_dynamic_grid(cc, camName):
                 # Cache the result and clear from generating set
                 with cc._grid_cache_lock:
                     cc._grid_cache[cache_key] = overlay
+                    if not hasattr(cc, "grid_polys") or cc.grid_polys is None:
+                        cc.grid_polys = {}
+                    cc.grid_polys[str(camName)] = data_polys
                     cc._grid_generating.discard(cache_key)
+                
+                elapsed = time.time() - start_time
+                print(f"INFO: [Calibration] Completed grid generation for Camera {camName} in {elapsed:.2f}s.")
 
             except Exception as e:
-                print(f"Error drawing dynamic grid in background: {e}")
+                print(f"ERROR: [Calibration] Error drawing dynamic grid in background for {camName}: {e}")
                 with cc._grid_cache_lock:
                     cc._grid_generating.discard(cache_key)
 
@@ -374,7 +405,8 @@ def eagerly_precalculate_grids(cc):
             print(f"Failed eagerly pre-calculating grid for {camName}: {e}")
 
 
-def genCameraFullViewWithActiveZone(cc, cm, camName):
+async def genCameraFullViewWithActiveZone(cc, cm, camName):
+    import asyncio
     while True:
         try:
             cam = cc.cameras[str(camName)]
@@ -417,20 +449,28 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
                         if pts and len(pts) > 0:
                             poly_cam = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
                             cv2.polylines(
-                                img, [poly_cam], True, (0, 255, 0), 2, cv2.LINE_AA
+                                img,
+                                [poly_cam],
+                                True,
+                                (0, 255, 0),
+                                2,
+                                cv2.LINE_AA,
                             )
-                            for i, p in enumerate(pts):
-                                x, y = int(p[0]), int(p[1])
-                                cv2.circle(img, (x, y), 5, (0, 255, 0), -1)
-                                cv2.putText(
-                                    img,
-                                    str(i + 1),
-                                    (x + 8, y + 8),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    0.7,
-                                    (0, 255, 0),
-                                    2,
-                                )
+                            # Draw coordinate text
+                            if len(calibObj[camName]) > 2:
+                                axials = calibObj[camName][2]
+                                for i, pt in enumerate(pts):
+                                    if i < len(axials):
+                                        q, r = axials[i]
+                                        cv2.putText(
+                                            img,
+                                            f"({q},{r})",
+                                            (int(pt[0]), int(pt[1]) - 10),
+                                            cv2.FONT_HERSHEY_SIMPLEX,
+                                            0.7,
+                                            (0, 255, 0),
+                                            2,
+                                        )
 
             ret, img = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
             yield (
@@ -438,11 +478,13 @@ def genCameraFullViewWithActiveZone(cc, cm, camName):
             )
 
             # Rate limiting: ~2 FPS is plenty for configurator preview and avoids tunnel saturation
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            break
         except Exception as e:
             print(f"Failed genCameraFullViewWithActiveZone for {camName} -- {e}")
             yield (b"--frame\r\nContent-Type: image/jpg\r\n\r\n\r\n")
-            time.sleep(1.0)  # Back off on error
+            await asyncio.sleep(1.0)  # Back off on error
 
 
 @configurator.post("/set_overlays")
@@ -820,6 +862,15 @@ async def nudgeHex(request: Request, camName: str):
             cc._grid_cache.clear()
         eagerly_precalculate_grids(cc)
 
+        return JSONResponse({"status": "success"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@configurator.post("/calibrate")
+async def run_calibration(request: Request):
+    cc = request.app.state.cc
+    try:
+        eagerly_precalculate_grids(cc)
         return JSONResponse({"status": "success"})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

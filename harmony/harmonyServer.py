@@ -146,28 +146,35 @@ class FrameBroadcaster:
             sleep_time = max(0, self.interval - elapsed)
             time.sleep(sleep_time)
 
-    def subscribe(self):
+    async def subscribe(self):
         """Yields frames to a client."""
+        import asyncio
         with self.lock:
             self.clients += 1
-            if self.last_frame:
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpg\r\n\r\n" + self.last_frame + b"\r\n"
-                )
+            frame = self.last_frame
+
+        if frame:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpg\r\n\r\n" + frame + b"\r\n"
+            )
 
         try:
+            last_yielded = frame
             while True:
-                with self.condition:
-                    self.condition.wait(timeout=1.0)  # check shutdown every second
-                    if not self.running or SHUTDOWN_EVENT.is_set():
-                        break
-                    frame = self.last_frame
+                if not self.running or SHUTDOWN_EVENT.is_set():
+                    break
 
-                if frame:
+                current = self.last_frame
+                if current and current != last_yielded:
                     yield (
-                        b"--frame\r\nContent-Type: image/jpg\r\n\r\n" + frame + b"\r\n"
+                        b"--frame\r\nContent-Type: image/jpg\r\n\r\n" + current + b"\r\n"
                     )
+                    last_yielded = current
+
+                await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            pass
         finally:
             with self.lock:
                 self.clients -= 1
@@ -351,7 +358,8 @@ def get_broadcaster(key, render_func):
 # ---------------------------------------------------------------------------
 
 
-def renderConsole():
+async def renderConsole():
+    import asyncio
     while not SHUTDOWN_EVENT.is_set():
         cm = _get_cm()
         shape = (170, 400)
@@ -387,14 +395,18 @@ def renderConsole():
             cv2.LINE_AA,
         )
         ret, consoleImage = cv2.imencode(".jpg", zeros)
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpg\r\n\r\n" + consoleImage.tobytes() + b"\r\n"
-        )
+        try:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpg\r\n\r\n" + consoleImage.tobytes() + b"\r\n"
+            )
+            await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            break
 
 
 @harmony.get("/harmony_console")
-def getConsoleImage():
+async def getConsoleImage():
     return StreamingResponse(
         renderConsole(), media_type="multipart/x-mixed-replace; boundary=frame"
     )
@@ -405,7 +417,8 @@ def getConsoleImage():
 # ---------------------------------------------------------------------------
 
 
-def genCombinedCamerasView():
+async def genCombinedCamerasView():
+    import asyncio
     while not SHUTDOWN_EVENT.is_set():
         cc = _get_cc()
         camImages = []
@@ -418,13 +431,17 @@ def genCombinedCamerasView():
             interpolation=cv2.INTER_AREA,
         )
         ret, camImage = cv2.imencode(".jpg", camImage)
-        yield (
-            b"--frame\r\nContent-Type: image/jpg\r\n\r\n" + camImage.tobytes() + b"\r\n"
-        )
+        try:
+            yield (
+                b"--frame\r\nContent-Type: image/jpg\r\n\r\n" + camImage.tobytes() + b"\r\n"
+            )
+            await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            break
 
 
 @harmony.get("/combinedCameras")
-def combinedCamerasResponse():
+async def combinedCamerasResponse():
     return StreamingResponse(
         genCombinedCamerasView(), media_type="multipart/x-mixed-replace; boundary=frame"
     )
@@ -611,7 +628,7 @@ def render_composite_all(cc, cm, viewId=None):
 
 
 @harmony.get("/camWithChanges/{camName}/{viewId}")
-def cameraViewWithChangesResponse(camName: str, viewId: str):
+async def cameraViewWithChangesResponse(camName: str, viewId: str):
     cm = _get_cm()
     cc = _get_cc()
     if camName == "VirtualMap":
@@ -846,7 +863,7 @@ def _get_canvas_data_dict(viewId: str, is_admin: bool = False):
     cc = _get_cc()
 
     session_config = SESSIONS.get(viewId, SessionConfig())
-    memory_oids = tuple(obj.oid for obj in cm.memory) if cm else ()
+    memory_ids = tuple(id(obj) for obj in cm.memory) if cm else ()
     # Create a hashable key for session_config to cache canvas data
     config_key = (
         tuple(session_config.selectable),
@@ -859,7 +876,7 @@ def _get_canvas_data_dict(viewId: str, is_admin: bool = False):
         tuple(session_config.selection.additionalCells) if session_config.selection else None,
         session_config.selected_oid,
         getattr(session_config, "showObjects", True),
-        memory_oids,
+        memory_ids,
         is_admin,
     )
     cycle_num = cm.cycleCounter if cm else 0
@@ -875,7 +892,7 @@ def _get_canvas_data_dict(viewId: str, is_admin: bool = False):
     if 'OBJECTS_GEOMETRY_CACHE' not in globals():
         OBJECTS_GEOMETRY_CACHE = {}
 
-    objects_cache_key = (cycle_num, memory_oids)
+    objects_cache_key = (cycle_num, memory_ids)
     if len(OBJECTS_GEOMETRY_CACHE) > 50:
         OBJECTS_GEOMETRY_CACHE.clear()
 
@@ -963,7 +980,16 @@ def _get_canvas_data_dict(viewId: str, is_admin: bool = False):
         comp_cams.append("No Camera")
     comp_cams = comp_cams[:4]
 
+    rsc_id = id(cc.rsc) if getattr(cc, "rsc", None) is not None else None
+    hex_key = (
+        (cc.hex.size, cc.hex.rotation_deg, cc.hex.anchor_xy)
+        if getattr(cc, "hex", None) is not None
+        else None
+    )
+    grid_cache_key = str(hash((rsc_id, hex_key)))
+
     data = {
+        "grid_cache_key": grid_cache_key,
         "objects": objects,
         "cameras": comp_cams,
         **asdict(session_config),
@@ -990,7 +1016,7 @@ def _get_canvas_data_dict(viewId: str, is_admin: bool = False):
     return data
 
 
-def _get_canvas_update_script(viewId: str, is_admin: bool = False):
+def _get_canvas_update_script(viewId: str, is_admin: bool = False, force_selection: bool = False):
     import json
 
     try:
@@ -999,10 +1025,10 @@ def _get_canvas_update_script(viewId: str, is_admin: bool = False):
         return f"""
         <script>
             if (window.harmonyEditor && (typeof queuedClicks === 'undefined' || queuedClicks <= 1)) {{
-                window.harmonyEditor.updateData({canvas_json});
+                window.harmonyEditor.updateData({canvas_json}, {str(force_selection).lower()});
             }}
             if (window.harmonyEditors) {{
-                window.harmonyEditors.forEach(function(ed) {{ ed.updateData({canvas_json}); }});
+                window.harmonyEditors.forEach(function(ed) {{ ed.updateData({canvas_json}, {str(force_selection).lower()}); }});
             }}
         </script>
         """
@@ -1022,7 +1048,8 @@ def getCanvasData(request: Request, viewId: str):
 # ---------------------------------------------------------------------------
 
 
-def genCombinedCameraWithChangesView():
+async def genCombinedCameraWithChangesView():
+    import asyncio
     while not SHUTDOWN_EVENT.is_set():
         cm = _get_cm()
         cc = _get_cc()
@@ -1045,15 +1072,18 @@ def genCombinedCameraWithChangesView():
             ret, camImage = cv2.imencode(
                 ".jpg", camImage, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
             )
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpg\r\n\r\n" + camImage.tobytes() + b"\r\n"
-            )
-        time.sleep(0.1)
+            try:
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpg\r\n\r\n" + camImage.tobytes() + b"\r\n"
+                )
+            except asyncio.CancelledError:
+                break
+        await asyncio.sleep(0.1)
 
 
 @harmony.get("/combinedCamerasWithChanges")
-def combinedCamerasWithChangesResponse():
+async def combinedCamerasWithChangesResponse():
     return StreamingResponse(
         genCombinedCameraWithChangesView(),
         media_type="multipart/x-mixed-replace; boundary=frame",
@@ -1722,8 +1752,10 @@ def _render_factory_error(viewId, error_message, axials, is_admin=False):
     cell_count = len(axials)
     html_content = interactor_template.format(
         info=f"""
-        <input type="button" class="btn btn-danger mb-3" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
-        <h2 class="text-danger">Definition Error</h2>
+        <div class="d-flex justify-content-between align-items-start">
+            <h2 class="text-danger m-0">Definition Error</h2>
+            <input type="button" class="btn btn-danger mb-3" value="Clear Selection" onclick="clearSelectionFrontEnd('{viewId}')">
+        </div>
         <div class="alert alert-danger" role="alert" style="margin-top: 10px; padding: 10px; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 4px;">
             {error_message}
         </div>
@@ -1740,7 +1772,7 @@ def _render_factory_error(viewId, error_message, axials, is_admin=False):
         actions=f"""
         """,
     )
-    html_content += _get_canvas_update_script(viewId, is_admin=is_admin)
+    html_content += _get_canvas_update_script(viewId, is_admin=is_admin, force_selection=True)
     return HTMLResponse(html_content)
 
 
@@ -1801,8 +1833,10 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
     cell_summary = ", ".join(str(c) for c in axials)
     html_content = interactor_template.format(
         info=f"""
-        <input type="button" class="btn btn-danger mb-3" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
-        <h2>Object Defined</h2>
+        <div class="d-flex justify-content-between align-items-start">
+            <h2 class="m-0">Object Defined</h2>
+            <input type="button" class="btn btn-danger mb-3" value="Clear Selection" onclick="clearSelectionFrontEnd('{viewId}')">
+        </div>
         <h3>Name: {trackedObject.oid}</h3>
         <p><small>Cells ({len(axials)}): <code>{cell_summary}</code></small></p>
         """,
@@ -1810,7 +1844,7 @@ async def buildObject(request: Request, viewId: str, object_name: str = Form(...
         <input type="button" class="btn btn-danger" value="Delete Object" hx-delete="/harmony/object_factory/{viewId}" hx-target="#interactor">
         """,
     )
-    html_content += _get_canvas_update_script(viewId, is_admin=is_admin)
+    html_content += _get_canvas_update_script(viewId, is_admin=is_admin, force_selection=True)
     return HTMLResponse(html_content)
 
 
@@ -1883,7 +1917,7 @@ def moveObjectDefinition(request: Request, oid: str, viewId: str):
         cm.memory.remove(existing)
         cm.commitChanges(trackedObject)
         SESSIONS[viewId].selection = CellSelection()
-    return HTMLResponse("Success" + _get_canvas_update_script(viewId, is_admin=is_admin))
+    return HTMLResponse("Success" + _get_canvas_update_script(viewId, is_admin=is_admin, force_selection=True))
 
 
 # ---------------------------------------------------------------------------
@@ -1891,10 +1925,15 @@ def moveObjectDefinition(request: Request, oid: str, viewId: str):
 # ---------------------------------------------------------------------------
 
 @harmony.get("/grid_polys/{camName}")
-def getGridPolys(request: Request, camName: str):
+async def getGridPolys(request: Request, camName: str):
     cc = _get_cc()
     if not hasattr(cc, "rsc") or cc.rsc is None:
         return JSONResponse({})
+        
+    # Instant return from precalculated cache if available
+    if hasattr(cc, "grid_polys") and cc.grid_polys is not None:
+        if str(camName) in cc.grid_polys:
+            return JSONResponse(cc.grid_polys[str(camName)])
     
     if camName != "VirtualMap" and camName not in cc.cameras:
         return JSONResponse({})
@@ -1915,12 +1954,49 @@ def getGridPolys(request: Request, camName: str):
                     if hasattr(pt, "__iter__") and len(pt) >= 2:
                         qs.append(int(pt[0]))
                         rs.append(int(pt[1]))
-    if qs and rs:
-        min_q, max_q = int(min(qs)) - 15, int(max(qs)) + 15
+
+    # Calculate actual visible bounds using camera corners / activeZone to prevent huge off-screen generation
+    visible_qs = []
+    visible_rs = []
+    try:
+        if camName == "VirtualMap":
+            for px, py in [(0, 0), (w, 0), (w, h), (0, h)]:
+                scale_x, scale_y, off_x_base, off_y_base = get_conversion_params("VirtualMap")
+                rx = px / scale_x + off_x_base
+                ry = py / scale_y + off_y_base
+                q, r = cc.pixel_to_axial(rx, ry, apply_affine=False)
+                visible_qs.append(int(q))
+                visible_rs.append(int(r))
+        else:
+            cam = cc.cameras[camName]
+            pts = getattr(cam, 'activeZone', [(0, 0), (w, 0), (w, h), (0, h)])
+            if not len(pts):
+                pts = [(0, 0), (w, 0), (w, h), (0, h)]
+            for px, py in pts:
+                rx, ry = cc.rsc.camCoordToRealSpace(camName, (px, py))
+                q, r = cc.pixel_to_axial(rx, ry, apply_affine=False)
+                visible_qs.append(int(q))
+                visible_rs.append(int(r))
+    except Exception:
+        pass
+
+    if visible_qs and visible_rs:
+        min_q, max_q = min(visible_qs) - 2, max(visible_qs) + 2
+        min_r, max_r = min(visible_rs) - 2, max(visible_rs) + 2
+    elif qs and rs:
+        min_q, max_q = int(min(qs)) - 10, int(max(qs)) + 10
         min_r, max_r = int(min(rs)) - 10, int(max(rs)) + 10
     else:
         min_q, max_q = -5, 5
         min_r, max_r = -5, 5
+
+    # Hard cap the grid size to max 60x60 to prevent 4-second timeouts
+    if max_q - min_q > 60:
+        cq = (max_q + min_q) // 2
+        min_q, max_q = cq - 30, cq + 30
+    if max_r - min_r > 60:
+        cr = (max_r + min_r) // 2
+        min_r, max_r = cr - 30, cr + 30
 
     pad = 2
     hex_polys = []
@@ -2184,7 +2260,7 @@ def drawRegion(request: Request, viewId: str, radius: int = Form(1), region_type
         SESSIONS[viewId] = session
     
     is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
-    return HTMLResponse(render_interactor(request, viewId, (q0, r0)).body.decode() + _get_canvas_update_script(viewId, is_admin=is_admin))
+    return render_interactor(request, viewId, (q0, r0), force_selection=True)
 
 @harmony.post("/rotate_object/{viewId}/{objectId}")
 def rotateObject(request: Request, viewId: str, objectId: str):
@@ -2210,10 +2286,10 @@ def rotateObject(request: Request, viewId: str, objectId: str):
     is_admin = request.app.state.config.get("HARMONY_TEMPLATE") == "Harmony.html"
     session = SESSIONS.get(viewId)
     origin_cell = session.selection.firstCell if session else axials[0]
-    return HTMLResponse(render_interactor(request, viewId, origin_cell).body.decode() + _get_canvas_update_script(viewId, is_admin=is_admin))
+    return render_interactor(request, viewId, origin_cell, force_selection=True)
 
 
-def render_interactor(request: Request, viewId: str, cell: tuple, skip_canvas_update: bool = False):
+def render_interactor(request: Request, viewId: str, cell: tuple, skip_canvas_update: bool = False, force_selection: bool = False):
     """Refactored core rendering logic for the interactor panel."""
     cm = _get_cm()
     session = SESSIONS.get(viewId, SessionConfig())
@@ -2271,8 +2347,10 @@ def render_interactor(request: Request, viewId: str, cell: tuple, skip_canvas_up
         session.selected_oid = first_obj.oid
 
     info_html = f"""
-        <input type="button" class="btn btn-danger mb-3" value="Clear Selection" hx-get="/harmony/clear_pixel/{viewId}" hx-target="#interactor">
-        <h2>Selected First Cell: {first}</h2>
+        <div class="d-flex justify-content-between align-items-start">
+            <h2 class="m-0">Selected First Cell: {first}</h2>
+            <input type="button" class="btn btn-danger mb-3" value="Clear Selection" onclick="clearSelectionFrontEnd('{viewId}')">
+        </div>
     """
 
     if all_at_first:
@@ -2294,8 +2372,6 @@ def render_interactor(request: Request, viewId: str, cell: tuple, skip_canvas_up
     if selected.additionalCells:
         info_html += "<hr><h3>Additional Selections:</h3>"
         for i, cell in enumerate(selected.additionalCells):
-            if i > 0:
-                info_html += "<hr style='margin: 10px 0; border-top: 1px dashed #ccc;'>"
             dist = cm.cc.axial_distance(first, cell)
 
             # Find ALL objects at this additional cell
@@ -2305,13 +2381,19 @@ def render_interactor(request: Request, viewId: str, cell: tuple, skip_canvas_up
                 o_type = get_object_type(obj.oid, viewId)
                 obj_str += f" <br>-> Object: {obj.oid} ({o_type})"
 
-            style = (
-                "border: 2px solid cyan; padding: 5px; margin: 2px;"
-                if i == 0
-                else "padding: 5px; margin: 2px;"
-            )
-            label = "Latest Selection" if i == 0 else f"Selection {i + 1}"
-            info_html += f"<div style='{style}'><b>{label}: {cell}</b><br>Dist to First: {dist} cells{obj_str}</div>"
+            if i == 0:
+                style = "border: 2px solid cyan; padding: 5px; margin: 2px;"
+                info_html += f"<div style='{style}'><b>Latest Selection: {cell}</b><br>Dist to First: {dist} cells{obj_str}</div>"
+                if len(selected.additionalCells) > 1:
+                    info_html += "<details class='mt-2'><summary class='h5' style='cursor: pointer;'>Older Selections</summary>"
+            else:
+                if i > 1:
+                    info_html += "<hr style='margin: 10px 0; border-top: 1px dashed #ccc;'>"
+                style = "padding: 5px; margin: 2px;"
+                info_html += f"<div style='{style}'><b>Selection {i + 1}: {cell}</b><br>Dist to First: {dist} cells{obj_str}</div>"
+        
+        if len(selected.additionalCells) > 1:
+            info_html += "</details>"
 
     actions_html = ""
 
@@ -2353,7 +2435,7 @@ def render_interactor(request: Request, viewId: str, cell: tuple, skip_canvas_up
         axials = _get_constituent_axials(first_obj, _get_cc())
         if len(axials) > 1:
             actions_html += f"""
-                <input type="button" class="btn btn-warning mt-2 mb-2" value="Rotate Object" hx-post="/harmony/rotate_object/{viewId}/{first_obj.oid}" hx-target="#interactor">
+                <input type="button" class="btn btn-warning mt-2 mb-2" value="Rotate Object" onclick="rotateObjectFrontEnd('{viewId}', '{first_obj.oid}')">
             """
 
     actions_html += f"""
@@ -2370,7 +2452,7 @@ def render_interactor(request: Request, viewId: str, cell: tuple, skip_canvas_up
 
     html_content = interactor_template.format(info=info_html, actions=actions_html)
     if not skip_canvas_update:
-        html_content += _get_canvas_update_script(viewId, is_admin=is_admin)
+        html_content += _get_canvas_update_script(viewId, is_admin=is_admin, force_selection=force_selection)
     return HTMLResponse(html_content)
 
 
@@ -2385,7 +2467,7 @@ def selectAdditionalPixel(viewId: str):
 
 
 @harmony.get("/minimap/{viewId}")
-def minimapResponse(viewId: str):
+async def minimapResponse(viewId: str):
     cm = _get_cm()
     broadcaster = get_broadcaster("VirtualMap", lambda: render_minimap(cm))
     return StreamingResponse(

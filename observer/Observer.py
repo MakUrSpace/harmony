@@ -592,6 +592,7 @@ class RTSPCamera(RemoteCamera):
     def _capture_loop(self) -> None:
         cap = self._open_cap()
         last_ok = time()
+        last_clear = time()
 
         try:
             while not self._stop_evt.is_set():
@@ -600,16 +601,32 @@ class RTSPCamera(RemoteCamera):
                     cap = self._open_cap()
                     continue
 
+                now = time()
+                # Periodically clear its buffer and get the latest frame
+                if now - last_clear > 300:  # Every 5 minutes
+                    print(f"[{self.camName}] Periodically clearing stream buffer to prevent lag.")
+                    cap.release()
+                    cap = self._open_cap()
+                    last_clear = time()
+                    continue
+
                 # Discard buffered/backlog frames using a fast grab loop
+                grab_count = 0
                 while True:
                     grab_start = time()
                     ok = cap.grab()
                     if not ok:
                         break
                     grab_duration = time() - grab_start
-                    # If it took more than 3ms to grab, it blocked waiting for the next fresh camera frame.
-                    # This means we successfully emptied the buffer!
-                    if grab_duration > 0.003:
+                    
+                    # If it took more than 15ms to grab, it blocked waiting for the next fresh camera frame.
+                    # 15ms is used instead of 3ms to avoid false positives from OS thread scheduling jitter.
+                    if grab_duration > 0.015:
+                        break
+                        
+                    grab_count += 1
+                    # Prevent starvation if there's a massive backlog; yield a frame occasionally
+                    if grab_count >= 30:
                         break
 
                 if not ok:
@@ -988,13 +1005,6 @@ class CaptureConfiguration:
         with open(path, "w") as f:
             f.write(json.dumps(self.buildConfiguration(), indent=2))
 
-        # Re-trigger eager background hex grid pre-calculation
-        try:
-            from observer.configurator import eagerly_precalculate_grids
-
-            eagerly_precalculate_grids(self)
-        except Exception as e:
-            print(f"Failed eagerly pre-calculating grids on saveConfiguration: {e}")
 
 
 # In[11]:

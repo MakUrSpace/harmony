@@ -69,6 +69,11 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
             
             if not self.grid_overlays:
                 self.grid_overlays = None
+                
+        self.grid_polys = None
+        if "grid_polys" in config:
+            self.grid_polys = config["grid_polys"]
+
         self.camera_realspace_contours = []
         self.camera_realspace_union_contours = []
 
@@ -102,6 +107,9 @@ class HexCaptureConfiguration(CalibratedCaptureConfiguration):
                         
         if encoded_overlays:
             config["grid_overlays"] = encoded_overlays
+            
+        if getattr(self, "grid_polys", None):
+            config["grid_polys"] = self.grid_polys
             
         return config
 
