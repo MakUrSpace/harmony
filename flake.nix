@@ -4,9 +4,10 @@
   inputs = {
     flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    crane.url = "github:ipetkov/crane";
   };
 
-  outputs = inputs@{ flake-parts, ... }:
+  outputs = inputs@{ flake-parts, crane, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [];
       systems = [ "x86_64-linux" "aarch64-linux" ];
@@ -14,6 +15,21 @@
       with pkgs;
       with python3Packages;
       let 
+        craneLib = crane.mkLib pkgs;
+        harmony-rs = craneLib.buildPackage {
+          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          strictDeps = true;
+          buildInputs = [
+            pkgs.opencv4
+            pkgs.clang
+          ];
+          nativeBuildInputs = [
+            pkgs.pkg-config
+            pkgs.clang
+            pkgs.rustPlatform.bindgenHook
+          ];
+        };
+
         opencv-contrib-python = buildPythonPackage rec {
           pname = "opencv-contrib-python";
           version = "4.12.0.88";
@@ -71,6 +87,7 @@
       in {
         packages.default = harmony;
         packages.harmony = harmony;
+        packages.harmony-rs = harmony-rs;
         packages.jupyter = writeShellApplication {
           name = "jupyter";
           runtimeInputs = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm ];
@@ -183,12 +200,13 @@
         };
         devShells.default = pkgs.mkShell {
           name = "harmonyShell";
-          packages = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver pkgs.treefmt pkgs.ruff ];
+          packages = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver pkgs.treefmt pkgs.ruff pkgs.rustc pkgs.cargo pkgs.pkg-config pkgs.opencv4 pkgs.clang pkgs.rustPlatform.bindgenHook ];
           shellHook = ''
             export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
             PROJECT_NAME="$(basename "$PWD")"
+            export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
             export PYTHONPATH="$PWD/harmony:$PWD/observer:${PYTHONPATH:-}"
             export PS1="\[\e[1;36m\][$PROJECT_NAME]\[\e[0m\] \w \$ "
           '';

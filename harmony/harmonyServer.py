@@ -632,11 +632,11 @@ async def cameraViewWithChangesResponse(camName: str, viewId: str):
     cm = _get_cm()
     cc = _get_cc()
     if camName == "VirtualMap":
-        broadcaster = get_broadcaster(f"VirtualMap_{viewId}", lambda: render_minimap(cm, viewId=viewId))
+        broadcaster = get_broadcaster(f"VirtualMap_{viewId}", lambda v=viewId: render_minimap(_get_cm(), viewId=v))
     elif camName == "All":
-        broadcaster = get_broadcaster(f"All_{viewId}", lambda: render_composite_all(cc, cm, viewId=viewId))
+        broadcaster = get_broadcaster(f"All_{viewId}", lambda v=viewId: render_composite_all(_get_cc(), _get_cm(), viewId=v))
     else:
-        broadcaster = get_broadcaster(f"{camName}_{viewId}", lambda c=camName: render_camera(cc, c, viewId=viewId))
+        broadcaster = get_broadcaster(f"{camName}_{viewId}", lambda c=camName, v=viewId: render_camera(_get_cc(), c, viewId=v))
 
     return StreamingResponse(
         broadcaster.subscribe(), media_type="multipart/x-mixed-replace; boundary=frame"
@@ -1104,6 +1104,8 @@ def resetHarmony(request: Request = None):
         new_cm = HarmonyMachine(_get_cc())
         new_cm.reset()
         _cm = new_cm
+        
+    get_broadcaster("VirtualMap_None", lambda: render_minimap(_get_cm(), viewId=None))
     return "success"
 
 
@@ -2797,6 +2799,8 @@ def start_servers():
 
     _cc = cc
     _cm = cm
+
+    get_broadcaster("VirtualMap_None", lambda: render_minimap(_get_cm(), viewId=None))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

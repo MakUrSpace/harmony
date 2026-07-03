@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "harmony-core",
+    "harmony-web",
+]
+resolver = "2"

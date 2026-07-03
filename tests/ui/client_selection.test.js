@@ -147,7 +147,9 @@ describe('Client-side Cell Selection', () => {
 
         const sel = window.harmonyCanvasData.selection;
         expect(sel).toBeTruthy();
-        expect(sel.firstCell).toEqual({ 'Camera 0': [[0, 0], [100, 0], [100, 100], [0, 100]] });
+        const expectedFirst = { 'Camera 0': [[0, 0], [100, 0], [100, 100], [0, 100]] };
+        expectedFirst._q = 0; expectedFirst._r = 0;
+        expect(sel.firstCell).toEqual(expectedFirst);
         expect(sel.additionalCells).toEqual([]);
     });
 
@@ -169,9 +171,13 @@ describe('Client-side Cell Selection', () => {
         window.handlePixelSelection(makeClickEvent(250, 250));
 
         const sel = window.harmonyCanvasData.selection;
-        expect(sel.firstCell).toEqual({ 'Camera 0': [[0, 0], [100, 0], [100, 100], [0, 100]] });
+        const expectedFirst = { 'Camera 0': [[0, 0], [100, 0], [100, 100], [0, 100]] };
+        expectedFirst._q = 0; expectedFirst._r = 0;
+        const expectedAdd = { 'Camera 0': [[200, 200], [300, 200], [300, 300], [200, 300]] };
+        expectedAdd._q = 1; expectedAdd._r = 0;
+        expect(sel.firstCell).toEqual(expectedFirst);
         expect(sel.additionalCells).toHaveLength(1);
-        expect(sel.additionalCells[0]).toEqual({ 'Camera 0': [[200, 200], [300, 200], [300, 300], [200, 300]] });
+        expect(sel.additionalCells[0]).toEqual(expectedAdd);
     });
 
     // ================================================================
@@ -195,11 +201,18 @@ describe('Client-side Cell Selection', () => {
         window.handlePixelSelection(makeClickEvent(450, 450, { shiftKey: true }));
 
         const sel = window.harmonyCanvasData.selection;
-        expect(sel.firstCell).toEqual({ 'Camera 0': [[0, 0], [100, 0], [100, 100], [0, 100]] });
+        const expectedFirst = { 'Camera 0': [[0, 0], [100, 0], [100, 100], [0, 100]] };
+        expectedFirst._q = 0; expectedFirst._r = 0;
+        const expectedAdd0 = { 'Camera 0': [[400, 400], [500, 400], [500, 500], [400, 500]] };
+        expectedAdd0._q = 2; expectedAdd0._r = 0;
+        const expectedAdd1 = { 'Camera 0': [[200, 200], [300, 200], [300, 300], [200, 300]] };
+        expectedAdd1._q = 1; expectedAdd1._r = 0;
+        
+        expect(sel.firstCell).toEqual(expectedFirst);
         expect(sel.additionalCells).toHaveLength(2);
         // Most recent at index 0 (unshift)
-        expect(sel.additionalCells[0]).toEqual({ 'Camera 0': [[400, 400], [500, 400], [500, 500], [400, 500]] });
-        expect(sel.additionalCells[1]).toEqual({ 'Camera 0': [[200, 200], [300, 200], [300, 300], [200, 300]] });
+        expect(sel.additionalCells[0]).toEqual(expectedAdd0);
+        expect(sel.additionalCells[1]).toEqual(expectedAdd1);
     });
 
     // ================================================================

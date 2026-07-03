@@ -1,0 +1,21 @@
+[package]
+name = "harmony-web"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+harmony-core = { path = "../harmony-core" }
+axum = { version = "0.7", features = ["multipart", "ws"] }
+tokio = { version = "1.37", features = ["full"] }
+askama = "0.12"
+askama_axum = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bytes = "1.5"
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures-util = "0.3"
+axum-extra = "0.9"
+opencv = "0.94.4"

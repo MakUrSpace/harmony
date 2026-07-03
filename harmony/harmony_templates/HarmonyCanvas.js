@@ -477,6 +477,7 @@ async function handlePixelSelection(event, camNameOverride) {
     const appendPixelField = document.getElementById(`appendPixel`);
     const isAppend = (event.shiftKey || event.ctrlKey || event.metaKey);
     if (appendPixelField) appendPixelField.value = isAppend ? "true" : "false";
+    if (pixelField) pixelField.value = JSON.stringify([final_x, final_y]);
 
     // Client-side cell selection — this is the ONLY place selection state is set.
     // The server sync (syncCanvasData) never touches selection.
