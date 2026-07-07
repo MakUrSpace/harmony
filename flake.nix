@@ -22,6 +22,7 @@
           src = pkgs.lib.cleanSourceWith {
             src = craneLib.path ./.;
             filter = path: type:
+              (builtins.match ".*static/.*" path != null) ||
               (builtins.match ".*html$" path != null) ||
               (craneLib.filterCargoSources path type);
           };
@@ -34,7 +35,15 @@
             pkgs.pkg-config
             pkgs.clang
             pkgs.rustPlatform.bindgenHook
+            pkgs.makeWrapper
           ];
+          postInstall = ''
+            mkdir -p $out/share/harmony-web
+            cp -r harmony-web/static $out/share/harmony-web/static
+            
+            wrapProgram $out/bin/harmony-web \
+              --set HARMONY_STATIC_DIR $out/share/harmony-web/static
+          '';
         };
 
         opencv-contrib-python = buildPythonPackage rec {

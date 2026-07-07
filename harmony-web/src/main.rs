@@ -330,11 +330,13 @@ async fn main() {
         }
     });
 
-    let static_dir = if std::path::Path::new("harmony-web/static").exists() {
-        "harmony-web/static"
-    } else {
-        "static"
-    };
+    let static_dir = std::env::var("HARMONY_STATIC_DIR").unwrap_or_else(|_| {
+        if std::path::Path::new("harmony-web/static").exists() {
+            "harmony-web/static".to_string()
+        } else {
+            "static".to_string()
+        }
+    });
 
     let admin_app = Router::new()
         .route("/", get(|| async { axum::response::Redirect::to("/harmony") }))
