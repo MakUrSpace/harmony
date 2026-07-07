@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>Harmony Sessions</title>
+    <link rel="stylesheet" href="/bootstrap.min.css">
+    <script src="/bootstrap.min.js"></script>
+    <script src="/htmx.min.js"></script>
+</head>
+
+<body>
+    <div class="container mt-4">
+        <h1>Active Harmony Sessions</h1>
+        <p>Select a session to configure object tags.</p>
+        <ul class="list-group">
+            {% if sessions.is_empty() %}
+            <li class="list-group-item">No active sessions found. Open <a href="/harmony">Harmony</a> in a new tab to
+                start a session.</li>
+            {% else %}
+            {% for sid in sessions %}
+            <li class="list-group-item">
+                <a href="/harmony/control/{{ sid }}">Session {{ sid }}</a>
+                <span class="badge bg-secondary float-end">Active</span>
+            </li>
+            {% endfor %}
+            {% endif %}
+        </ul>
+        <div class="mt-3">
+            <a href="/harmony" class="btn btn-success" target="_blank">Open New Harmony Session</a>
+            <a href="/harmony/control" class="btn btn-secondary">Refresh List</a>
+            <button type="button" class="btn btn-warning float-end" hx-post="/harmony/clear_all_published_selections" hx-swap="none" onclick="alert('Cleared all published selections globally!')">Clear ALL Global Broadcasts</button>
+        </div>
+    </div>
+</body>
+
+</html>

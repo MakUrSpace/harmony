@@ -1,8 +1,28 @@
 use crate::observer::HexCaptureConfiguration;
+use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct TrackedObject {
+    pub oid: String,
+    pub object_type: String,
+    pub constituent_axials: Vec<(i32, i32)>,
+}
+
+impl TrackedObject {
+    pub fn position_hash(&self) -> String {
+        let mut out = String::new();
+        for (q, r) in &self.constituent_axials {
+            out.push_str(&format!("{}_{}_", q, r));
+        }
+        out
+    }
+}
 
 pub struct HarmonyMachine {
     pub cc: HexCaptureConfiguration,
     pub cycle_counter: u64,
+    pub memory: HashMap<String, TrackedObject>,
 }
 
 impl HarmonyMachine {
@@ -10,6 +30,7 @@ impl HarmonyMachine {
         Self {
             cc,
             cycle_counter: 0,
+            memory: HashMap::new(),
         }
     }
 

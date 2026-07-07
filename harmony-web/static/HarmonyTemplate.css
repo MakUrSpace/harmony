@@ -1,0 +1,181 @@
+:root {
+            --bg-color: #050505;
+            --panel-color: #0b1011;
+            --primary-color: #00ff41;
+            /* CRT Green */
+            --secondary-color: #00ffff;
+            /* Cyan */
+            --danger-color: #ff3333;
+            --dim-color: #1a3c3c;
+            --scanline: rgba(0, 0, 0, 0.5);
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+            color: var(--primary-color);
+            font-family: 'Share Tech Mono', monospace;
+            text-shadow: 0 0 2px rgba(0, 255, 65, 0.5);
+        }
+
+        h1,
+        h2,
+        h3,
+        h4,
+        h5 {
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--secondary-color);
+            border-bottom: 2px solid var(--dim-color);
+            padding-bottom: 10px;
+            text-shadow: 0 0 8px var(--secondary-color);
+        }
+
+        /* Bootstrap Overrides */
+        .container {
+            max-width: 100%;
+            padding: 20px;
+        }
+
+        .btn {
+            border-radius: 0;
+            background: transparent;
+            border: 1px solid var(--secondary-color);
+            color: var(--secondary-color);
+            text-transform: uppercase;
+            font-family: 'Share Tech Mono', monospace;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 5px rgba(0, 255, 255, 0.1);
+        }
+
+        .btn:hover {
+            background: var(--secondary-color);
+            color: #000;
+            box-shadow: 0 0 15px var(--secondary-color);
+        }
+
+        .btn-success {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .btn-success:hover {
+            background: var(--primary-color);
+            color: #000;
+            box-shadow: 0 0 15px var(--primary-color);
+        }
+
+        .btn-danger {
+            border-color: var(--danger-color);
+            color: var(--danger-color);
+        }
+
+        .btn-danger:hover {
+            background: var(--danger-color);
+            color: #000;
+            box-shadow: 0 0 15px var(--danger-color);
+        }
+
+        .btn-outline-secondary {
+            border-color: var(--dim-color);
+            color: var(--dim-color);
+        }
+        .btn-outline-secondary:hover {
+            background: var(--dim-color);
+            color: var(--primary-color);
+        }
+
+
+        .form-control {
+            background: #000;
+            border: 1px solid var(--dim-color);
+            color: var(--primary-color);
+            border-radius: 0;
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        .form-control:focus {
+            background: #051515;
+            color: var(--secondary-color);
+            border-color: var(--secondary-color);
+            box-shadow: 0 0 8px rgba(0, 255, 255, 0.3);
+        }
+
+        hr {
+            border-color: var(--dim-color);
+        }
+
+        /* Custom Box Style */
+        .x-box {
+            position: relative;
+            display: flex;
+        }
+
+        .x-box::before,
+        .x-box::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .x-box::before {
+            background: linear-gradient(30deg, transparent 49%, var(--danger-color) 49%, var(--danger-color) 51%, transparent 51%);
+        }
+
+        .x-box::after {
+            background: linear-gradient(-30deg, transparent 49%, var(--danger-color) 49%, var(--danger-color) 51%, transparent 51%);
+        }
+
+        /* Game World Frame */
+        #GameWorldViewer {
+            border: 2px solid var(--dim-color);
+            position: relative;
+            background: #000;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+
+        #GameWorldViewer::after {
+            content: "SYSTEM ONLINE";
+            position: absolute;
+            bottom: -20px;
+            right: 0;
+            font-size: 12px;
+            color: var(--dim-color);
+        }
+        
+        #GameWorldViewer::before {
+             content: "LIVE FEED >>";
+             position: absolute;
+             top: -20px;
+             left: 0;
+             font-size: 12px;
+             color: var(--secondary-color);
+        }
+
+        #GameWorld {
+            border: 1px solid var(--secondary-color) !important;
+            border-radius: 0 !important;
+        }
+
+        /* Table Styles */
+        table,
+        th,
+        td {
+            border: 1px solid var(--dim-color) !important;
+            color: var(--primary-color);
+            background: rgba(0, 20, 0, 0.2);
+        }
+        
+        /* Utils */
+        .text-muted {
+            color: #4a6c6c !important;
+        }

@@ -1,48 +1,131 @@
 <!doctype html>
 <html lang="en">
+
 <head>
+    <!-- Required meta tags -->
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
     <link rel="stylesheet" href="/static/bootstrap.min.css">
     <script src="/static/bootstrap.min.js"></script>
     <script src="/static/htmx.min.js"></script>
+
     <title>Observer Configurator</title>
 </head>
+
 <body>
     <div class="container">
         <h1 align="center">Configurator</h1>
         <div class="row" align="center">
             <div class="col" align="left">
-                <input type="button" class="btn btn-primary" value="Save State" hx-post="/configurator" hx-swap="none">
-                <input class="btn btn-secondary" type="button" value="Calibrate Cameras" onclick="window.location.href='/configurator/calibrator'">
+                <input type="button" id="saveStateBtn" class="btn btn-primary" value="Save State" hx-post="/configurator" hx-swap="none" onclick="showStatus('Configuration Saved!', false)">
+                <span id="calibrationPendingFlag" class="badge bg-danger ms-2" style="display: none;">Calibration Pending</span>
+                <div class="btn-group ms-2">
+                    <button type="button" class="btn btn-warning" onclick="clearShape()">Clear All</button>
+                    <button type="button" class="btn btn-success" onclick="submitShape()">Submit Shape</button>
+                    <button type="button" class="btn btn-secondary" onclick="toggleEditMode()">Toggle Edit/Draw</button>
+                </div>
+                <div class="d-inline-block ms-3">
+                    <label for="modeSelect" class="form-label mb-0 fw-bold">Tool Mode:</label>
+                    <select id="modeSelect" class="form-select form-select-sm d-inline-block w-auto" onchange="toggleMode()">
+                        <option value="az">Active Zone</option>
+                        <option value="calibration">Calibration</option>
+                    </select>
+                </div>
+                <div class="form-check form-switch d-inline-block ms-3">
+                    <input class="form-check-input" type="checkbox" id="showGridConfig" {% if show_grid %}checked{% endif %}
+                        onchange="toggleConfigOverlays()">
+                    <label class="form-check-label" for="showGridConfig">Show Grid</label>
+                </div>
+                <div class="form-check form-switch d-inline-block ms-3">
+                    <input class="form-check-input" type="checkbox" id="showObjectsConfig" {% if show_objects %}checked{% endif %}
+                        onchange="toggleConfigOverlays()">
+                    <label class="form-check-label" for="showObjectsConfig">Show Objects</label>
+                </div>
+                <div id="statusMessage" class="d-inline-block ms-3 fw-bold"></div>
+            </div>
+            <div class="col" align="right">
+                <input class="btn btn-info" type="button" value="Observer" onclick="window.location.href='/'">
             </div>
         </div>
-
+        
         {% for cam in cameras %}
         <div class="row justify-content-center text-center">
             <h3 class="mt-5">Camera {{ cam.name }} 
                 <input type="button" value="Delete" class="btn btn-danger" hx-post="/configurator/delete_cam/{{ cam.name }}" hx-swap="outerHTML">
             </h3>
             <div id="camContainer_{{ cam.name }}" style="position: relative; display: inline-block;">
-                <img src="/configurator/camera/{{ cam.name }}" title="{{ cam.name }} Capture" height="375" id="cam{{ cam.name }}" onclick="camClickListener('{{ cam.name }}', event)">
+                <img src="/configurator/camera/{{ cam.name }}" title="{{ cam.name }} Capture" height="375" id="cam{{ cam.name }}" draggable="false">
                 <canvas id="overlayCanvas_{{ cam.name }}" 
-                    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair;"
+                    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"
                     onmousedown="onMouseDown('{{ cam.name }}', event)"
                     onmousemove="onMouseMove('{{ cam.name }}', event)">
                 </canvas>
             </div>
-            
-            <div class="text-center mt-2 d-flex flex-wrap justify-content-center align-items-center gap-2">
-                <button class="btn btn-sm btn-warning" onclick="clearShape('{{ cam.name }}')">Clear Manual Points</button>
-                <button class="btn btn-sm btn-secondary" onclick="undoLastPoint('{{ cam.name }}')">Undo Last</button>
-            </div>
 
-            <label for="az">Active Zone</label><br>
-            <div class="container">
+            <!-- Active Zone Configuration (Hidden unless Active Zone mode) -->
+            <div class="container" id="azContainer_{{ cam.name }}" style="display: none;">
+                <label for="az">Active Zone</label><br>
                 <div class="row">
                     <div class="col">
-                        <input type="text" name="az" id="cam{{ cam.name }}_ActiveZone" value="{{ cam.active_zone }}" size="50" hx-post="/configurator/cam{{ cam.name }}_activezone" hx-swap="none">   
-                        <input type="button" class="btn btn-secondary" name="clearCam{{ cam.name }}AZ" value="Clear AZ" onclick="clearCamAZ('{{ cam.name }}', event)">
+                        <input type="text" name="az" id="cam{{ cam.name }}_ActiveZone" value="{{ cam.active_zone }}" size="50" hx-post="/configurator/activezone/{{ cam.name }}" hx-swap="none" hx-trigger="change">   
+                        <input type="button" class="btn btn-secondary" name="clearCam{{ cam.name }}AZ" value="Clear AZ" onclick="clearCamAZ('{{ cam.name }}')">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calibration Configuration (Hidden unless Calibration mode) -->
+            <div class="container mt-3" id="calibContainer_{{ cam.name }}">
+                <div class="row justify-content-center">
+                    <div class="col-md-3">
+                        <label>Row Increment</label>
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text">dq</span>
+                            <input type="number" id="rowIncrQ_{{ cam.name }}" class="form-control" value="1">
+                            <span class="input-group-text">dr</span>
+                            <input type="number" id="rowIncrR_{{ cam.name }}" class="form-control" value="0">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label>Column Increment</label>
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text">dq</span>
+                            <input type="number" id="colIncrQ_{{ cam.name }}" class="form-control" value="0">
+                            <span class="input-group-text">dr</span>
+                            <input type="number" id="colIncrR_{{ cam.name }}" class="form-control" value="1">
+                        </div>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end mb-2">
+                        <button class="btn btn-sm btn-info w-100" onclick="advanceColumn('{{ cam.name }}')">Next Column</button>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end mb-2">
+                        <button class="btn btn-sm btn-warning w-100" onclick="undoLastPoint('{{ cam.name }}')">Undo Point</button>
+                        <form hx-post="/configurator/clear_calibration/{{ cam.name }}" hx-swap="none" class="ms-2 mb-0" onsubmit="setTimeout(() => location.reload(), 200);">
+                            <button type="submit" class="btn btn-sm btn-danger w-100">Clear Calibration</button>
+                        </form>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-center mb-2">
+                        <span id="nextClickCoords_{{ cam.name }}" class="badge bg-secondary">Next: (0, 0)</span>
+                    </div>
+                </div>
+                
+                <div class="row justify-content-center mt-2" id="activeCalibTableContainer_{{ cam.name }}" style="display: none;">
+                    <div class="col-md-10">
+                        <div id="latestCalibPoint_{{ cam.name }}" class="mb-2"></div>
+                        <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered table-dark text-center mb-0" id="activeCalibTable_{{ cam.name }}">
+                                <thead>
+                                    <tr>
+                                        <th>Point</th>
+                                        <th>Pixel X</th>
+                                        <th>Pixel Y</th>
+                                        <th>Axial Q</th>
+                                        <th>Axial R</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -50,40 +133,643 @@
         {% endfor %}
 
         <div class="container" align="right" style="margin-top: 1rem">
-            <input type="button" class="btn btn-primary" value="Add Camera" onclick="window.location.href='/configurator/new_camera'">
+            <input type="button" class="btn btn-primary" value="Add Camera"
+                onclick="window.location.href='/configurator/new_camera'">
+        </div>
+
+        <div class="row mt-4 mb-4" align="left">
+            <div class="col-md-6 mb-3">
+                <div class="container border border-3 border-info p-3 rounded bg-dark text-white h-100">
+                    <h3>Grid Configuration</h3>
+                    <form hx-post="/configurator/grid_configuration" hx-swap="outerHTML">
+                        <div class="d-flex align-items-center gap-2 mb-3">
+                            <input type="number" class="form-control bg-light text-dark fw-bold" name="size" min="10" max="60" value="{{ hex.size }}"
+                                style="width: 5em;">
+                            <label class="form-label mb-0 fw-bold" for="size">Size (px)</label>
+                        </div>
+                        <input type="submit" class="btn btn-primary" value="Submit Grid Configuration">
+                    </form>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="container border border-3 border-warning p-3 rounded bg-dark text-white h-100">
+                    <h3>Save & Restore Calibration</h3>
+                    <div class="d-flex flex-column gap-3">
+                        <div>
+                            <p class="text-muted small mb-2">Backup active cameras, active zones, converters, and nudges configuration to a local JSON file.</p>
+                            <a class="btn btn-warning w-100 fw-bold" href="/configurator/export_calibration" download="harmony_grid_calibration.json">Export Grid Calibration</a>
+                        </div>
+                        <hr class="border-secondary my-1">
+                        <div>
+                            <p class="text-muted small mb-2">Upload a previously exported calibration file to restore all settings instantly.</p>
+                            <form action="/configurator/import_calibration" method="POST" enctype="multipart/form-data" class="d-flex gap-2">
+                                <input class="form-control form-control-sm bg-secondary text-white" type="file" name="file" required accept=".json">
+                                <button type="submit" class="btn btn-success btn-sm fw-bold px-3">Restore</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </body>
 <script>
+
+    function toggleConfigOverlays() {
+        let formData = new URLSearchParams();
+        formData.append('show_grid', document.getElementById('showGridConfig').checked);
+        formData.append('show_objects', document.getElementById('showObjectsConfig').checked);
+        fetch('/configurator/set_overlays', { method: 'POST', body: formData });
+    }
+
+    document.body.addEventListener('htmx:afterRequest', function(evt) {
+        if (evt.target && evt.target.id === "saveStateBtn") {
+            if (evt.detail.successful) {
+                showStatus("State saved successfully", false);
+            } else {
+                showStatus("Failed to save state", true);
+            }
+        }
+    });
+
+    var cameraNames = {{ camera_names_json|safe }};
+    var calibrationPts = {{ calibration_pts_json|safe }} || {};
+    var gridPolys = {{ grid_polys_json|safe }} || {};
+    var allNudges = {} || {};
+    var manualPoints = {};
+    var axialPoints = {};
+    var editMode = false;
+    var dragPointIndex = -1;
+    var dragCamName = null;
+    var currentCol = {};
+    var currentRow = {};
+    var colAnchor = {};  // axial [q, r] of the first point in the current column
+    var loadedCams = {};
+
+    cameraNames.forEach(function (name) {
+        manualPoints[name] = [];
+        axialPoints[name] = [];
+        currentCol[name] = 0;
+        currentRow[name] = 0;
+        colAnchor[name] = [0, 0];
+    });
+
+    function resizeCanvas() {
+        cameraNames.forEach(function (camName) {
+            var canvas = document.getElementById('overlayCanvas_' + camName);
+            var img = document.getElementById('cam' + camName);
+            if (canvas && img) {
+                canvas.width = img.naturalWidth || img.clientWidth;
+                canvas.height = img.naturalHeight || img.clientHeight;
+                canvas.style.width = img.clientWidth + 'px';
+                canvas.style.height = img.clientHeight + 'px';
+                canvas.style.left = img.offsetLeft + 'px';
+                canvas.style.top = img.offsetTop + 'px';
+
+                if (!loadedCams[camName] && canvas.width > 0 && Object.keys(calibrationPts).length > 0) {
+                    if (calibrationPts[camName]) {
+                        var pixelChunk = calibrationPts[camName].pixel;
+                        var axialChunk = calibrationPts[camName].axial;
+                        for (var i = 0; i < pixelChunk.length; i++) {
+                            manualPoints[camName].push([pixelChunk[i][0], pixelChunk[i][1]]);
+                            axialPoints[camName].push([axialChunk[i][0], axialChunk[i][1]]);
+                        }
+                    }
+
+                    if (manualPoints[camName].length > 0) {
+                        renderActiveCalibrationTable(camName);
+                    }
+                    loadedCams[camName] = true;
+                }
+
+                drawPoints(camName);
+                updateNextClickDisplay(camName);
+            }
+        });
+        toggleMode(); // Ensure correct state on load
+    }
+
+    window.onload = function () {
+        resizeCanvas();
+    };
+
+    // Poll resizing just in case images load late
+    setInterval(function () {
+        var needsResize = false;
+        cameraNames.forEach(function (camName) {
+            var canvas = document.getElementById('overlayCanvas_' + camName);
+            var img = document.getElementById('cam' + camName);
+            if (canvas && img && (canvas.clientWidth !== img.clientWidth || canvas.clientHeight !== img.clientHeight || canvas.offsetLeft !== img.offsetLeft || canvas.offsetTop !== img.offsetTop)) {
+                needsResize = true;
+            }
+        });
+        if (needsResize) {
+            resizeCanvas();
+        }
+    }, 1000);
+
+    function getMousePos(canvas, evt) {
+        var rect = canvas.getBoundingClientRect();
+        return {
+            x: evt.offsetX, // offsetX is relative to target element (canvas)
+            y: evt.offsetY
+        };
+    }
+
+    function stopDrag() {
+        dragPointIndex = -1;
+        dragCamName = null;
+    }
+
+    // Attach global mouseup to catch releases outside canvas
+    window.addEventListener('mouseup', stopDrag);
+
+    function onMouseDown(camName, event) {
+        var canvas = document.getElementById('overlayCanvas_' + camName);
+        var pos = getMousePos(canvas, event);
+        var x = pos.x;
+        var y = pos.y;
+        var w = canvas.clientWidth;
+        var h = canvas.clientHeight;
+
+        var mode = document.getElementById('modeSelect') ? document.getElementById('modeSelect').value : 'calibration';
+
+        if (mode === 'nudge') {
+            fetch('/configurator/nudge_select/' + camName + '?px=' + (x/w) + '&py=' + (y/h))
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) { alert("Error: " + data.error); return; }
+                    toggleNudgeSelection(camName, data);
+                });
+            return;
+        }
+
+        if (mode === 'az') {
+            var image_x = (x / w) * canvas.width;
+            var image_y = (y / h) * canvas.height;
+            var formField = document.getElementById(`cam${camName}_ActiveZone`);
+            var formValue;
+            try {
+                formValue = JSON.parse(formField.value);
+            } catch (err) {
+                formValue = [];
+            }
+            formValue.push([Math.floor(image_x), Math.floor(image_y)]);
+            formField.value = JSON.stringify(formValue);
+            formField.dispatchEvent(new Event('change'));
+            drawPoints(camName);
+            return;
+        }
+
+        // Ensure array exists and is valid
+        if (!manualPoints[camName]) manualPoints[camName] = [];
+
+        // Filter out any undefined/null points to prevent "reading '1'" error
+        manualPoints[camName] = manualPoints[camName].filter(p => p && p.length === 2);
+
+        if (editMode) {
+            // Check if clicking near existing point to drag
+            for (var i = 0; i < manualPoints[camName].length; i++) {
+                var px = manualPoints[camName][i][0] * w;
+                var py = manualPoints[camName][i][1] * h;
+                var dist = Math.sqrt((x - px) * (x - px) + (y - py) * (y - py));
+                if (dist < 20) {
+                    dragPointIndex = i;
+                    dragCamName = camName;
+                    return;
+                }
+            }
+        } else {
+            var col = currentCol[camName] || 0;
+            var row = currentRow[camName] || 0;
+
+            var rowDQ = parseInt(document.getElementById('rowIncrQ_' + camName).value) || 8;
+            var rowDR = parseInt(document.getElementById('rowIncrR_' + camName).value) || 0;
+            var colDQ = parseInt(document.getElementById('colIncrQ_' + camName).value) || -2;
+            var colDR = parseInt(document.getElementById('colIncrR_' + camName).value) || 4;
+
+            var predictedQ, predictedR;
+            if (axialPoints[camName].length === 0) {
+                // Very first point: start at origin
+                predictedQ = 0;
+                predictedR = 0;
+            } else if (row === 0) {
+                // First point of a new column: apply colDelta to the previous column's anchor
+                predictedQ = colAnchor[camName][0] + colDQ;
+                predictedR = colAnchor[camName][1] + colDR;
+            } else {
+                // Subsequent point in same column: apply rowDelta to the previous point
+                var prev = axialPoints[camName][axialPoints[camName].length - 1];
+                predictedQ = prev[0] + rowDQ;
+                predictedR = prev[1] + rowDR;
+            }
+
+            // Record column anchor on the first point of each column
+            if (row === 0) {
+                colAnchor[camName] = [predictedQ, predictedR];
+            }
+
+            manualPoints[camName].push([x / w, y / h]);
+            axialPoints[camName].push([predictedQ, predictedR]);
+
+            // Advance for next click
+            currentRow[camName] = row + 1;
+
+            drawPoints(camName);
+            renderActiveCalibrationTable(camName);
+            updateNextClickDisplay(camName);
+        }
+    }
+
+    function updateNextClickDisplay(camName) {
+        var el = document.getElementById('nextClickCoords_' + camName);
+        if (!el) return;
+
+        var row = currentRow[camName] || 0;
+
+        var rowDQ = parseInt(document.getElementById('rowIncrQ_' + camName).value) || 8;
+        var rowDR = parseInt(document.getElementById('rowIncrR_' + camName).value) || 0;
+        var colDQ = parseInt(document.getElementById('colIncrQ_' + camName).value) || -2;
+        var colDR = parseInt(document.getElementById('colIncrR_' + camName).value) || 4;
+
+        var predictedQ, predictedR;
+        if (!axialPoints[camName] || axialPoints[camName].length === 0) {
+            predictedQ = 0;
+            predictedR = 0;
+        } else if (row === 0) {
+            predictedQ = (colAnchor[camName] ? colAnchor[camName][0] : 0) + colDQ;
+            predictedR = (colAnchor[camName] ? colAnchor[camName][1] : 0) + colDR;
+        } else {
+            var prev = axialPoints[camName][axialPoints[camName].length - 1];
+            predictedQ = prev[0] + rowDQ;
+            predictedR = prev[1] + rowDR;
+        }
+
+        el.innerText = "Next: (" + predictedQ + ", " + predictedR + ")";
+    }
+
+    function onMouseMove(camName, event) {
+        if (dragPointIndex !== -1 && dragCamName === camName) {
+            // Safety check
+            if (!manualPoints[camName] || !manualPoints[camName][dragPointIndex]) {
+                stopDrag();
+                return;
+            }
+
+            var canvas = document.getElementById('overlayCanvas_' + camName);
+            var pos = getMousePos(canvas, event);
+            var w = canvas.clientWidth;
+            var h = canvas.clientHeight;
+            manualPoints[camName][dragPointIndex] = [pos.x / w, pos.y / h];
+            drawPoints(camName);
+            renderActiveCalibrationTable(camName);
+        }
+    }
+
+    function drawPoints(camName) {
+        var canvas = document.getElementById('overlayCanvas_' + camName);
+        if (!canvas) return;
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        var w = canvas.width;
+        var h = canvas.height;
+
+        ctx.fillStyle = 'red';
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 3;
+
+        var points = manualPoints[camName];
+        if (points && points.length > 0) {
+            ctx.beginPath();
+            for (var i = 0; i < points.length; i++) {
+                var x = points[i][0] * w;
+                var y = points[i][1] * h;
+
+                if (i == 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+
+                ctx.fillRect(x - 5, y - 5, 10, 10);
+                // Draw text for sequence order
+                ctx.fillText(i + 1, x + 8, y + 8);
+            }
+            ctx.stroke();
+        }
+
+        // Draw grid polys
+        if (gridPolys[camName]) {
+            ctx.beginPath();
+            ctx.strokeStyle = "rgba(0, 255, 0, 0.6)";
+            ctx.lineWidth = 1;
+            for (var j = 0; j < gridPolys[camName].length; j++) {
+                var hexObj = gridPolys[camName][j];
+                if (hexObj && hexObj.poly) {
+                    for (var i = 0; i < hexObj.poly.length; i++) {
+                        var px = hexObj.poly[i][0] / canvas.width * w;
+                        var py = hexObj.poly[i][1] / canvas.height * h;
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.lineTo(hexObj.poly[0][0] / canvas.width * w, hexObj.poly[0][1] / canvas.height * h);
+                }
+            }
+            ctx.stroke();
+        }
+
+        // Draw active zone
+        var formField = document.getElementById(`cam${camName}_ActiveZone`);
+        if (formField) {
+            try {
+                var azPts = JSON.parse(formField.value);
+                if (azPts && azPts.length > 0) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = "rgba(0, 0, 255, 0.8)";
+                    ctx.fillStyle = "rgba(0, 0, 255, 0.2)";
+                    ctx.lineWidth = 2;
+                    for (var i = 0; i < azPts.length; i++) {
+                        var px = azPts[i][0] / canvas.width * w;
+                        var py = azPts[i][1] / canvas.height * h;
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                        ctx.fillRect(px - 4, py - 4, 8, 8);
+                    }
+                    if (azPts.length > 2) ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            } catch (e) {}
+        }
+        
+        // Draw nudged hex previews
+        if (selectedNudgeHexes[camName]) {
+            var shift = currentNudgeShift[camName] || {dx:0, dy:0};
+            for (var key in selectedNudgeHexes[camName]) {
+                var hexObj = selectedNudgeHexes[camName][key];
+                if (hexObj && hexObj.poly) {
+                    ctx.beginPath();
+                    ctx.fillStyle = "rgba(0, 255, 255, 0.3)";
+                    ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
+                    for (var i = 0; i < hexObj.poly.length; i++) {
+                        var px = hexObj.poly[i][0] + shift.dx;
+                        var py = hexObj.poly[i][1] + shift.dy;
+                        if (i === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+        }
+    }
+
+    var selectedNudgeHexes = {};
+    var currentNudgeShift = {};
+
+    function advanceColumn(camName) {
+        if (!currentCol[camName]) currentCol[camName] = 0;
+        currentCol[camName] += 1;
+        currentRow[camName] = 0;
+        updateNextClickDisplay(camName);
+    }
+
+    function clearShape(camName) {
+        if (camName) {
+            manualPoints[camName] = [];
+            axialPoints[camName] = [];
+            currentCol[camName] = 0;
+            currentRow[camName] = 0;
+            colAnchor[camName] = [0, 0];
+            stopDrag();
+            drawPoints(camName);
+            renderActiveCalibrationTable(camName);
+            updateNextClickDisplay(camName);
+        } else {
+            cameraNames.forEach(function (name) {
+                manualPoints[name] = [];
+                axialPoints[name] = [];
+                currentCol[name] = 0;
+                currentRow[name] = 0;
+                colAnchor[name] = [0, 0];
+                drawPoints(name);
+                renderActiveCalibrationTable(name);
+                updateNextClickDisplay(name);
+            });
+            stopDrag();
+        }
+    }
+
+    function toggleEditMode() {
+        editMode = !editMode;
+        var btn = event.target || event.srcElement;
+        // In case event.target doesn't work if called differently, let's gracefully fail or find it
+        if (btn && btn.tagName === 'BUTTON') {
+            btn.innerText = editMode ? "Edit Mode: ON" : "Toggle Edit/Draw";
+            btn.classList.toggle("btn-danger", editMode);
+            btn.classList.toggle("btn-secondary", !editMode);
+        }
+    }
+
+    function showStatus(msg, isError) {
+        var el = document.getElementById('statusMessage');
+        el.innerText = msg;
+        el.className = "d-inline-block ms-3 fw-bold " + (isError ? "text-danger" : "text-success");
+        setTimeout(function () { el.innerText = ""; }, 5000);
+    }
+
+    function showPendingFlag() {
+        var el = document.getElementById('calibrationPendingFlag');
+        if (el) el.style.display = 'inline-block';
+    }
+
+    function clearPendingFlag() {
+        var el = document.getElementById('calibrationPendingFlag');
+        if (el) el.style.display = 'none';
+        showStatus("Calibration grids regenerating...", false);
+    }
+
+    function submitShape() {
+        var validData = {};
+        var count = 0;
+
+        cameraNames.forEach(function (name) {
+            // Need at least 4 points to compute homography or 3 for affine fallback
+            if (manualPoints[name] && manualPoints[name].length >= 3) {
+                var canvas = document.getElementById('overlayCanvas_' + name);
+                var img = document.getElementById('cam' + name);
+                var w = 1920;
+                var h = 1080;
+                if (img && img.naturalWidth > 0) {
+                    w = img.naturalWidth;
+                    h = img.naturalHeight;
+                } else if (canvas) {
+                    w = canvas.width;
+                    h = canvas.height;
+                }
+                
+                validData[name] = {
+                    pixel: manualPoints[name],
+                    axial: axialPoints[name],
+                    width: w,
+                    height: h
+                };
+                count++;
+            }
+        });
+
+        if (count === 0) {
+            showStatus("Please define at least 3 points on at least one camera.", true);
+            return;
+        }
+
+        fetch(`/configurator/manual_calibration`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(validData)
+        }).then(response => {
+            if (response.ok) {
+                showStatus("Calibration submitted successfully!", false);
+                showPendingFlag();
+                // Optionally reload page to update table? or just update local list if we knew the return format
+                // For now, let's just leave it. If user refreshes, they see the new data.
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                response.text().then(text => showStatus("Error: " + text, true));
+            }
+        }).catch(e => showStatus("Network error: " + e, true));
+    }
+    function undoLastPoint(camName) {
+        if (manualPoints[camName] && manualPoints[camName].length > 0) {
+            manualPoints[camName].pop();
+            axialPoints[camName].pop();
+            if (currentRow[camName] > 0) {
+                currentRow[camName]--;
+            }
+            drawPoints(camName);
+            renderActiveCalibrationTable(camName);
+            updateNextClickDisplay(camName);
+            showPendingFlag();
+        }
+    }
+
+
+    function renderActiveCalibrationTable(camName) {
+        var container = document.getElementById('activeCalibTableContainer_' + camName);
+        var latestContainer = document.getElementById('latestCalibPoint_' + camName);
+        var tbody = document.querySelector('#activeCalibTable_' + camName + ' tbody');
+        if (!container || !tbody || !latestContainer) return;
+
+        var points = manualPoints[camName];
+        var axials = axialPoints[camName];
+
+        if (!points || points.length === 0) {
+            container.style.display = 'none';
+            tbody.innerHTML = '';
+            latestContainer.innerHTML = '';
+            return;
+        }
+
+        container.style.display = 'block';
+        tbody.innerHTML = '';
+        latestContainer.innerHTML = '';
+
+        for (let i = points.length - 1; i >= 0; i--) {
+            var pt = points[i];
+            var px = pt[0].toFixed(4);
+            var py = pt[1].toFixed(4);
+            var q = axials[i] ? axials[i][0] : 0;
+            var r = axials[i] ? axials[i][1] : 0;
+
+            var rowHtml = `
+                <td>P${i + 1}</td>
+                <td><input type="number" step="0.0001" class="form-control form-control-sm text-center" value="${px}" onchange="updateManualPoint('${camName}', ${i}, 'x', this.value)"></td>
+                <td><input type="number" step="0.0001" class="form-control form-control-sm text-center" value="${py}" onchange="updateManualPoint('${camName}', ${i}, 'y', this.value)"></td>
+                <td><input type="number" class="form-control form-control-sm text-center" value="${q}" onchange="updateAxialPoint('${camName}', ${i}, 'q', this.value)"></td>
+                <td><input type="number" class="form-control form-control-sm text-center" value="${r}" onchange="updateAxialPoint('${camName}', ${i}, 'r', this.value)"></td>
+            `;
+
+            if (i === points.length - 1) {
+                // Latest point
+                var latestTable = document.createElement('table');
+                latestTable.className = 'table table-sm table-bordered table-success text-center mb-0';
+                latestTable.innerHTML = `<thead><tr><th>Latest Point</th><th>Pixel X</th><th>Pixel Y</th><th>Axial Q</th><th>Axial R</th></tr></thead><tbody><tr>${rowHtml}</tr></tbody>`;
+                latestContainer.appendChild(latestTable);
+            } else {
+                // Older points
+                var row = document.createElement('tr');
+                row.innerHTML = rowHtml;
+                tbody.appendChild(row);
+            }
+        }
+    }
+
+    function updateManualPoint(camName, index, axis, value) {
+        var val = parseFloat(value);
+        if (!isNaN(val)) {
+            if (axis === 'x') manualPoints[camName][index][0] = val;
+            if (axis === 'y') manualPoints[camName][index][1] = val;
+            drawPoints(camName);
+        }
+    }
+
+    function updateAxialPoint(camName, index, axis, value) {
+        var val = parseInt(value, 10);
+        if (!isNaN(val)) {
+            if (axis === 'q') axialPoints[camName][index][0] = val;
+            if (axis === 'r') axialPoints[camName][index][1] = val;
+        }
+    }
+
     function clearCamAZ(camName, event) {
         const formField = document.getElementById(`cam${camName}_ActiveZone`)
         formField.value = '[]'
+        drawPoints(camName);
     }
 
-    function camClickListener(camName, event) {
-        const imgElem = document.getElementById(`cam${camName}`)
-        const bounds = imgElem.getBoundingClientRect();
-        const left = bounds.left;
-        const top = bounds.top;
-        const x = event.clientX - left;
-        const y = event.clientY - top;
-        const cw = imgElem.clientWidth;
-        const ch = imgElem.clientHeight;
-        const iw = imgElem.naturalWidth;
-        const ih = imgElem.naturalHeight;
-        const px = x / cw * iw;
-        const py = y / ch * ih;
-        
-        const formField = document.getElementById(`cam${camName}_ActiveZone`)
-        let formValue = [];
-        try {
-            formValue = JSON.parse(formField.value)
-        } catch (err) {
-            formValue = []
-        }
-        formValue.push([Math.floor(px), Math.floor(py)])
-        formField.value = JSON.stringify(formValue)
-        formField.dispatchEvent(new Event('change'));
+    // Kept old camClickListener for reference, but it might conflict with onMouseDown if both are active.
+    // The new structure has canvas overlay which captures mouse events.
+    // So the img onclick might not fire if canvas is on top.
+    // Active Zone setting might need to be reintegrated if it's important.
+    // The user requirement was "combine... configurator with manual triangle selection".
+    // Does "active zone" still matter? Probably.
+    // But how to switch between drawing AZ and drawing Calibration Triangle?
+    // Maybe we assume AZ is set, and now we are doing calibration.
+    // Or we need a mode switch.
+    // Let's assume the canvas overlay is for Calibration.
+    // If user wants to set AZ, maybe they need to disable calibration mode?
+    // For now, I will prioritize Calibration as requested.
+
+    function toggleMode() {
+        var mode = document.getElementById('modeSelect') ? document.getElementById('modeSelect').value : 'calibration';
+        var isActive = (mode === 'calibration' || mode === 'nudge' || mode === 'az');
+        cameraNames.forEach(function (camName) {
+            var canvas = document.getElementById('overlayCanvas_' + camName);
+            if (canvas) {
+                canvas.style.pointerEvents = isActive ? 'auto' : 'none';
+                canvas.style.opacity = isActive ? '1' : '0.5'; 
+            }
+            var nudgeUI = document.getElementById('nudgeUI_' + camName);
+            if (nudgeUI) {
+                nudgeUI.style.display = (mode === 'nudge') ? 'block' : 'none';
+            }
+            var nudgeTableContainer = document.getElementById('nudgeTableContainer_' + camName);
+            if (nudgeTableContainer) {
+                nudgeTableContainer.style.display = (mode === 'nudge') ? 'block' : 'none';
+            }
+            var azContainer = document.getElementById('azContainer_' + camName);
+            if (azContainer) {
+                azContainer.style.display = (mode === 'az') ? 'block' : 'none';
+            }
+            // Always render nudge UI so Clear All is visible without needing a prior click
+            if (mode === 'nudge') {
+                renderNudgeUI(camName);
+                renderNudgeTable(camName);
+            }
+        });
     }
+
+    toggleMode();
 </script>
+
 </html>

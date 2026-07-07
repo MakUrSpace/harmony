@@ -17,7 +17,14 @@
       let 
         craneLib = crane.mkLib pkgs;
         harmony-rs = craneLib.buildPackage {
-          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          pname = "harmony-web";
+          version = "0.1.0";
+          src = pkgs.lib.cleanSourceWith {
+            src = craneLib.path ./.;
+            filter = path: type:
+              (builtins.match ".*html$" path != null) ||
+              (craneLib.filterCargoSources path type);
+          };
           strictDeps = true;
           buildInputs = [
             pkgs.opencv4
@@ -119,16 +126,16 @@
         };
         packages.harmony-ngrok = writeShellApplication {
           name = "harmony-ngrok";
-          runtimeInputs = [ self'.packages.harmony ngrok tmux ];
+          runtimeInputs = [ self'.packages.harmony-rs ngrok tmux ];
           text = ''
             # Starts a tmux session with 3 panes:
-            #   1. Python server (port 7000/7001)
-            #   2. ngrok tunnel for Harmony (7000)
-            #   3. ngrok tunnel for Admin (7001)
+            #   1. Rust server (port 8081/8080)
+            #   2. ngrok tunnel for Harmony (8081)
+            #   3. ngrok tunnel for Admin (8080)
             
             SESSION_NAME="harmony"
-            PORT="''${PORT:-7000}"
-            ADMIN_PORT="''${ADMIN_PORT:-7001}"
+            PORT="''${PORT:-8081}"
+            ADMIN_PORT="''${ADMIN_PORT:-8080}"
             
             # Arguments for URLs
             ADMIN_URL="''${1:-harmony-admin.ngrok.app}"
@@ -144,7 +151,7 @@
             
             # Create new detached session with the server
             tmux new-session -d -s "$SESSION_NAME" -n "harmony-stack" \
-              "PYTHONUNBUFFERED=1 harmony; read"
+              "harmony-web; read"
             
             # Split for Harmony Ngrok (horizontal split)
             tmux split-window -t "$SESSION_NAME:0" -h \
