@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use axum::http::header;
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
@@ -58,7 +59,6 @@ impl Default for SessionConfig {
 
 struct AppState {
     machine: Arc<Mutex<HarmonyMachine>>,
-    frame_tx: broadcast::Sender<(String, bytes::Bytes)>,
     sessions: Mutex<std::collections::HashMap<String, SessionConfig>>,
 }
 
@@ -289,7 +289,6 @@ async fn main() {
         });
         
     let machine = Arc::new(Mutex::new(HarmonyMachine::new(cc)));
-    let (frame_tx, _) = broadcast::channel(16);
 
     {
         let mut m = machine.lock().await;
@@ -304,29 +303,15 @@ async fn main() {
 
     let state = Arc::new(AppState {
         machine: machine.clone(),
-        frame_tx: frame_tx.clone(),
         sessions: Mutex::new(std::collections::HashMap::new()),
     });
 
-    let tx = frame_tx.clone();
     tokio::spawn(async move {
         loop {
             {
                 let mut m = machine.lock().await;
                 if let Err(e) = m.cycle() {
                     tracing::error!("Machine cycle error: {}", e);
-                }
-                for (cam_name, cam) in m.cc.cameras.iter() {
-                    if let Some(frame) = &cam.reference_frame {
-                        let mut buf = opencv::core::Vector::<u8>::new();
-                        let params = opencv::core::Vector::<i32>::new();
-                        if let Ok(success) = opencv::imgcodecs::imencode(".jpg", frame, &mut buf, &params) {
-                            if success {
-                                let bytes = bytes::Bytes::copy_from_slice(buf.as_slice());
-                                let _ = tx.send((cam_name.clone(), bytes));
-                            }
-                        }
-                    }
                 }
             }
             // In python, the calibrator pool time was 1.0s and observer was 0.01s.
@@ -369,6 +354,8 @@ async fn main() {
         .route("/harmony/publish_selection", post(publish_selection))
         .route("/harmony/clear_published_selection", post(clear_published_selection))
         .route("/harmony/clear_all_published_selections", post(clear_all_published_selections))
+        .route("/harmony/update_session_id", post(update_session_id))
+        .route("/harmony/objects/:oid/rename", post(rename_object))
         .route("/observer", get(observer))
         .route("/configurator", get(configurator).post(configurator_save))
         .route("/configurator/delete_cam/:name", post(configurator_delete_cam))
@@ -403,6 +390,8 @@ async fn main() {
         .route("/harmony/set_overlays", post(set_overlays))
         .route("/harmony/publish_selection", post(publish_selection))
         .route("/harmony/clear_published_selection", post(clear_published_selection))
+        .route("/harmony/update_session_id", post(update_session_id))
+        .route("/harmony/objects/:oid/rename", post(rename_object))
         .route("/harmony/camWithChanges/:cam_name/:view_id", get(cam_with_changes_feed)) // Alias to clean video feed for client overlays
         .nest_service("/static", ServeDir::new(static_dir.clone()))
         .fallback_service(ServeDir::new(static_dir))
@@ -674,42 +663,7 @@ async fn calibrator_reset() -> impl IntoResponse {
     Html("Reset calibrator")
 }
 
-use tokio_stream::wrappers::BroadcastStream;
-use futures_util::stream::StreamExt;
-use axum::http::header;
 
-
-async fn calibrator_cam_with_changes(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Path(name): axum::extract::Path<String>
-) -> impl IntoResponse {
-    tracing::info!("Route hit: /calibrator/camera/{} with changes", name);
-    let rx = state.frame_tx.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(move |res| {
-        let name_clone = name.clone();
-        async move {
-            match res {
-                Ok((cam_name, bytes)) if cam_name == name_clone => {
-                    let header = format!("--frame\r\nContent-Type: image/jpeg\r\n\r\n");
-                    let footer = "\r\n";
-                    let mut resp_bytes = bytes::BytesMut::new();
-                    resp_bytes.extend_from_slice(header.as_bytes());
-                    resp_bytes.extend_from_slice(&bytes);
-                    resp_bytes.extend_from_slice(footer.as_bytes());
-                    Some(Ok::<_, axum::Error>(resp_bytes.freeze()))
-                }
-                _ => None,
-            }
-        }
-    });
-
-    let body = axum::body::Body::from_stream(stream);
-
-    Response::builder()
-        .header(header::CONTENT_TYPE, "multipart/x-mixed-replace; boundary=frame")
-        .body(body)
-        .unwrap()
-}
 
 async fn calibrator_mode_controller() -> impl IntoResponse {
     tracing::info!("Route hit: /calibrator/mode_controller");
@@ -1327,10 +1281,16 @@ async fn clear_selection(
 }
 
 
+struct ObjectGroup {
+    name: String,
+    id_name: String,
+    objects: Vec<harmony_core::machine::TrackedObject>,
+}
+
 #[derive(Template)]
 #[template(path = "objects.html")]
 struct ObjectsTemplate {
-    objects: Vec<harmony_core::machine::TrackedObject>,
+    groups: Vec<ObjectGroup>,
     selection_json: String,
     cameras: Vec<String>,
     is_user_ui: bool,
@@ -1385,8 +1345,36 @@ async fn get_objects(
         }
     }
     
+    let mut groups_map: std::collections::HashMap<String, Vec<harmony_core::machine::TrackedObject>> = std::collections::HashMap::new();
+    for obj in objects {
+        groups_map.entry(obj.object_type.clone()).or_default().push(obj);
+    }
+    
+    let mut groups = Vec::new();
+    let order = ["Moveable", "Allies", "Enemies", "Targetable", "Terrain", "Selectable"];
+    for name in order {
+        if let Some(objs) = groups_map.remove(name) {
+            groups.push(ObjectGroup { 
+                name: name.to_string(), 
+                id_name: name.replace(" ", "-"),
+                objects: objs 
+            });
+        }
+    }
+    let mut remaining: Vec<_> = groups_map.keys().cloned().collect();
+    remaining.sort();
+    for name in remaining {
+        if let Some(objs) = groups_map.remove(&name) {
+            groups.push(ObjectGroup { 
+                name: name.clone(), 
+                id_name: name.replace(" ", "-"),
+                objects: objs 
+            });
+        }
+    }
+    
     let template = ObjectsTemplate {
-        objects,
+        groups,
         selection_json,
         cameras,
         is_user_ui: query.isUserUI.is_some(),
@@ -1587,19 +1575,20 @@ async fn update_object_type(
     }
 }
 
-async fn save_game() -> impl IntoResponse {
-    tracing::info!("Route hit: /harmony/save_game");
-    axum::response::Html("Game saved (stub)".to_string())
-}
-
-async fn load_game() -> impl IntoResponse {
-    tracing::info!("Route hit: /harmony/load_game");
-    axum::response::Html("Game loaded (stub)".to_string())
-}
-
-async fn reset_game() -> impl IntoResponse {
+async fn reset_game(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     tracing::info!("Route hit: /harmony/reset_game");
-    axum::response::Html("Game reset (stub)".to_string())
+    
+    let mut machine = state.machine.lock().await;
+    machine.memory.clear();
+    
+    let mut sessions = state.sessions.lock().await;
+    for session in sessions.values_mut() {
+        *session = SessionConfig::default();
+    }
+    
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
+    (axum::http::StatusCode::OK, headers, "Game Reset").into_response()
 }
 
 #[derive(serde::Deserialize)]
@@ -2070,5 +2059,156 @@ async fn update_session_config(
         axum::response::Redirect::to(&format!("/harmony/control/{}", view_id)).into_response()
     } else {
         (axum::http::StatusCode::NOT_FOUND, "Session not found").into_response()
+    }
+}
+#[derive(serde::Deserialize)]
+struct UpdateSessionIdForm {
+    viewId: String,
+    newViewId: String,
+}
+
+async fn update_session_id(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Form(form): Form<UpdateSessionIdForm>,
+) -> impl IntoResponse {
+    let mut sessions = state.sessions.lock().await;
+    let new_vid = form.newViewId.trim();
+    if !new_vid.is_empty() && new_vid != form.viewId {
+        if let Some(session) = sessions.remove(&form.viewId) {
+            sessions.insert(new_vid.to_string(), session);
+        }
+    }
+    
+    let mut redirect_url = format!("/?view_id={}", form.newViewId);
+    if let Some(referer) = headers.get(axum::http::header::REFERER) {
+        if let Ok(referer_str) = referer.to_str() {
+            if let Some(base) = referer_str.split('?').next() {
+                redirect_url = format!("{}?view_id={}", base, form.newViewId);
+            }
+        }
+    }
+    
+    let mut resp_headers = axum::http::HeaderMap::new();
+    resp_headers.insert(axum::http::header::LOCATION, axum::http::HeaderValue::from_str(&redirect_url).unwrap());
+    resp_headers.insert(axum::http::header::SET_COOKIE, axum::http::HeaderValue::from_str(&format!("session_view_id={}; Path=/", form.newViewId)).unwrap());
+    
+    (axum::http::StatusCode::SEE_OTHER, resp_headers)
+}
+
+#[derive(serde::Deserialize)]
+struct RenameObjectForm {
+    new_oid: String,
+}
+
+async fn rename_object(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(old_oid): axum::extract::Path<String>,
+    Form(form): Form<RenameObjectForm>,
+) -> impl IntoResponse {
+    let new_oid = form.new_oid.trim();
+    if new_oid.is_empty() || new_oid == old_oid {
+        return (axum::http::StatusCode::OK, "No change").into_response();
+    }
+    
+    let mut machine = state.machine.lock().await;
+    if let Some(mut obj) = machine.memory.remove(&old_oid) {
+        obj.oid = new_oid.to_string();
+        machine.memory.insert(new_oid.to_string(), obj);
+    }
+    
+    let mut sessions = state.sessions.lock().await;
+    for session in sessions.values_mut() {
+        let replace = |list: &mut Vec<String>| {
+            if let Some(pos) = list.iter().position(|x| x == &old_oid) {
+                list[pos] = new_oid.to_string();
+            }
+        };
+        replace(&mut session.selectable);
+        replace(&mut session.terrain);
+        replace(&mut session.targetable);
+        replace(&mut session.enemies);
+        replace(&mut session.allies);
+        replace(&mut session.moveable);
+    }
+    
+    (axum::http::StatusCode::OK, "Renamed").into_response()
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct GameSave {
+    memory: std::collections::HashMap<String, harmony_core::machine::TrackedObject>,
+    sessions: std::collections::HashMap<String, SessionConfig>,
+}
+
+#[derive(serde::Deserialize)]
+struct GameSaveForm {
+    game_name: String,
+}
+
+fn sanitize_filename(name: &str) -> String {
+    let mut safe_name: String = name.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect();
+    if safe_name.is_empty() {
+        safe_name = "Harmony".to_string();
+    }
+    safe_name
+}
+
+async fn save_game(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<GameSaveForm>,
+) -> impl IntoResponse {
+    let filename = format!("{}.json", sanitize_filename(&form.game_name));
+    
+    let machine = state.machine.lock().await;
+    let sessions = state.sessions.lock().await;
+    
+    let save_data = GameSave {
+        memory: machine.memory.clone(),
+        sessions: sessions.clone(),
+    };
+    
+    if let Ok(json_str) = serde_json::to_string_pretty(&save_data) {
+        if let Err(e) = std::fs::write(&filename, json_str) {
+            tracing::error!("Failed to save game to {}: {}", filename, e);
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to write save file").into_response();
+        }
+    } else {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize save data").into_response();
+    }
+    
+    (axum::http::StatusCode::OK, format!("Saved to {}", filename)).into_response()
+}
+
+async fn load_game(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<GameSaveForm>,
+) -> impl IntoResponse {
+    let filename = format!("{}.json", sanitize_filename(&form.game_name));
+    
+    match std::fs::read_to_string(&filename) {
+        Ok(json_str) => {
+            match serde_json::from_str::<GameSave>(&json_str) {
+                Ok(save_data) => {
+                    let mut machine = state.machine.lock().await;
+                    let mut sessions = state.sessions.lock().await;
+                    
+                    machine.memory = save_data.memory;
+                    *sessions = save_data.sessions;
+                    
+                    let mut headers = axum::http::HeaderMap::new();
+                    headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
+                    (axum::http::StatusCode::OK, headers, format!("Loaded {}", filename)).into_response()
+                }
+                Err(e) => {
+                    tracing::error!("Failed to deserialize game save {}: {}", filename, e);
+                    (axum::http::StatusCode::BAD_REQUEST, "Invalid save file format").into_response()
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to read game save {}: {}", filename, e);
+            (axum::http::StatusCode::NOT_FOUND, "Save file not found").into_response()
+        }
     }
 }

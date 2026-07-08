@@ -25,9 +25,20 @@
     <div class="container mt-4">
         <h1>Control Panel</h1>
         <h5>Session: <small class="text-muted">{{ viewId }}</small></h5>
-        <a href="/harmony/control" class="btn btn-secondary btn-sm mb-3">&larr; Back to Session List</a>
-        <a href="/harmony/canvas_data/{{ viewId }}" class="btn btn-info btn-sm mb-3" target="_blank">View JSON Data</a>
-
+        <div class="d-flex align-items-center mb-3 flex-wrap">
+            <a href="/harmony/control" class="btn btn-secondary btn-sm me-2">&larr; Back to Session List</a>
+            <a href="/harmony/canvas_data/{{ viewId }}" class="btn btn-info btn-sm me-4" target="_blank">View JSON Data</a>
+            
+            <form hx-post="/harmony/save" hx-swap="none" class="d-flex align-items-center m-0 p-0 me-3">
+                <input type="text" name="game_name" class="form-control form-control-sm me-1" value="Harmony" style="max-width: 120px;" required>
+                <button type="submit" class="btn btn-sm btn-success" onclick="setTimeout(() => alert('Game Saved!'), 200);">Save Game</button>
+            </form>
+            
+            <form hx-post="/harmony/load" hx-swap="none" class="d-flex align-items-center m-0 p-0">
+                <input type="text" name="game_name" class="form-control form-control-sm me-1" value="Harmony" style="max-width: 120px;" required>
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to load this game state? This will overwrite the current state.');">Load Game</button>
+            </form>
+        </div>
         <div class="card">
             <div class="card-header">
                 Object Configuration

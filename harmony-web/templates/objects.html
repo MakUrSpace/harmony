@@ -2,27 +2,78 @@
     <h4>Objects</h4>
 </div>
 
-{% for obj in objects %}
-<div class="d-flex flex-row justify-content-between align-items-center mb-2 border border-secondary border-2 p-2" style="border-radius: 8px;">
-    <!-- Left column: Object info -->
-    <div class="d-flex flex-column pe-2" style="flex: 1;">
-        <h5 class="mb-1 border-bottom border-info border-1 pb-1">{{ obj.oid }}</h5>
-        <p class="mb-1 text-muted small">Pos: {{ obj.constituent_axials.len() }} hexes</p>
-        <p class="mb-2 small">Type: <strong>{{ obj.object_type }}</strong></p>
-        {% if !is_user_ui %}
-        <div>
-            <button hx-delete="/harmony/objects/{{ obj.oid }}" hx-target="#interactor" class="btn btn-sm btn-outline-danger">Delete</button>
-        </div>
-        {% endif %}
+{% for group in groups %}
+<div class="mb-3 object-group-container">
+    <div class="d-flex justify-content-between align-items-center mb-2 px-2 py-1 bg-light border" 
+         style="cursor: pointer; border-radius: 4px;"
+         data-bs-toggle="collapse" 
+         data-bs-target="#collapse-{{ group.id_name }}"
+         aria-expanded="true">
+        <h5 class="mb-0 text-primary">{{ group.name }} ({{ group.objects.len() }})</h5>
+        <i class="bi bi-chevron-down"></i>
     </div>
+    <div class="collapse show object-group-collapse" id="collapse-{{ group.id_name }}">
+        {% for obj in group.objects %}
+        <div class="d-flex flex-row justify-content-between align-items-center mb-2 border border-secondary border-2 p-2" style="border-radius: 8px;">
+            <!-- Left column: Object info -->
+            <div class="d-flex flex-column pe-2" style="flex: 1;">
+                <div class="mb-1 border-bottom border-info border-1 pb-1 d-flex align-items-center justify-content-between">
+                    <h5 class="mb-0 me-2 text-truncate" style="max-width: 100px;" title="{{ obj.oid }}">{{ obj.oid }}</h5>
+                    {% if !is_user_ui || obj.object_type == "Moveable" %}
+                    <form hx-post="/harmony/objects/{{ obj.oid }}/rename" hx-swap="none" class="d-flex m-0 p-0" style="flex:1; justify-content: flex-end;">
+                        <input type="text" name="new_oid" class="form-control form-control-sm me-1" placeholder="Rename" style="max-width: 90px;" required>
+                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Rename"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" class="bi bi-pencil" viewBox="0 0 16 16"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/></svg></button>
+                    </form>
+                    {% endif %}
+                </div>
+                <p class="mb-1 text-muted small">Pos: {{ obj.constituent_axials.len() }} hexes</p>
+                <p class="mb-2 small">Type: <strong>{{ obj.object_type }}</strong></p>
+                {% if !is_user_ui %}
+                <div>
+                    <button hx-delete="/harmony/objects/{{ obj.oid }}" hx-target="#interactor" class="btn btn-sm btn-outline-danger">Delete</button>
+                </div>
+                {% endif %}
+            </div>
 
-    <!-- Right column: Camera Snapshots -->
-    <div class="d-flex flex-wrap gap-2 justify-content-end align-items-center" style="min-width: fit-content;">
-        {% for cam in cameras %}
-        <div class="border border-info" style="border-radius: 4px; background: #000; width: 100px; height: 100px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-            <img id="snapshot_{{ obj.oid }}_{{ cam }}_{{ obj.position_hash() }}" hx-preserve="true" src="/harmony/objects/{{ obj.oid }}/snapshot/{{ cam }}?v={{ obj.position_hash() }}" alt="{{ cam }}" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+            <!-- Right column: Camera Snapshots -->
+            <div class="d-flex flex-wrap gap-2 justify-content-end align-items-center" style="min-width: fit-content;">
+                {% for cam in cameras %}
+                <div class="border border-info" style="border-radius: 4px; background: #000; width: 100px; height: 100px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                    <img id="snapshot_{{ obj.oid }}_{{ cam }}_{{ obj.position_hash() }}" hx-preserve="true" src="/harmony/objects/{{ obj.oid }}/snapshot/{{ cam }}?v={{ obj.position_hash() }}" alt="{{ cam }}" style="max-width: 100%; max-height: 100%; object-fit: contain;">
+                </div>
+                {% endfor %}
+            </div>
         </div>
         {% endfor %}
     </div>
 </div>
 {% endfor %}
+
+<script>
+(function() {
+    // Save state on toggle
+    if (!window._harmonyCollapseBound) {
+        window._harmonyCollapseBound = true;
+        document.body.addEventListener('hidden.bs.collapse', function(e) {
+            if (e.target.id && e.target.id.startsWith('collapse-')) {
+                sessionStorage.setItem('collapseState_' + e.target.id, 'hidden');
+            }
+        });
+        document.body.addEventListener('shown.bs.collapse', function(e) {
+            if (e.target.id && e.target.id.startsWith('collapse-')) {
+                sessionStorage.setItem('collapseState_' + e.target.id, 'shown');
+            }
+        });
+    }
+
+    // Apply state immediately
+    document.querySelectorAll('.object-group-collapse').forEach(function(el) {
+        var state = sessionStorage.getItem('collapseState_' + el.id);
+        if (state === 'hidden') {
+            el.classList.remove('show');
+        } else {
+            el.classList.add('show');
+        }
+    });
+})();
+</script>
