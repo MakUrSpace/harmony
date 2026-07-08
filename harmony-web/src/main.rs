@@ -80,8 +80,13 @@ fn spawn_camera_stream(
             final_cam_path = format!("rtsp://{}", final_cam_path);
         }
 
+        std::env::set_var("OPENCV_FFMPEG_CAPTURE_OPTIONS", "fflags;nobuffer|flags;low_delay");
+
         let mut cam = match VideoCapture::from_file(&final_cam_path, CAP_ANY) {
-            Ok(c) => c,
+            Ok(mut c) => {
+                let _ = c.set(opencv::videoio::CAP_PROP_BUFFERSIZE, 1.0);
+                c
+            },
             Err(e) => {
                 println!("Failed to open camera: {}", e);
                 return;
