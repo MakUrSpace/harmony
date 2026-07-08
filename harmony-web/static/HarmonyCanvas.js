@@ -165,7 +165,7 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
             const polys = window.gridPolys[currentCam];
             for (let i = 0; i < polys.length; i++) {
                 if (polys[i] && polys[i].poly) {
-                    drawPoly(polys[i].poly, scale, false, 255, 255, 255, null, 0.2); 
+                    drawPoly(polys[i].poly, scale, false, 255, 255, 255, null, 0.4); 
                 }
             }
         }
