@@ -951,7 +951,7 @@ async fn build_harmony_context(
 ) -> (String, String, String, String, String) {
     let mut view_id = query.view_id.clone().or_else(|| {
         jar.get("session_view_id").map(|c| c.value().to_string())
-    });
+    }).map(|s| s.trim().to_lowercase());
 
     if let Some(vid) = &view_id {
         let mut sessions = state.sessions.lock().await;
@@ -1096,6 +1096,7 @@ async fn canvas_data(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(view_id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
+    let view_id = view_id.trim().to_lowercase();
     tracing::info!("Route hit: /harmony/canvas_data/{}", view_id);
     let machine = state.machine.lock().await;
     let sessions = state.sessions.lock().await;
@@ -1306,7 +1307,8 @@ async fn select_pixel(
     State(state): State<Arc<AppState>>,
     axum::extract::Form(payload): axum::extract::Form<SelectPixelPayload>,
 ) -> impl IntoResponse {
-    tracing::info!("Route hit: /harmony/select_pixel by view_id {}", payload.viewId);
+    let view_id_lower = payload.viewId.trim().to_lowercase();
+    tracing::info!("Route hit: /harmony/select_pixel by view_id {}", view_id_lower);
     let pixel: Result<(f64, f64), _> = serde_json::from_str(&payload.selectedPixel);
     let (x, y) = pixel.unwrap_or((0.0, 0.0));
     
@@ -1340,7 +1342,7 @@ async fn select_pixel(
         objects_at_cell.sort();
 
         let mut sessions = state.sessions.lock().await;
-        let session = sessions.entry(payload.viewId.clone()).or_insert_with(SessionConfig::default);
+        let session = sessions.entry(view_id_lower).or_insert_with(SessionConfig::default);
         
         let append = payload.appendPixel.to_lowercase() == "true";
         if append && session.selection.first_cell.is_some() {
@@ -1475,9 +1477,10 @@ async fn clear_selection(
     State(state): State<Arc<AppState>>,
     axum::extract::Form(payload): axum::extract::Form<ClearSelectionPayload>,
 ) -> impl IntoResponse {
-    tracing::info!("Route hit: /harmony/clear_selection by view_id {}", payload.viewId);
+    let view_id_lower = payload.viewId.trim().to_lowercase();
+    tracing::info!("Route hit: /harmony/clear_selection by view_id {}", view_id_lower);
     let mut sessions = state.sessions.lock().await;
-    if let Some(session) = sessions.get_mut(&payload.viewId) {
+    if let Some(session) = sessions.get_mut(&view_id_lower) {
         session.selection.first_cell = None;
         session.selection.additional_cells.clear();
         session.selected_oid = None;
@@ -1808,9 +1811,10 @@ async fn set_overlays(
     State(state): State<Arc<AppState>>,
     axum::extract::Form(form): axum::extract::Form<SetOverlaysForm>,
 ) -> impl IntoResponse {
-    tracing::info!("Route hit: /harmony/set_overlays for view {}", form.view_id);
+    let view_id_lower = form.view_id.trim().to_lowercase();
+    tracing::info!("Route hit: /harmony/set_overlays for view {}", view_id_lower);
     let mut sessions = state.sessions.lock().await;
-    if let Some(session) = sessions.get_mut(&form.view_id) {
+    if let Some(session) = sessions.get_mut(&view_id_lower) {
         session.show_grid = form.show_grid;
         session.show_objects = form.show_objects;
     }
@@ -2153,9 +2157,10 @@ async fn session_control_panel(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(view_id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
+    let view_id_lower = view_id.trim().to_lowercase();
     let config = {
         let sessions = state.sessions.lock().await;
-        sessions.get(&view_id).cloned()
+        sessions.get(&view_id_lower).cloned()
     };
     
     if let Some(config) = config {
@@ -2165,7 +2170,7 @@ async fn session_control_panel(
         };
         objects.sort_by(|a, b| a.oid.cmp(&b.oid));
         let template = ControlPanelTemplate {
-            viewId: view_id.clone(),
+            viewId: view_id_lower.clone(),
             config: config.clone(),
             objects,
         };
@@ -2187,9 +2192,10 @@ async fn publish_selection(
     State(state): State<Arc<AppState>>,
     Form(payload): Form<PublishSelectionForm>,
 ) -> impl IntoResponse {
+    let view_id_lower = payload.viewId.trim().to_lowercase();
     let mut sessions = state.sessions.lock().await;
     let mut published = None;
-    if let Some(session) = sessions.get(&payload.viewId) {
+    if let Some(session) = sessions.get(&view_id_lower) {
         if session.can_publish_selection {
             if let Some(first) = session.selection.first_cell {
                 let mut cells = vec![first];
@@ -2199,7 +2205,7 @@ async fn publish_selection(
         }
     }
     
-    if let Some(session) = sessions.get_mut(&payload.viewId) {
+    if let Some(session) = sessions.get_mut(&view_id_lower) {
         session.published_selection = published;
     }
     
@@ -2210,8 +2216,9 @@ async fn clear_published_selection(
     State(state): State<Arc<AppState>>,
     Form(payload): Form<PublishSelectionForm>,
 ) -> impl IntoResponse {
+    let view_id_lower = payload.viewId.trim().to_lowercase();
     let mut sessions = state.sessions.lock().await;
-    if let Some(session) = sessions.get_mut(&payload.viewId) {
+    if let Some(session) = sessions.get_mut(&view_id_lower) {
         session.published_selection = None;
     }
     axum::response::Html("<div id='publishedFeedback' class='alert alert-secondary mt-2 p-1'>Broadcast cleared.</div>")
@@ -2232,8 +2239,9 @@ async fn update_session_config(
     axum::extract::Path(view_id): axum::extract::Path<String>,
     Form(form): Form<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
+    let view_id_lower = view_id.trim().to_lowercase();
     let mut sessions = state.sessions.lock().await;
-    if let Some(config) = sessions.get_mut(&view_id) {
+    if let Some(config) = sessions.get_mut(&view_id_lower) {
         config.selectable.clear();
         config.terrain.clear();
         config.targetable.clear();
@@ -2261,7 +2269,7 @@ async fn update_session_config(
                 }
             }
         }
-        axum::response::Redirect::to(&format!("/harmony/control/{}", view_id)).into_response()
+        axum::response::Redirect::to(&format!("/harmony/control/{}", view_id_lower)).into_response()
     } else {
         (axum::http::StatusCode::NOT_FOUND, "Session not found").into_response()
     }
@@ -2278,25 +2286,26 @@ async fn update_session_id(
     Form(form): Form<UpdateSessionIdForm>,
 ) -> impl IntoResponse {
     let mut sessions = state.sessions.lock().await;
-    let new_vid = form.newViewId.trim();
-    if !new_vid.is_empty() && new_vid != form.viewId {
-        if let Some(session) = sessions.remove(&form.viewId) {
+    let old_vid = form.viewId.trim().to_lowercase();
+    let new_vid = form.newViewId.trim().to_lowercase();
+    if !new_vid.is_empty() && new_vid != old_vid {
+        if let Some(session) = sessions.remove(&old_vid) {
             sessions.insert(new_vid.to_string(), session);
         }
     }
     
-    let mut redirect_url = format!("/?view_id={}", form.newViewId);
+    let mut redirect_url = format!("/?view_id={}", new_vid);
     if let Some(referer) = headers.get(axum::http::header::REFERER) {
         if let Ok(referer_str) = referer.to_str() {
             if let Some(base) = referer_str.split('?').next() {
-                redirect_url = format!("{}?view_id={}", base, form.newViewId);
+                redirect_url = format!("{}?view_id={}", base, new_vid);
             }
         }
     }
     
     let mut resp_headers = axum::http::HeaderMap::new();
     resp_headers.insert(axum::http::header::LOCATION, axum::http::HeaderValue::from_str(&redirect_url).unwrap());
-    resp_headers.insert(axum::http::header::SET_COOKIE, axum::http::HeaderValue::from_str(&format!("session_view_id={}; Path=/", form.newViewId)).unwrap());
+    resp_headers.insert(axum::http::header::SET_COOKIE, axum::http::HeaderValue::from_str(&format!("session_view_id={}; Path=/", new_vid)).unwrap());
     
     (axum::http::StatusCode::SEE_OTHER, resp_headers)
 }
@@ -2417,3 +2426,55 @@ async fn load_game(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_session_id_case_insensitivity() {
+        let (chat_tx, _) = tokio::sync::broadcast::channel(16);
+        let state = AppState {
+            machine: Arc::new(tokio::sync::Mutex::new(harmony_core::machine::HarmonyMachine::new(
+                harmony_core::observer::HexCaptureConfiguration {
+                    cameras: std::collections::HashMap::new(),
+                    rsc: std::collections::HashMap::new(),
+                    hex: None,
+                    show_grid: false,
+                    show_objects: false,
+                    grid_polys_cache: std::collections::HashMap::new(),
+                    calibration_plan: serde_json::Value::Null,
+                    discord_token: None,
+                    discord_channel_id: None,
+                    embed_compcon: false,
+                }
+            ))),
+            sessions: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_tx,
+        };
+
+        // 1. Build context with mixed-case session ID
+        let query = HarmonyQuery {
+            view_id: Some("Test-Session-123".to_string()),
+        };
+        let jar = axum_extra::extract::CookieJar::new();
+        let (vid_1, _, _, _, _) = build_harmony_context(&state, &query, &jar).await;
+
+        // The returned ID should be lowercase
+        assert_eq!(vid_1, "test-session-123");
+
+        // 2. Build context with lowercase session ID
+        let query_lower = HarmonyQuery {
+            view_id: Some("test-session-123".to_string()),
+        };
+        let (vid_2, _, _, _, _) = build_harmony_context(&state, &query_lower, &jar).await;
+
+        assert_eq!(vid_1, vid_2);
+
+        // Verify only 1 session was created in the state map
+        let sessions = state.sessions.lock().await;
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions.contains_key("test-session-123"));
+    }
+}
+
