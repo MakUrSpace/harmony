@@ -17,24 +17,47 @@
 </head>
 
 <body>
-    <div class="container">
+    <div class="container-fluid px-4">
         <h1 align="center">Harmony</h1>
         <hr>
-        <div class="row justify-content-center mb-3">
-            <h4>Session ID: {{ view_id }}
-                <button class="btn btn-sm btn-outline-secondary"
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0 text-start" style="white-space: nowrap;">Session ID: {{ view_id }}
+                <button class="btn btn-sm btn-outline-secondary ms-2"
                     onclick="document.getElementById('updateSessionForm').hidden = !document.getElementById('updateSessionForm').hidden">Edit</button>
+                <span class="mx-2 text-muted">|</span>
+                <button id="chatToggleButton" class="btn btn-sm btn-outline-primary" onclick="toggleChatVisibility()">💬 Open Chat</button>
             </h4>
+            {% if embed_compcon %}
+            <div class="text-end">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Layout Toggle">
+                    <input type="radio" class="btn-check" name="layoutToggle" id="layoutSplit" autocomplete="off" checked onchange="toggleLayout('split')">
+                    <label class="btn btn-outline-primary" for="layoutSplit">Split</label>
+                    <input type="radio" class="btn-check" name="layoutToggle" id="layoutTabs" autocomplete="off" onchange="toggleLayout('tabs')">
+                    <label class="btn btn-outline-primary" for="layoutTabs">Tabs</label>
+                </div>
+            </div>
+            {% endif %}
         </div>
-        <div id="updateSessionForm" class="row justify-content-center mb-3" hidden>
+        <div id="updateSessionForm" class="row justify-content-start mb-3" hidden>
             <form action="{{ harmony_url }}update_session_id" method="POST" class="form-inline">
                 <input type="hidden" name="viewId" value="{{ view_id }}">
                 <input type="text" name="newViewId" class="form-control mr-2" placeholder="New Session ID" required>
                 <button type="submit" class="btn btn-primary">Update</button>
             </form>
         </div>
-        <div class="row" style="min-width: 500px">
-            <div class="container justify-content-center" align="center">
+        {% if embed_compcon %}
+        <ul class="nav nav-tabs mb-3 justify-content-center" id="layoutNavTabs" style="display: none;">
+            <li class="nav-item">
+                <button class="nav-link active" id="tab-harmony" onclick="switchTab('harmony')">Observer</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" id="tab-compcon" onclick="switchTab('compcon')">Comp/Con</button>
+            </li>
+        </ul>
+        {% endif %}
+        <div class="row flex-nowrap" style="min-width: 500px" id="mainLayoutRow">
+            <div class="{% if embed_compcon %}col-5{% else %}col-12{% endif %}" id="harmonyColumn">
+                <div class="container-fluid justify-content-center" align="center">
                 <h3 id="GameWorldHeader">Game World View -- {{ default_camera }}</h3>
                 <form id="selectPixelForm" hx-post="{{ harmony_url }}select_pixel" hx-target="#interactor" hx-sync="this:queue all">
                     <input type="hidden" name="selectedCamera" id="selectedCamera" value="{{ default_camera }}">
@@ -169,45 +192,97 @@
                 }
                 </script>
                 </div>
-                <hr>
-                <div class="row">
-                    <div class="col" align="left">
-                        <form hx-post="{{ harmony_url }}save" hx-swap="none">
-                            <input class="btn btn-success" type="submit" value="Save Game">
-                            <input class="text" value="Harmony" id="game_name" name="game_name">
-                        </form>
-                    </div>
                 </div>
-                <div class="row">
-                    <div class="col" align="left">
-                        <input class="btn btn-warning" type="submit" value="Load Game" onclick="loadGame()">
-                        <form id="load_game" hx-post="{{ harmony_url }}load" hx-target="#load_status" hx-swap="innerHTML">
+            </div>
+            {% if embed_compcon %}
+            <div class="col-7" id="compconColumn">
+                <div class="w-100 h-100" style="min-height: 85vh;">
+                    <iframe src="https://compcon.app/" width="100%" height="100%" style="border: 1px solid #ccc; border-radius: 8px; min-height: 85vh;"></iframe>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        <hr class="mt-4 mb-3">
+        <div class="row align-items-center mb-4">
+            <div class="col-md-4" align="left">
+                <div class="d-flex flex-column gap-2">
+                    <form hx-post="{{ harmony_url }}save" hx-swap="none" class="d-flex align-items-center m-0">
+                        <input class="btn btn-success me-2" type="submit" value="Save Game">
+                        <input class="form-control" value="Harmony" id="game_name" name="game_name" style="max-width: 150px;">
+                    </form>
+                    <div class="d-flex align-items-center mt-2">
+                        <input class="btn btn-warning me-2" type="button" value="Load Game" onclick="loadGame()">
+                        <form id="load_game" hx-post="{{ harmony_url }}load" hx-target="#load_status" hx-swap="innerHTML" class="m-0">
                             <input type="hidden" value="Harmony" id="load_game_name" name="game_name">
                         </form>
-                        <div id="load_status" class="text-sm text-muted mt-1"></div>
-                        <script>
-                            function loadGame() {
-                                const gameNameVal = document.getElementById(`game_name`).value
-                                const loadGameField = document.getElementById(`load_game_name`)
-                                loadGameField.value = gameNameVal
-                                const loadGameForm = document.getElementById(`load_game`)
-                                loadGameForm.requestSubmit()
-                            }
-                        </script>
-                    </div>
-                    <div class="col" align="center">
-                        <button class="btn btn-info" onclick=" window.open('{{ harmony_url }}control','_blank')">Session
-                            Control Panels</button>
-                        <button class="btn btn-secondary ml-2"
-                            onclick=" window.open('/configurator/','_blank')">Configurator</button>
-                    </div>
-                    <div class="col" align="right">
-                        <input class="btn btn-danger" type="button" value="Reset Game" hx-get="{{ harmony_url }}reset">
+                        <div id="load_status" class="text-sm text-muted ms-2"></div>
                     </div>
                 </div>
+                <script>
+                    function loadGame() {
+                        const gameNameVal = document.getElementById(`game_name`).value
+                        const loadGameField = document.getElementById(`load_game_name`)
+                        loadGameField.value = gameNameVal
+                        const loadGameForm = document.getElementById(`load_game`)
+                        loadGameForm.requestSubmit()
+                    }
+                </script>
+            </div>
+            <div class="col-md-4" align="center">
+                <button class="btn btn-info" onclick="window.open('{{ harmony_url }}control','_blank')">Session Control Panels</button>
+                <button class="btn btn-secondary ms-2" onclick="window.open('/configurator/','_blank')">Configurator</button>
+            </div>
+            <div class="col-md-4" align="right">
+                <input class="btn btn-danger" type="button" value="Reset Game" hx-get="{{ harmony_url }}reset">
             </div>
         </div>
     </div>
+    <script>
+        function toggleLayout(mode) {
+            const harmonyCol = document.getElementById('harmonyColumn');
+            const compconCol = document.getElementById('compconColumn');
+            const navTabs = document.getElementById('layoutNavTabs');
+            if (!harmonyCol || !compconCol || !navTabs) return;
+            
+            if (mode === 'split') {
+                navTabs.style.display = 'none';
+                harmonyCol.className = 'col-5';
+                harmonyCol.style.display = 'block';
+                compconCol.className = 'col-7';
+                compconCol.style.display = 'block';
+            } else {
+                navTabs.style.display = 'flex';
+                harmonyCol.className = 'col-12';
+                compconCol.className = 'col-12';
+                switchTab('harmony');
+            }
+            if (window.harmonyEditor) window.harmonyEditor.render();
+            if (window.harmonyEditors) window.harmonyEditors.forEach(ed => ed.render());
+        }
+        
+        function switchTab(tab) {
+            const harmonyCol = document.getElementById('harmonyColumn');
+            const compconCol = document.getElementById('compconColumn');
+            const tabHarmony = document.getElementById('tab-harmony');
+            const tabCompcon = document.getElementById('tab-compcon');
+            const layoutTabs = document.getElementById('layoutTabs');
+            if (!harmonyCol || !compconCol || !tabHarmony || !tabCompcon || !layoutTabs) return;
+            
+            if (layoutTabs.checked) {
+                if (tab === 'harmony') {
+                    harmonyCol.style.display = 'block';
+                    compconCol.style.display = 'none';
+                    tabHarmony.classList.add('active');
+                    tabCompcon.classList.remove('active');
+                } else {
+                    harmonyCol.style.display = 'none';
+                    compconCol.style.display = 'block';
+                    tabHarmony.classList.remove('active');
+                    tabCompcon.classList.add('active');
+                }
+            }
+        }
+    </script>
 
     <!-- Rename Unit Modal — lives outside the polled container so it never reloads -->
     <div class="modal fade" id="renameUnitModal" tabindex="-1" aria-labelledby="renameUnitModalLabel" aria-hidden="true">
@@ -276,6 +351,162 @@
                 if (e.key === 'Enter') doRename();
             });
         })();
+    </script>
+    <!-- Floating Chat Widget -->
+    <style>
+        #discordChatWidget {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            width: 350px;
+            height: 450px;
+            background: var(--panel-color) !important;
+            border: 2px solid var(--dim-color) !important;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            font-family: 'Share Tech Mono', monospace;
+        }
+        #discordChatWidget .chat-header {
+            background: var(--dim-color) !important;
+            color: var(--secondary-color) !important;
+            padding: 10px;
+            border-bottom: 2px solid var(--secondary-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        #discordChatWidget .nav-tabs {
+            border-bottom: 1px solid var(--dim-color) !important;
+            background: #000;
+            border-radius: 0;
+        }
+        #discordChatWidget .nav-link {
+            color: #4a6c6c !important;
+            border: none !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            padding: 8px 12px;
+        }
+        #discordChatWidget .nav-link.active {
+            color: var(--secondary-color) !important;
+            background: var(--panel-color) !important;
+            border-bottom: 2px solid var(--secondary-color) !important;
+            text-shadow: 0 0 5px var(--secondary-color);
+        }
+        #discordChatWidget .tab-content {
+            background: var(--panel-color) !important;
+            color: var(--primary-color) !important;
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+        #discordChatWidget .form-control {
+            background: #000 !important;
+            border: 1px solid var(--dim-color) !important;
+            color: var(--primary-color) !important;
+            border-radius: 0 !important;
+        }
+        #discordChatWidget .btn-primary {
+            border-radius: 0 !important;
+            border: 1px solid var(--secondary-color) !important;
+            color: var(--secondary-color) !important;
+            background: transparent !important;
+            text-transform: uppercase;
+        }
+        #discordChatWidget .btn-primary:hover {
+            background: var(--secondary-color) !important;
+            color: #000 !important;
+            box-shadow: 0 0 10px var(--secondary-color);
+        }
+    </style>
+    <script>
+        function toggleChatVisibility() {
+            const chatWidget = document.getElementById('discordChatWidget');
+            const toggleBtn = document.getElementById('chatToggleButton');
+            if (chatWidget.style.display === 'none') {
+                chatWidget.style.display = 'flex';
+                if (toggleBtn) toggleBtn.innerHTML = '💬 Close Chat';
+            } else {
+                chatWidget.style.display = 'none';
+                if (toggleBtn) toggleBtn.innerHTML = '💬 Open Chat';
+            }
+        }
+    </script>
+    <div id="discordChatWidget" style="display: none;">
+        <div class="chat-header">
+            <span style="font-weight: bold;">Discord Chat</span>
+            <button onclick="toggleChatVisibility()" style="background: transparent; border: none; color: var(--danger-color); font-size: 1.2rem; line-height: 1; text-shadow: 0 0 5px var(--danger-color);">&times;</button>
+        </div>
+        <ul class="nav nav-tabs" id="chatTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="group-tab" data-bs-toggle="tab" data-bs-target="#chat-group" type="button" role="tab" onclick="window.currentChatChannel='group'">Group</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="team-tab" data-bs-toggle="tab" data-bs-target="#chat-team" type="button" role="tab" onclick="window.currentChatChannel='team'">Team</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="dms-tab" data-bs-toggle="tab" data-bs-target="#chat-dms" type="button" role="tab" onclick="window.currentChatChannel='dms'">DMs</button>
+            </li>
+        </ul>
+        <div class="tab-content" id="chatTabContent">
+            <div class="tab-pane fade show active h-100" id="chat-group" role="tabpanel">
+                <div id="chat-messages-group" style="height: 100%; overflow-y: auto;"></div>
+            </div>
+            <div class="tab-pane fade h-100" id="chat-team" role="tabpanel">
+                <div id="chat-messages-team" style="height: 100%; overflow-y: auto;"></div>
+            </div>
+            <div class="tab-pane fade h-100" id="chat-dms" role="tabpanel">
+                <div id="chat-messages-dms" style="height: 100%; overflow-y: auto;"></div>
+            </div>
+        </div>
+        <div style="padding: 10px; border-top: 1px solid var(--dim-color); display: flex; background: var(--panel-color);">
+            <input type="text" id="chatInput" class="form-control me-2" placeholder="Type a message..." onkeypress="if(event.key === 'Enter') sendChatMessage()">
+            <button onclick="sendChatMessage()" class="btn btn-primary">Send</button>
+        </div>
+    </div>
+
+    <script>
+        window.currentChatChannel = 'group';
+        let chatWsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        let chatWs = new WebSocket(chatWsProtocol + '//' + window.location.host + '/harmony/chat_ws');
+        
+        chatWs.onmessage = function(event) {
+            let msg = JSON.parse(event.data);
+            let channel = msg.channel || 'group';
+            let container = document.getElementById('chat-messages-' + channel);
+            if (container) {
+                let msgEl = document.createElement('div');
+                msgEl.style.marginBottom = '8px';
+                msgEl.style.fontSize = '0.9rem';
+                msgEl.innerHTML = '<strong style="color: #5865F2;">' + msg.author + ':</strong> ' + msg.content;
+                container.appendChild(msgEl);
+                container.scrollTop = container.scrollHeight;
+            }
+        };
+        
+        function sendChatMessage() {
+            let input = document.getElementById('chatInput');
+            let text = input.value.trim();
+            if (text !== '') {
+                let msg = {
+                    author: 'WebUser',
+                    content: text,
+                    channel: window.currentChatChannel,
+                    timestamp: 0,
+                    from_discord: false
+                };
+                chatWs.send(JSON.stringify(msg));
+                input.value = '';
+            }
+        }
     </script>
 </body>
 

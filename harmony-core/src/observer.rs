@@ -373,6 +373,9 @@ pub struct HexCaptureConfiguration {
     pub show_objects: bool,
     pub grid_polys_cache: HashMap<String, serde_json::Value>,
     pub calibration_plan: serde_json::Value,
+    pub discord_token: Option<String>,
+    pub discord_channel_id: Option<String>,
+    pub embed_compcon: bool,
 }
 
 impl HexCaptureConfiguration {
@@ -383,6 +386,9 @@ impl HexCaptureConfiguration {
         let mut show_grid = true;
         let mut show_objects = true;
         let mut calibration_plan = serde_json::json!({});
+        let mut discord_token = None;
+        let mut discord_channel_id = None;
+        let mut embed_compcon = false;
         
         let file_contents = std::fs::read_to_string(path).unwrap_or_else(|_| "{}".to_string());
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&file_contents) {
@@ -405,6 +411,15 @@ impl HexCaptureConfiguration {
             }
             if let Some(v) = json.get("show_objects").and_then(|v| v.as_bool()) {
                 show_objects = v;
+            }
+            if let Some(v) = json.get("discord_token").and_then(|v| v.as_str()) {
+                discord_token = Some(v.to_string());
+            }
+            if let Some(v) = json.get("discord_channel_id").and_then(|v| v.as_str()) {
+                discord_channel_id = Some(v.to_string());
+            }
+            if let Some(v) = json.get("embed_compcon").and_then(|v| v.as_bool()) {
+                embed_compcon = v;
             }
 
             // Parse Cameras
@@ -508,6 +523,9 @@ impl HexCaptureConfiguration {
             show_objects,
             grid_polys_cache: HashMap::new(),
             calibration_plan,
+            discord_token,
+            discord_channel_id,
+            embed_compcon,
         };
 
         config.precompute_grid_polys();
@@ -563,6 +581,14 @@ impl HexCaptureConfiguration {
         map.insert("show_objects".to_string(), serde_json::json!(self.show_objects));
         map.insert("calibrationPlan".to_string(), self.calibration_plan.clone());
         map.insert("show_objects".to_string(), serde_json::json!(self.show_objects));
+        
+        if let Some(token) = &self.discord_token {
+            map.insert("discord_token".to_string(), serde_json::json!(token));
+        }
+        if let Some(channel_id) = &self.discord_channel_id {
+            map.insert("discord_channel_id".to_string(), serde_json::json!(channel_id));
+        }
+        map.insert("embed_compcon".to_string(), serde_json::json!(self.embed_compcon));
 
         // grid_overlays is not currently synced, we can stub it if needed, or omit it (Python doesn't strictly require it to be saved).
         map.insert("grid_overlays".to_string(), serde_json::json!({}));

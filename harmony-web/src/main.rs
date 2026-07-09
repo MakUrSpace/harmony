@@ -57,10 +57,123 @@ impl Default for SessionConfig {
     }
 }
 
+use axum::extract::ws::{WebSocketUpgrade, WebSocket, Message as WsMessage};
+use futures_util::{sink::SinkExt, stream::StreamExt};
+use serenity::async_trait;
+use serenity::model::channel::Message;
+use serenity::model::gateway::Ready;
+use serenity::prelude::*;
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+pub struct ChatMessage {
+    pub author: String,
+    pub content: String,
+    pub timestamp: u64,
+    pub from_discord: bool,
+    pub channel: String,
+}
+
 struct AppState {
     machine: Arc<Mutex<HarmonyMachine>>,
     sessions: Mutex<std::collections::HashMap<String, SessionConfig>>,
+    chat_tx: tokio::sync::broadcast::Sender<ChatMessage>,
 }
+
+struct Handler {
+    chat_tx: tokio::sync::broadcast::Sender<ChatMessage>,
+    channel_id: u64,
+}
+
+#[async_trait]
+impl EventHandler for Handler {
+    async fn message(&self, _ctx: Context, msg: Message) {
+        if msg.author.bot {
+            return;
+        }
+        if msg.channel_id.get() == self.channel_id {
+            let chat_msg = ChatMessage {
+                author: msg.author.name.clone(),
+                content: msg.content.clone(),
+                timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+                from_discord: true,
+                channel: "group".to_string(),
+            };
+            let _ = self.chat_tx.send(chat_msg);
+        }
+    }
+
+    async fn ready(&self, _: Context, ready: Ready) {
+        tracing::info!("Discord bot connected as {}", ready.user.name);
+    }
+}
+
+async fn start_discord_bot(token: String, channel_id: u64, chat_tx: tokio::sync::broadcast::Sender<ChatMessage>, mut chat_rx: tokio::sync::broadcast::Receiver<ChatMessage>) {
+    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
+    let mut client = match Client::builder(&token, intents)
+        .event_handler(Handler { chat_tx: chat_tx.clone(), channel_id })
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to create Discord client: {:?}", e);
+            return;
+        }
+    };
+
+    let http = client.http.clone();
+    
+    tokio::spawn(async move {
+        while let Ok(msg) = chat_rx.recv().await {
+            if !msg.from_discord && msg.channel == "group" {
+                let text = format!("**{}**: {}", msg.author, msg.content);
+                let _ = serenity::model::id::ChannelId::new(channel_id).say(&http, &text).await;
+            }
+        }
+    });
+
+    if let Err(why) = client.start().await {
+        tracing::error!("Discord client error: {:?}", why);
+    }
+}
+
+async fn chat_ws(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_chat_socket(socket, state))
+}
+
+async fn handle_chat_socket(socket: WebSocket, state: Arc<AppState>) {
+    let (mut sender, mut receiver) = socket.split();
+    let mut rx = state.chat_tx.subscribe();
+
+    let mut send_task = tokio::spawn(async move {
+        while let Ok(msg) = rx.recv().await {
+            if let Ok(json) = serde_json::to_string(&msg) {
+                if sender.send(WsMessage::Text(json)).await.is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    let tx = state.chat_tx.clone();
+    let mut recv_task = tokio::spawn(async move {
+        while let Some(Ok(WsMessage::Text(text))) = receiver.next().await {
+            if let Ok(mut msg) = serde_json::from_str::<ChatMessage>(&text) {
+                msg.from_discord = false;
+                msg.timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                let _ = tx.send(msg);
+            }
+        }
+    });
+
+    tokio::select! {
+        _ = (&mut send_task) => recv_task.abort(),
+        _ = (&mut recv_task) => send_task.abort(),
+    }
+}
+
 
 fn spawn_camera_stream(
     cam_name: String,
@@ -274,7 +387,7 @@ async fn main() {
     
     tracing_subscriber::fmt::init();
 
-    let mut cc = HexCaptureConfiguration::load_from_file("observerConfiguration.json")
+    let cc = HexCaptureConfiguration::load_from_file("observerConfiguration.json")
         .unwrap_or_else(|e| {
             eprintln!("Failed to load configuration: {:?}", e);
             HexCaptureConfiguration {
@@ -285,6 +398,9 @@ async fn main() {
                 show_objects: true,
                 grid_polys_cache: std::collections::HashMap::new(),
                 calibration_plan: serde_json::json!({}),
+                discord_token: None,
+                discord_channel_id: None,
+                embed_compcon: false,
             }
         });
         
@@ -301,10 +417,29 @@ async fn main() {
         }
     }
 
+    let (chat_tx, _) = tokio::sync::broadcast::channel(100);
+
     let state = Arc::new(AppState {
         machine: machine.clone(),
         sessions: Mutex::new(std::collections::HashMap::new()),
+        chat_tx: chat_tx.clone(),
     });
+
+    {
+        let m = machine.lock().await;
+        if let Some(token) = &m.cc.discord_token {
+            if let Some(channel_id_str) = &m.cc.discord_channel_id {
+                if let Ok(channel_id) = channel_id_str.parse::<u64>() {
+                    let token_clone = token.clone();
+                    let rx = chat_tx.subscribe();
+                    let tx = chat_tx.clone();
+                    tokio::spawn(async move {
+                        start_discord_bot(token_clone, channel_id, tx, rx).await;
+                    });
+                }
+            }
+        }
+    }
 
     tokio::spawn(async move {
         loop {
@@ -331,6 +466,7 @@ async fn main() {
     let admin_app = Router::new()
         .route("/", get(|| async { axum::response::Redirect::to("/harmony") }))
         .route("/harmony", get(harmony))
+        .route("/harmony/chat_ws", axum::routing::get(chat_ws))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
         .route("/harmony/select_pixel", post(select_pixel))
@@ -374,11 +510,14 @@ async fn main() {
         .fallback_service(ServeDir::new(static_dir.clone()))
         .route("/configurator/", get(configurator).post(configurator_save))
         .route("/configurator/clear_calibration/:name", post(configurator_clear_calibration))
+        .route("/configurator/discord", post(configurator_discord))
+        .route("/configurator/embed_compcon", post(configurator_embed_compcon))
         .with_state(state.clone());
 
     let user_app = Router::new()
         .route("/", get(harmony_user))
         .route("/harmony_user", get(harmony_user))
+        .route("/harmony/chat_ws", axum::routing::get(chat_ws))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
         .route("/harmony/select_pixel", post(select_pixel))
@@ -456,6 +595,9 @@ struct ConfiguratorTemplate {
     show_grid: bool,
     show_objects: bool,
     hex: harmony_core::observer::HexGridConfiguration,
+    discord_token: String,
+    discord_channel_id: String,
+    embed_compcon: bool,
 }
 
 async fn configurator(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -480,6 +622,8 @@ async fn configurator(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let hex = machine.cc.hex.clone().unwrap_or_default();
     let show_grid = machine.cc.show_grid;
     let show_objects = machine.cc.show_objects;
+    let discord_token = machine.cc.discord_token.clone().unwrap_or_default();
+    let discord_channel_id = machine.cc.discord_channel_id.clone().unwrap_or_default();
 
     let template = ConfiguratorTemplate { 
         cameras, 
@@ -488,7 +632,10 @@ async fn configurator(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         grid_polys_json,
         show_grid, 
         show_objects, 
-        hex 
+        hex,
+        discord_token,
+        discord_channel_id,
+        embed_compcon: machine.cc.embed_compcon,
     };
     match askama::Template::render(&template) {
         Ok(html) => Html(html).into_response(),
@@ -601,6 +748,54 @@ async fn configurator_activezone(
     axum::response::Redirect::to("/configurator")
 }
 
+#[derive(serde::Deserialize)]
+struct DiscordForm {
+    discord_token: String,
+    discord_channel_id: String,
+}
+
+async fn configurator_discord(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<DiscordForm>
+) -> impl IntoResponse {
+    let mut machine = state.machine.lock().await;
+    tracing::info!("Updating discord config");
+    machine.cc.discord_token = if form.discord_token.is_empty() { None } else { Some(form.discord_token.clone()) };
+    machine.cc.discord_channel_id = if form.discord_channel_id.is_empty() { None } else { Some(form.discord_channel_id.clone()) };
+    if let Err(e) = machine.cc.save_to_file("observerConfiguration.json") {
+        tracing::error!("Failed to save configuration: {}", e);
+    }
+    axum::response::Redirect::to("/configurator")
+}
+
+#[derive(serde::Deserialize)]
+struct EmbedCompconForm {
+    embed_compcon: Option<String>,
+}
+
+async fn configurator_embed_compcon(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<EmbedCompconForm>,
+) -> impl IntoResponse {
+    tracing::info!("Route hit: /configurator/embed_compcon");
+    let mut machine = state.machine.lock().await;
+    machine.cc.embed_compcon = form.embed_compcon.is_some();
+    if let Err(e) = machine.cc.save_to_file("observerConfiguration.json") {
+        tracing::error!("Failed to save state to observerConfiguration.json: {:?}", e);
+    }
+    axum::response::Html(format!(
+        r#"<form hx-post="/configurator/embed_compcon" hx-swap="outerHTML">
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" id="embed_compcon" name="embed_compcon" {}>
+                <label class="form-check-label fw-bold" for="embed_compcon">Embed Comp/Con Interface</label>
+            </div>
+            <input type="submit" class="btn btn-primary" value="Save Comp/Con Settings">
+            <div class="alert alert-success mt-2 p-1 text-center" style="font-size: 0.9rem; border-radius: 0;">Settings Saved!</div>
+        </form>"#,
+        if machine.cc.embed_compcon { "checked" } else { "" }
+    ))
+}
+
 
 #[derive(serde::Deserialize)]
 struct NewCameraForm {
@@ -707,6 +902,7 @@ struct HarmonyTemplate {
     configurator_url: String,
     show_grid_checked: String,
     show_objects_checked: String,
+    embed_compcon: bool,
 }
 
 #[derive(Template)]
@@ -718,6 +914,7 @@ struct HarmonyUserTemplate {
     harmony_url: String,
     show_grid_checked: String,
     show_objects_checked: String,
+    embed_compcon: bool,
 }
 
 #[derive(Template)]
@@ -829,6 +1026,10 @@ async fn harmony(
         configurator_url: "/configurator".to_string(),
         show_grid_checked,
         show_objects_checked,
+        embed_compcon: {
+            let machine = state.machine.lock().await;
+            machine.cc.embed_compcon
+        },
     };
 
     let updated_jar = jar.add(Cookie::new("session_view_id", view_id.clone()));
@@ -858,6 +1059,10 @@ async fn harmony_user(
         harmony_url: "/harmony/".to_string(),
         show_grid_checked,
         show_objects_checked,
+        embed_compcon: {
+            let machine = state.machine.lock().await;
+            machine.cc.embed_compcon
+        },
     };
 
     let updated_jar = jar.add(Cookie::new("session_view_id", view_id.clone()));
@@ -911,7 +1116,7 @@ async fn canvas_data(
         "additionalCells": []
     });
     
-    let mut gen_cell_map = |q: i32, r: i32| -> serde_json::Value {
+    let gen_cell_map = |q: i32, r: i32| -> serde_json::Value {
         let center = hex.axial_to_pixel(q as f64, r as f64);
         let mut corners = Vec::new();
         for k in 0..6 {
@@ -1241,7 +1446,7 @@ pub fn render_interactor(session: &SessionConfig, machine: &harmony_core::machin
             <div class='d-flex justify-content-between'>
                 <form hx-post='/harmony/publish_selection' hx-target='#publishedFeedbackContainer' hx-swap='innerHTML' class='flex-fill me-1'>
                     <input type='hidden' name='viewId' value='{}'>
-                    <button type='submit' class='btn btn-primary btn-sm w-100'>Publish Selection</button>
+                    <button type='submit' class='btn btn-primary btn-sm w-100'>Broadcast Selection</button>
                 </form>
                 <form hx-post='/harmony/clear_published_selection' hx-target='#publishedFeedbackContainer' hx-swap='innerHTML' class='flex-fill ms-1'>
                     <input type='hidden' name='viewId' value='{}'>
@@ -1998,7 +2203,7 @@ async fn publish_selection(
         session.published_selection = published;
     }
     
-    axum::response::Html("<div id='publishedFeedback' class='alert alert-success mt-2 p-1'>Selection published globally.</div>")
+    axum::response::Html("<div id='publishedFeedback' class='alert alert-success mt-2 p-1'>Selection broadcasted globally.</div>")
 }
 
 async fn clear_published_selection(

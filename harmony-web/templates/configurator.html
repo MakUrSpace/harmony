@@ -171,6 +171,38 @@
                 </div>
             </div>
         </div>
+        <div class="row mt-4 mb-4" align="left">
+            <div class="col-md-6 mb-3">
+                <div class="container border border-3 border-secondary p-3 rounded bg-dark text-white h-100">
+                    <h3>Discord Configuration</h3>
+                    <form hx-post="/configurator/discord" hx-swap="outerHTML">
+                        <div class="d-flex flex-column gap-3 mb-3">
+                            <div>
+                                <label class="form-label mb-0 fw-bold" for="discord_token">Bot Token</label>
+                                <input type="password" class="form-control bg-light text-dark" name="discord_token" value="{{ discord_token }}" placeholder="Enter Discord Bot Token">
+                            </div>
+                            <div>
+                                <label class="form-label mb-0 fw-bold" for="discord_channel_id">Game Channel ID</label>
+                                <input type="text" class="form-control bg-light text-dark" name="discord_channel_id" value="{{ discord_channel_id }}" placeholder="Enter Channel ID">
+                            </div>
+                        </div>
+                        <input type="submit" class="btn btn-primary" value="Save Discord Configuration">
+                    </form>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="container border border-3 border-secondary p-3 rounded bg-dark text-white h-100">
+                    <h3>Comp/Con Integration</h3>
+                    <form hx-post="/configurator/embed_compcon" hx-swap="outerHTML">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="embed_compcon" name="embed_compcon" {% if embed_compcon %}checked{% endif %}>
+                            <label class="form-check-label fw-bold" for="embed_compcon">Embed Comp/Con Interface</label>
+                        </div>
+                        <input type="submit" class="btn btn-primary" value="Save Comp/Con Settings">
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
 </body>
 <script>
