@@ -30,6 +30,7 @@
           buildInputs = [
             pkgs.opencv4
             pkgs.clang
+            pkgs.openssl
           ];
           nativeBuildInputs = [
             pkgs.pkg-config
@@ -137,18 +138,21 @@
           name = "harmony-ngrok";
           runtimeInputs = [ self'.packages.harmony-rs ngrok tmux ];
           text = ''
-            # Starts a tmux session with 3 panes:
-            #   1. Rust server (port 8081/8080)
+            # Starts a tmux session with 4 panes:
+            #   1. Rust server (port 8081/8080/8082)
             #   2. ngrok tunnel for Harmony (8081)
             #   3. ngrok tunnel for Admin (8080)
+            #   4. ngrok tunnel for Discord (8082)
             
             SESSION_NAME="harmony"
             PORT="''${PORT:-8081}"
             ADMIN_PORT="''${ADMIN_PORT:-8080}"
+            DISCORD_PORT="''${DISCORD_PORT:-8082}"
             
             # Arguments for URLs
             ADMIN_URL="''${1:-harmony-admin.ngrok.app}"
             HARMONY_URL="''${2:-harmony.ngrok.app}"
+            DISCORD_URL="''${3:-harmony-discord.ngrok.app}"
             
             # If the session already exists, just attach
             if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -169,6 +173,10 @@
             # Split for Admin Ngrok (vertical split of the new pane)
             tmux split-window -t "$SESSION_NAME:0.1" -v \
               "echo 'Exposing Admin on $ADMIN_URL -> $ADMIN_PORT'; ngrok http $ADMIN_PORT --domain=$ADMIN_URL; read"
+            
+            # Split for Discord Ngrok
+            tmux split-window -t "$SESSION_NAME:0.2" -v \
+              "echo 'Exposing Discord Activity on $DISCORD_URL -> $DISCORD_PORT'; ngrok http $DISCORD_PORT --domain=$DISCORD_URL; read"
             
             # Reorganize tiles
             tmux select-layout -t "$SESSION_NAME:0" tiled
@@ -216,7 +224,7 @@
         };
         devShells.default = pkgs.mkShell {
           name = "harmonyShell";
-          packages = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver pkgs.treefmt pkgs.ruff pkgs.rustc pkgs.cargo pkgs.pkg-config pkgs.opencv4 pkgs.clang pkgs.rustPlatform.bindgenHook ];
+          packages = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver pkgs.treefmt pkgs.ruff pkgs.rustc pkgs.cargo pkgs.pkg-config pkgs.openssl pkgs.opencv4 pkgs.clang pkgs.rustPlatform.bindgenHook ];
           shellHook = ''
             export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1

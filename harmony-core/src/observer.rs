@@ -375,6 +375,8 @@ pub struct HexCaptureConfiguration {
     pub calibration_plan: serde_json::Value,
     pub discord_token: Option<String>,
     pub discord_channel_id: Option<String>,
+    pub discord_client_id: Option<String>,
+    pub discord_client_secret: Option<String>,
     pub embed_compcon: bool,
 }
 
@@ -388,6 +390,8 @@ impl HexCaptureConfiguration {
         let mut calibration_plan = serde_json::json!({});
         let mut discord_token = None;
         let mut discord_channel_id = None;
+        let mut discord_client_id = None;
+        let mut discord_client_secret = None;
         let mut embed_compcon = false;
         
         let file_contents = std::fs::read_to_string(path).unwrap_or_else(|_| "{}".to_string());
@@ -417,6 +421,12 @@ impl HexCaptureConfiguration {
             }
             if let Some(v) = json.get("discord_channel_id").and_then(|v| v.as_str()) {
                 discord_channel_id = Some(v.to_string());
+            }
+            if let Some(v) = json.get("discord_client_id").and_then(|v| v.as_str()) {
+                discord_client_id = Some(v.to_string());
+            }
+            if let Some(v) = json.get("discord_client_secret").and_then(|v| v.as_str()) {
+                discord_client_secret = Some(v.to_string());
             }
             if let Some(v) = json.get("embed_compcon").and_then(|v| v.as_bool()) {
                 embed_compcon = v;
@@ -525,12 +535,89 @@ impl HexCaptureConfiguration {
             calibration_plan,
             discord_token,
             discord_channel_id,
+            discord_client_id,
+            discord_client_secret,
             embed_compcon,
         };
 
         config.precompute_grid_polys();
 
         Ok(config)
+    }
+
+    pub fn get_virtual_map_boundary(&self) -> opencv::Result<(Vec<Vec<Point>>, opencv::core::Rect)> {
+        let width = self.hex.as_ref().map(|h| h.width).unwrap_or(1600);
+        let height = self.hex.as_ref().map(|h| h.height).unwrap_or(1600);
+        
+        let mut union_mask = opencv::core::Mat::new_rows_cols_with_default(
+            height,
+            width,
+            opencv::core::CV_8UC1,
+            opencv::core::Scalar::all(0.0),
+        )?;
+        
+        let mut contours = opencv::core::Vector::<opencv::core::Vector<Point>>::new();
+        
+        for (cam_name, cam) in &self.cameras {
+            if let Some(rsc) = self.rsc.get(cam_name) {
+                let mut real_pts = opencv::core::Vector::<Point>::new();
+                for pt in &cam.active_zone {
+                    if let Ok(real_pt) = rsc.convert_camera_to_real_space((pt.x as f64, pt.y as f64)) {
+                        real_pts.push(Point::new(real_pt.0 as i32, real_pt.1 as i32));
+                    }
+                }
+                if real_pts.len() > 0 {
+                    contours.push(real_pts);
+                }
+            }
+        }
+        
+        opencv::imgproc::draw_contours(
+            &mut union_mask,
+            &contours,
+            -1,
+            opencv::core::Scalar::all(255.0),
+            -1,
+            opencv::imgproc::LINE_AA,
+            &opencv::core::no_array(),
+            2147483647,
+            Point::new(0, 0),
+        )?;
+        
+        let mut union_contours = opencv::core::Vector::<opencv::core::Vector<Point>>::new();
+        opencv::imgproc::find_contours(
+            &union_mask,
+            &mut union_contours,
+            opencv::imgproc::RETR_EXTERNAL,
+            opencv::imgproc::CHAIN_APPROX_SIMPLE,
+            Point::new(0, 0),
+        )?;
+        
+        let mut res_contours = Vec::new();
+        let mut total_rect = opencv::core::Rect::default();
+        let mut first = true;
+        
+        for i in 0..union_contours.len() {
+            let contour = union_contours.get(i)?;
+            let rect = opencv::imgproc::bounding_rect(&contour)?;
+            if first {
+                total_rect = rect;
+                first = false;
+            } else {
+                let x1 = std::cmp::min(total_rect.x, rect.x);
+                let y1 = std::cmp::min(total_rect.y, rect.y);
+                let x2 = std::cmp::max(total_rect.x + total_rect.width, rect.x + rect.width);
+                let y2 = std::cmp::max(total_rect.y + total_rect.height, rect.y + rect.height);
+                total_rect = opencv::core::Rect::new(x1, y1, x2 - x1, y2 - y1);
+            }
+            let mut v = Vec::new();
+            for pt in &contour {
+                v.push(pt);
+            }
+            res_contours.push(v);
+        }
+        
+        Ok((res_contours, total_rect))
     }
 
     pub fn save_to_file(&self, path: &str) -> opencv::Result<()> {
@@ -587,6 +674,12 @@ impl HexCaptureConfiguration {
         }
         if let Some(channel_id) = &self.discord_channel_id {
             map.insert("discord_channel_id".to_string(), serde_json::json!(channel_id));
+        }
+        if let Some(client_id) = &self.discord_client_id {
+            map.insert("discord_client_id".to_string(), serde_json::json!(client_id));
+        }
+        if let Some(client_secret) = &self.discord_client_secret {
+            map.insert("discord_client_secret".to_string(), serde_json::json!(client_secret));
         }
         map.insert("embed_compcon".to_string(), serde_json::json!(self.embed_compcon));
 

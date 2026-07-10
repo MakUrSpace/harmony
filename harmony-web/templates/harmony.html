@@ -497,7 +497,7 @@
             let text = input.value.trim();
             if (text !== '') {
                 let msg = {
-                    author: 'WebUser',
+                    author: '{{ view_id }}',
                     content: text,
                     channel: window.currentChatChannel,
                     timestamp: 0,

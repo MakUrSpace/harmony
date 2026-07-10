@@ -102,8 +102,11 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn ready(&self, _: Context, ready: Ready) {
+    async fn ready(&self, ctx: Context, ready: Ready) {
         tracing::info!("Discord bot connected as {}", ready.user.name);
+        if let Err(e) = serenity::model::id::ChannelId::new(self.channel_id).say(&ctx.http, "Harmony Online!").await {
+            tracing::error!("Failed to send Harmony Online message: {:?}", e);
+        }
     }
 }
 
@@ -125,8 +128,10 @@ async fn start_discord_bot(token: String, channel_id: u64, chat_tx: tokio::sync:
     tokio::spawn(async move {
         while let Ok(msg) = chat_rx.recv().await {
             if !msg.from_discord && msg.channel == "group" {
-                let text = format!("**{}**: {}", msg.author, msg.content);
-                let _ = serenity::model::id::ChannelId::new(channel_id).say(&http, &text).await;
+                let text = format!("**Session {}**: {}", msg.author, msg.content);
+                if let Err(e) = serenity::model::id::ChannelId::new(channel_id).say(&http, &text).await {
+                    tracing::error!("Failed to send message to Discord: {:?}", e);
+                }
             }
         }
     });
@@ -160,10 +165,15 @@ async fn handle_chat_socket(socket: WebSocket, state: Arc<AppState>) {
     let tx = state.chat_tx.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(WsMessage::Text(text))) = receiver.next().await {
-            if let Ok(mut msg) = serde_json::from_str::<ChatMessage>(&text) {
-                msg.from_discord = false;
-                msg.timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                let _ = tx.send(msg);
+            match serde_json::from_str::<ChatMessage>(&text) {
+                Ok(mut msg) => {
+                    msg.from_discord = false;
+                    msg.timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                    let _ = tx.send(msg);
+                },
+                Err(e) => {
+                    tracing::error!("Failed to parse ChatMessage: {} from payload: {}", e, text);
+                }
             }
         }
     });
@@ -400,6 +410,8 @@ async fn main() {
                 calibration_plan: serde_json::json!({}),
                 discord_token: None,
                 discord_channel_id: None,
+                discord_client_id: None,
+                discord_client_secret: None,
                 embed_compcon: false,
             }
         });
@@ -506,6 +518,10 @@ async fn main() {
         .route("/calibrator/commit_calibration", get(calibrator_commit))
         .route("/calibrator/objects", get(calibrator_objects))
         .route("/calibrator/observer_console", get(calibrator_console))
+        .route("/compcon/", get(proxy_compcon_root))
+        .route("/assets/*path", get(proxy_compcon_assets))
+        .route("/icons/*path", get(proxy_compcon_icons))
+        .route("/manifest.webmanifest", get(proxy_compcon_manifest))
         .nest_service("/static", ServeDir::new(static_dir.clone()))
         .fallback_service(ServeDir::new(static_dir.clone()))
         .route("/configurator/", get(configurator).post(configurator_save))
@@ -531,20 +547,57 @@ async fn main() {
         .route("/harmony/clear_published_selection", post(clear_published_selection))
         .route("/harmony/update_session_id", post(update_session_id))
         .route("/harmony/objects/:oid/rename", post(rename_object))
-        .route("/harmony/camWithChanges/:cam_name/:view_id", get(cam_with_changes_feed)) // Alias to clean video feed for client overlays
+        .route("/harmony/camWithChanges/:cam_name/:view_id", get(cam_with_changes_feed))
+        .route("/compcon/", get(proxy_compcon_root))
+        .route("/assets/*path", get(proxy_compcon_assets))
+        .route("/icons/*path", get(proxy_compcon_icons))
+        .route("/manifest.webmanifest", get(proxy_compcon_manifest))
+        .nest_service("/static", ServeDir::new(static_dir.clone()))
+        .fallback_service(ServeDir::new(static_dir.clone()))
+        .with_state(state.clone());
+
+    let discord_app = Router::new()
+        .route("/", get(discord_activity))
+        .route("/api/discord/token-exchange", post(token_exchange))
+        .route("/harmony/chat_ws", axum::routing::get(chat_ws))
+        .route("/harmony/canvas_data/:view_id", get(canvas_data))
+        .route("/harmony/grid_polys/:cam_name", get(grid_polys))
+        .route("/harmony/select_pixel", post(select_pixel))
+        .route("/harmony/clear_selection", post(clear_selection))
+        .route("/harmony/objects", get(get_objects))
+        .route("/harmony/objects/:oid/snapshot/:cam_name", get(object_snapshot_feed))
+        .route("/harmony/objects/:oid/move", post(move_object))
+        .route("/harmony/objects/:oid/rotate", post(rotate_object))
+        .route("/harmony/set_overlays", post(set_overlays))
+        .route("/harmony/publish_selection", post(publish_selection))
+        .route("/harmony/clear_published_selection", post(clear_published_selection))
+        .route("/harmony/update_session_id", post(update_session_id))
+        .route("/harmony/objects/:oid/rename", post(rename_object))
+        .route("/harmony/camWithChanges/:cam_name/:view_id", get(cam_with_changes_feed))
+        .route("/compcon/", get(proxy_compcon_root))
+        .route("/assets/*path", get(proxy_compcon_assets))
+        .route("/icons/*path", get(proxy_compcon_icons))
+        .route("/manifest.webmanifest", get(proxy_compcon_manifest))
         .nest_service("/static", ServeDir::new(static_dir.clone()))
         .fallback_service(ServeDir::new(static_dir))
         .with_state(state);
 
     let admin_addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let user_addr = SocketAddr::from(([0, 0, 0, 0], 8081));
+    let discord_addr = SocketAddr::from(([0, 0, 0, 0], 8082));
     
     tracing::info!("Admin server listening on {}", admin_addr);
     tracing::info!("User server listening on {}", user_addr);
+    tracing::info!("Discord server listening on {}", discord_addr);
 
     tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(&admin_addr).await.unwrap();
         axum::serve(listener, admin_app).await.unwrap();
+    });
+
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(&discord_addr).await.unwrap();
+        axum::serve(listener, discord_app).await.unwrap();
     });
 
     let listener = tokio::net::TcpListener::bind(&user_addr).await.unwrap();
@@ -597,6 +650,8 @@ struct ConfiguratorTemplate {
     hex: harmony_core::observer::HexGridConfiguration,
     discord_token: String,
     discord_channel_id: String,
+    discord_client_id: String,
+    discord_client_secret: String,
     embed_compcon: bool,
 }
 
@@ -624,6 +679,8 @@ async fn configurator(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let show_objects = machine.cc.show_objects;
     let discord_token = machine.cc.discord_token.clone().unwrap_or_default();
     let discord_channel_id = machine.cc.discord_channel_id.clone().unwrap_or_default();
+    let discord_client_id = machine.cc.discord_client_id.clone().unwrap_or_default();
+    let discord_client_secret = machine.cc.discord_client_secret.clone().unwrap_or_default();
 
     let template = ConfiguratorTemplate { 
         cameras, 
@@ -635,6 +692,8 @@ async fn configurator(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         hex,
         discord_token,
         discord_channel_id,
+        discord_client_id,
+        discord_client_secret,
         embed_compcon: machine.cc.embed_compcon,
     };
     match askama::Template::render(&template) {
@@ -752,6 +811,8 @@ async fn configurator_activezone(
 struct DiscordForm {
     discord_token: String,
     discord_channel_id: String,
+    discord_client_id: String,
+    discord_client_secret: String,
 }
 
 async fn configurator_discord(
@@ -762,10 +823,36 @@ async fn configurator_discord(
     tracing::info!("Updating discord config");
     machine.cc.discord_token = if form.discord_token.is_empty() { None } else { Some(form.discord_token.clone()) };
     machine.cc.discord_channel_id = if form.discord_channel_id.is_empty() { None } else { Some(form.discord_channel_id.clone()) };
+    machine.cc.discord_client_id = if form.discord_client_id.is_empty() { None } else { Some(form.discord_client_id.clone()) };
+    machine.cc.discord_client_secret = if form.discord_client_secret.is_empty() { None } else { Some(form.discord_client_secret.clone()) };
     if let Err(e) = machine.cc.save_to_file("observerConfiguration.json") {
         tracing::error!("Failed to save configuration: {}", e);
     }
-    axum::response::Redirect::to("/configurator")
+    axum::response::Html(format!(
+        r#"<form hx-post="/configurator/discord" hx-swap="outerHTML">
+            <div class="d-flex flex-column gap-3 mb-3">
+                <div>
+                    <label class="form-label mb-0 fw-bold" for="discord_token">Bot Token</label>
+                    <input type="password" class="form-control bg-light text-dark" name="discord_token" value="{}" placeholder="Enter Discord Bot Token">
+                </div>
+                <div>
+                    <label class="form-label mb-0 fw-bold" for="discord_channel_id">Game Channel ID</label>
+                    <input type="text" class="form-control bg-light text-dark" name="discord_channel_id" value="{}" placeholder="Enter Channel ID">
+                </div>
+                <div>
+                    <label class="form-label mb-0 fw-bold" for="discord_client_id">Discord Client ID</label>
+                    <input type="text" class="form-control bg-light text-dark" name="discord_client_id" value="{}" placeholder="Enter Discord Client ID (for Activities)">
+                </div>
+                <div>
+                    <label class="form-label mb-0 fw-bold" for="discord_client_secret">Discord Client Secret</label>
+                    <input type="password" class="form-control bg-light text-dark" name="discord_client_secret" value="{}" placeholder="Enter Discord Client Secret (for Activities)">
+                </div>
+            </div>
+            <input type="submit" class="btn btn-primary" value="Save Discord Configuration">
+            <div class="alert alert-success mt-2 p-1 text-center" style="font-size: 0.9rem; border-radius: 0;">Settings Saved!</div>
+        </form>"#,
+        form.discord_token, form.discord_channel_id, form.discord_client_id, form.discord_client_secret
+    ))
 }
 
 #[derive(serde::Deserialize)]
@@ -890,6 +977,7 @@ async fn calibrator_console() -> impl IntoResponse {
 pub struct HarmonyQuery {
     #[serde(rename = "viewId")]
     view_id: Option<String>,
+    mode: Option<String>,
 }
 
 #[derive(Template)]
@@ -995,11 +1083,14 @@ async fn build_harmony_context(
 
     let mut camera_buttons = String::new();
     camera_buttons.push_str(&format!(
-        r#"<input type="button" class="btn btn-info" value="Virtual Map" onclick="gameWorldClick('VirtualMap')"> "#
+        r#"<input type="button" class="btn btn-info cam-btn" value="All Perspectives" data-camera="All"> "#
+    ));
+    camera_buttons.push_str(&format!(
+        r#"<input type="button" class="btn btn-info cam-btn" value="Virtual Map" data-camera="VirtualMap"> "#
     ));
     for cam in &cams {
         camera_buttons.push_str(&format!(
-            r#"<input type="button" class="btn btn-info" value="Camera {}" onclick="gameWorldClick('{}')"> "#,
+            r#"<input type="button" class="btn btn-info cam-btn" value="Camera {}" data-camera="{}"> "#,
             cam, cam
         ));
     }
@@ -1030,6 +1121,105 @@ async fn harmony(
             let machine = state.machine.lock().await;
             machine.cc.embed_compcon
         },
+    };
+
+    let updated_jar = jar.add(Cookie::new("session_view_id", view_id.clone()));
+
+    match askama::Template::render(&template) {
+        Ok(html) => (updated_jar, Html(html)).into_response(),
+        Err(err) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to render template: {}", err),
+        ).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct TokenExchangeRequest {
+    code: String,
+}
+
+async fn token_exchange(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Json(payload): axum::extract::Json<TokenExchangeRequest>,
+) -> impl IntoResponse {
+    let (client_id, client_secret) = {
+        let machine = state.machine.lock().await;
+        (
+            machine.cc.discord_client_id.clone().unwrap_or_default(),
+            machine.cc.discord_client_secret.clone().unwrap_or_default(),
+        )
+    };
+
+    if client_id.is_empty() || client_secret.is_empty() {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Discord client id or secret not configured").into_response();
+    }
+
+    let client = reqwest::Client::new();
+    let res = client.post("https://discord.com/api/oauth2/token")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("grant_type", "authorization_code"),
+            ("code", payload.code.as_str()),
+        ])
+        .send()
+        .await;
+
+    match res {
+        Ok(response) => {
+            if let Ok(json) = response.text().await {
+                (axum::http::StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], json).into_response()
+            } else {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to read Discord response").into_response()
+            }
+        },
+        Err(e) => {
+            tracing::error!("Discord token exchange failed: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to exchange token with Discord").into_response()
+        }
+    }
+}
+
+#[derive(Template)]
+#[template(path = "discord_activity.html")]
+struct DiscordActivityTemplate {
+    view_id: String,
+    default_camera: String,
+    camera_buttons: String,
+    harmony_url: String,
+    show_grid_checked: String,
+    show_objects_checked: String,
+    embed_compcon: bool,
+    discord_client_id: String,
+}
+
+async fn discord_activity(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<HarmonyQuery>,
+    jar: CookieJar,
+) -> axum::response::Response {
+    if query.mode.as_deref() == Some("compcon") {
+        return proxy_compcon_root().await;
+    }
+    tracing::info!("Route hit: /discord_activity");
+    let (view_id, default_camera, camera_buttons, show_grid_checked, show_objects_checked) =
+        build_harmony_context(&state, &query, &jar).await;
+
+    let (embed_compcon, discord_client_id) = {
+        let machine = state.machine.lock().await;
+        (machine.cc.embed_compcon, machine.cc.discord_client_id.clone().unwrap_or_default())
+    };
+
+    let template = DiscordActivityTemplate {
+        view_id: view_id.clone(),
+        default_camera,
+        camera_buttons,
+        harmony_url: "/harmony/".to_string(),
+        show_grid_checked,
+        show_objects_checked,
+        embed_compcon,
+        discord_client_id,
     };
 
     let updated_jar = jar.add(Cookie::new("session_view_id", view_id.clone()));
@@ -1090,6 +1280,8 @@ struct CanvasData {
     selection: serde_json::Value,
     constituent_axials: std::collections::HashMap<String, Vec<(i32, i32)>>,
     published_selections: Vec<Vec<(i32, i32)>>,
+    virtual_map_boundary: Vec<Vec<(i32, i32)>>,
+    virtual_map_rect: (i32, i32, i32, i32),
 }
 
 async fn canvas_data(
@@ -1102,9 +1294,10 @@ async fn canvas_data(
     let sessions = state.sessions.lock().await;
     let session = sessions.get(&view_id).cloned().unwrap_or_default();
 
-    let mut comp_cams: Vec<String> = machine.cc.cameras.keys().cloned().collect();
-    comp_cams.sort();
-    comp_cams.push("VirtualMap".to_string());
+    let mut comp_cams = vec!["VirtualMap".to_string()];
+    let mut other_cams: Vec<String> = machine.cc.cameras.keys().cloned().collect();
+    other_cams.sort();
+    comp_cams.extend(other_cams);
     while comp_cams.len() < 4 {
         comp_cams.push("No Camera".to_string());
     }
@@ -1231,6 +1424,22 @@ async fn canvas_data(
         }
     }
 
+    let mut virtual_map_boundary = Vec::new();
+    let mut virtual_map_rect = (0, 0, 1200, 1200);
+    
+    if let Ok((b_polys, b_rect)) = machine.cc.get_virtual_map_boundary() {
+        for poly in b_polys {
+            let mut pt_vec = Vec::new();
+            for pt in poly {
+                pt_vec.push((pt.x, pt.y));
+            }
+            virtual_map_boundary.push(pt_vec);
+        }
+        if b_rect.width > 0 && b_rect.height > 0 {
+            virtual_map_rect = (b_rect.x, b_rect.y, b_rect.width, b_rect.height);
+        }
+    }
+
     let data = CanvasData {
         grid_cache_key: "default".to_string(), // Rust backend doesn't implement caching yet
         objects: objects_json,
@@ -1244,6 +1453,8 @@ async fn canvas_data(
         selection: selection_json,
         constituent_axials,
         published_selections,
+        virtual_map_boundary,
+        virtual_map_rect,
     };
 
     axum::response::Json(data)
@@ -1330,6 +1541,10 @@ async fn select_pixel(
                         axial_coord = hex_cfg.pixel_to_axial(real_pt.0, real_pt.1);
                     }
                 }
+            }
+        } else {
+            if let Some(hex_cfg) = &machine.cc.hex {
+                axial_coord = hex_cfg.pixel_to_axial(x, y);
             }
         }
         
@@ -2048,8 +2263,19 @@ async fn cam_with_changes_feed(
     tracing::info!("Route hit: /harmony/camWithChanges/{}/{} - alias to video_feed", cam_name, _view_id);
     
     if cam_name.eq_ignore_ascii_case("VirtualMap") {
+        let mut width = 1200;
+        let mut height = 1200;
+        {
+            let machine = state.machine.lock().await;
+            if let Ok((_, rect)) = machine.cc.get_virtual_map_boundary() {
+                if rect.width > 0 && rect.height > 0 {
+                    width = rect.width;
+                    height = rect.height;
+                }
+            }
+        }
         let stream = async_stream::stream! {
-            let img = opencv::core::Mat::new_rows_cols_with_default(1200, 1200, opencv::core::CV_8UC3, opencv::core::Scalar::all(0.0)).unwrap();
+            let img = opencv::core::Mat::new_rows_cols_with_default(height, width, opencv::core::CV_8UC3, opencv::core::Scalar::all(0.0)).unwrap();
             let mut buf = opencv::core::Vector::<u8>::new();
             let params = opencv::core::Vector::<i32>::new();
             opencv::imgcodecs::imencode(".jpg", &img, &mut buf, &params).unwrap();
@@ -2446,6 +2672,8 @@ mod tests {
                     calibration_plan: serde_json::Value::Null,
                     discord_token: None,
                     discord_channel_id: None,
+                    discord_client_id: None,
+                    discord_client_secret: None,
                     embed_compcon: false,
                 }
             ))),
@@ -2453,9 +2681,10 @@ mod tests {
             chat_tx,
         };
 
-        // 1. Build context with mixed-case session ID
+        // 1. Build context with mixed-case session
         let query = HarmonyQuery {
             view_id: Some("Test-Session-123".to_string()),
+            mode: None,
         };
         let jar = axum_extra::extract::CookieJar::new();
         let (vid_1, _, _, _, _) = build_harmony_context(&state, &query, &jar).await;
@@ -2466,6 +2695,7 @@ mod tests {
         // 2. Build context with lowercase session ID
         let query_lower = HarmonyQuery {
             view_id: Some("test-session-123".to_string()),
+            mode: None,
         };
         let (vid_2, _, _, _, _) = build_harmony_context(&state, &query_lower, &jar).await;
 
@@ -2478,3 +2708,51 @@ mod tests {
     }
 }
 
+
+async fn proxy_compcon_root() -> axum::response::Response {
+    proxy_request("https://compcon.app/").await
+}
+
+async fn proxy_compcon_assets(axum::extract::Path(path): axum::extract::Path<String>) -> axum::response::Response {
+    proxy_request(&format!("https://compcon.app/assets/{}", path)).await
+}
+
+async fn proxy_compcon_icons(axum::extract::Path(path): axum::extract::Path<String>) -> axum::response::Response {
+    proxy_request(&format!("https://compcon.app/icons/{}", path)).await
+}
+
+async fn proxy_compcon_manifest() -> axum::response::Response {
+    proxy_request("https://compcon.app/manifest.webmanifest").await
+}
+
+async fn proxy_request(url: &str) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let client = reqwest::Client::new();
+    match client.get(url).send().await {
+        Ok(res) => {
+            let status = axum::http::StatusCode::from_u16(res.status().as_u16()).unwrap();
+            let mut headers = axum::http::HeaderMap::new();
+            for (key, value) in res.headers() {
+                let key_str = key.as_str().to_lowercase();
+                if key_str != "content-encoding" 
+                    && key_str != "transfer-encoding" 
+                    && key_str != "content-length" 
+                    && key_str != "x-frame-options"
+                    && key_str != "content-security-policy"
+                {
+                    if let Ok(val) = axum::http::HeaderValue::from_bytes(value.as_bytes()) {
+                        headers.insert(axum::http::HeaderName::from_bytes(key.as_str().as_bytes()).unwrap(), val);
+                    }
+                }
+            }
+            if let Ok(bytes) = res.bytes().await {
+                (status, headers, bytes).into_response()
+            } else {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to read body").into_response()
+            }
+        },
+        Err(e) => {
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to proxy: {}", e)).into_response()
+        }
+    }
+}

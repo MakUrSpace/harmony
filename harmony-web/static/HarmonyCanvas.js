@@ -71,13 +71,23 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
             return;
         }
 
+        let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : (window.harmonyCanvasData || data);
+        let vmr = editorData && editorData.virtual_map_rect ? editorData.virtual_map_rect : [0,0,1200,1200];
+        const currentCam = camName || (document.getElementById(`selectedCamera`) ? document.getElementById(`selectedCamera`).value : null);
+
+        let offsetX = 0;
+        let offsetY = 0;
+        if (currentCam === 'VirtualMap') {
+            offsetX = -vmr[0];
+            offsetY = -vmr[1];
+        }
+
         // Draw edges
         if (poly.length > 1) {
             ctx.beginPath();
             ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${strokeAlpha})`;
             ctx.lineWidth = 2;
             var transparency = 0.3;
-            const currentCam = camName || (document.getElementById(`selectedCamera`) ? document.getElementById(`selectedCamera`).value : null);
             if (currentCam == 'VirtualMap') {
                 transparency = 1;
             }
@@ -85,11 +95,13 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                 transparency = customAlpha;
             }
             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${transparency})`;
-            const start = Array.isArray(poly[0]) ? { x: poly[0][0], y: poly[0][1] } : poly[0];
-            ctx.moveTo(start.x * scale.x, start.y * scale.y);
+            const p0x = Array.isArray(poly[0]) ? poly[0][0] : poly[0].x;
+            const p0y = Array.isArray(poly[0]) ? poly[0][1] : poly[0].y;
+            ctx.moveTo((p0x + offsetX) * scale.x, (p0y + offsetY) * scale.y);
             for (let i = 1; i < poly.length; i++) {
-                const pt = Array.isArray(poly[i]) ? { x: poly[i][0], y: poly[i][1] } : poly[i];
-                ctx.lineTo(pt.x * scale.x, pt.y * scale.y);
+                const px = Array.isArray(poly[i]) ? poly[i][0] : poly[i].x;
+                const py = Array.isArray(poly[i]) ? poly[i][1] : poly[i].y;
+                ctx.lineTo((px + offsetX) * scale.x, (py + offsetY) * scale.y);
             }
             ctx.closePath();
             if (fill) ctx.fill();
@@ -159,6 +171,12 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
 
         const currentCam = camName || (document.getElementById('selectedCamera') ? document.getElementById('selectedCamera').value : null);
         
+        if (currentCam === 'VirtualMap' && data.virtual_map_boundary) {
+            for (let i = 0; i < data.virtual_map_boundary.length; i++) {
+                drawPoly(data.virtual_map_boundary[i], scale, false, 255, 255, 255, null, 1);
+            }
+        }
+
         const showGridElem = document.getElementById('showGridHarmony') || document.getElementById('showGridConfig');
         const showGrid = showGridElem ? showGridElem.checked : false;
         if (showGrid && window.gridPolys && window.gridPolys[currentCam]) {
@@ -545,9 +563,11 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
 }
 
 function getNaturalDims(camName) {
-    const currentCam = camName || document.getElementById('selectedCamera').value;
+    const currentCam = camName || (document.getElementById('selectedCamera') ? document.getElementById('selectedCamera').value : null);
     if (currentCam === "VirtualMap") {
-        return { w: 1200, h: 1200 };
+        let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : window.harmonyCanvasData;
+        let vmr = editorData && editorData.virtual_map_rect ? editorData.virtual_map_rect : [0,0,1200,1200];
+        return { w: vmr[2] > 0 ? vmr[2] : 1200, h: vmr[3] > 0 ? vmr[3] : 1200 };
     }
     return { w: 1920, h: 1080 };
 }
@@ -596,7 +616,8 @@ async function handlePixelSelection(event, camNameOverride) {
     const camName = camNameOverride || document.getElementById('selectedCamera').value;
     let imgElem = null;
     if (camNameOverride) {
-        imgElem = document.getElementById('GameWorld_' + camNameOverride);
+        let safeName = camNameOverride.replace(/[^a-zA-Z0-9_-]/g, '_');
+        imgElem = document.getElementById('GameWorld_' + safeName);
     } else {
         imgElem = document.getElementById('GameWorld');
     }
@@ -640,41 +661,21 @@ async function handlePixelSelection(event, camNameOverride) {
     const image_y = py // (py - 0) * 1
 
     let finalCamName = camName;
+    
+    let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : window.harmonyCanvasData;
+    let vmr = editorData && editorData.virtual_map_rect ? editorData.virtual_map_rect : [0,0,1200,1200];
+    
     let final_x = image_x;
     let final_y = image_y;
 
+    if (finalCamName === "VirtualMap") {
+        final_x += vmr[0];
+        final_y += vmr[1];
+    }
+
     if (camName === "All") {
-        if (cams.length > 0) {
-            const numCams = cams.length;
-            const w = event.target.width;
-            const h = event.target.height;
-            const half_w = w / 2;
-            const half_h = h / 2;
-            
-            let cIndex = -1;
-            if (numCams === 2) {
-                cIndex = image_x < half_w ? 0 : 1;
-            } else if (numCams > 2) {
-                if (image_y < half_h) {
-                    cIndex = image_x < half_w ? 0 : 1;
-                } else {
-                    cIndex = image_x < half_w ? 2 : 3;
-                }
-            }
-            
-            if (cIndex >= 0 && cIndex < cams.length) {
-                finalCamName = cams[cIndex];
-                if (finalCamName === "VirtualMap") {
-                    final_x = (image_x % half_w) * (1200 / 960);
-                    final_y = (image_y % half_h) * (1200 / 540);
-                } else {
-                    final_x = (image_x % half_w) * 2;
-                    final_y = (image_y % half_h) * 2;
-                }
-            } else {
-                finalCamName = cams[0];
-            }
-        }
+        // Obsolete: All view is now implemented as a CSS grid of individual streams.
+        return;
     }
 
     const pixelField = document.getElementById(`selectedPixel`);
@@ -909,6 +910,12 @@ function initHarmonyCanvas() {
     fetchGridPolys(canvasData.cameraName);
 }
 
+document.addEventListener('click', function(e) {
+    if (e.target && e.target.classList.contains('cam-btn')) {
+        gameWorldClick(e.target.getAttribute('data-camera'));
+    }
+});
+
 function gameWorldClick(camNum) {
     const view_id = document.getElementById(`viewId`).value;
     var container = document.querySelector("#GameWorldViewer");
@@ -922,21 +929,50 @@ function gameWorldClick(camNum) {
         const camField = document.getElementById(`selectedCamera`);
         camField.value = 'All';
 
-        container.innerHTML = `<img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="/harmony/camWithChanges/All/${view_id}" style="border-radius: 40px; max-width: 90%;">
-                               <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>`;
+        let html = `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; height: auto;">`;
+        const allCams = window.harmonyCanvasData && window.harmonyCanvasData.cameras ? window.harmonyCanvasData.cameras : ["VirtualMap"];
+        for(let i=0; i < allCams.length; i++) {
+            let cName = allCams[i];
+            if (!cName || cName === "No Camera") continue;
+            let safeName = cName.replace(/[^a-zA-Z0-9_-]/g, '_');
+            let encodedCName = encodeURIComponent(cName);
+            html += `<div style="position: relative; width: 100%; aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 20px; overflow: hidden;" class="border border-3 border-info">
+                        <img id="GameWorld_${safeName}" class="img-responsive" src="/harmony/camWithChanges/${encodedCName}/${view_id}" style="max-width: 100%; max-height: 100%;">
+                        <canvas id="GameWorldOverlay_${safeName}" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>
+                     </div>`;
+        }
+        html += `</div>`;
+        container.innerHTML = html;
+
         if (window.harmonyCanvasData) {
             window.harmonyCanvasData.cameraName = 'All';
+            window.harmonyEditors = [];
             setTimeout(() => {
-                window.harmonyEditor = initCanvasEditor("GameWorldOverlay", window.harmonyCanvasData,
-                    function (updatedData) { console.log("Data updated", updatedData); },
-                    function (clickEvent) { handlePixelSelection(clickEvent); }
-                );
-            }, 50);
+                for(let i=0; i < allCams.length; i++) {
+                    let cName = allCams[i];
+                    if (!cName || cName === "No Camera") continue;
+                    let safeName = cName.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    let ed = initCanvasEditor(`GameWorldOverlay_${safeName}`, window.harmonyCanvasData, 
+                        function(d) { console.log("Data updated", d); },
+                        function(ev) { handlePixelSelection(ev, cName); },
+                        cName
+                    );
+                    if (ed) window.harmonyEditors.push(ed);
+                }
+                if (window.harmonyEditors.length > 0) {
+                    window.harmonyEditor = {
+                        getData: function() { return window.harmonyCanvasData; },
+                        updateData: function(d) { window.harmonyEditors.forEach(e => e.updateData(d)); },
+                        render: function() { window.harmonyEditors.forEach(e => e.render()); }
+                    };
+                }
+            }, 100);
         }
-        window.harmonyEditors = []; // clear multi-view mode
+
     } else {
+        let encodedCamNum = encodeURIComponent(camNum);
         if (!document.getElementById('GameWorld') || (window.harmonyCanvasData && window.harmonyCanvasData.cameraName === 'All')) {
-            container.innerHTML = `<img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="/harmony/camWithChanges/${camNum}/${view_id}" style="border-radius: 40px; max-width: 90%;">
+            container.innerHTML = `<img id="GameWorld" class="img-responsive border border-3 border-info bg-primary" src="/harmony/camWithChanges/${encodedCamNum}/${view_id}" style="border-radius: 40px; max-width: 90%;">
                                    <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>`;
             if (window.harmonyCanvasData) {
                 window.harmonyCanvasData.cameraName = camNum;
@@ -951,7 +987,7 @@ function gameWorldClick(camNum) {
         }
 
         var img = document.querySelector("#GameWorld");
-        const newSrc = `/harmony/camWithChanges/${camNum}/${view_id}`;
+        const newSrc = `/harmony/camWithChanges/${encodedCamNum}/${view_id}`;
         if (img.src !== newSrc) {
             img.src = newSrc;
         }

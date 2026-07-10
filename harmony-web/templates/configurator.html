@@ -185,6 +185,14 @@
                                 <label class="form-label mb-0 fw-bold" for="discord_channel_id">Game Channel ID</label>
                                 <input type="text" class="form-control bg-light text-dark" name="discord_channel_id" value="{{ discord_channel_id }}" placeholder="Enter Channel ID">
                             </div>
+                            <div>
+                                <label class="form-label mb-0 fw-bold" for="discord_client_id">Discord Client ID</label>
+                                <input type="text" class="form-control bg-light text-dark" name="discord_client_id" value="{{ discord_client_id }}" placeholder="Enter Discord Client ID (for Activities)">
+                            </div>
+                            <div>
+                                <label class="form-label mb-0 fw-bold" for="discord_client_secret">Discord Client Secret</label>
+                                <input type="password" class="form-control bg-light text-dark" name="discord_client_secret" value="{{ discord_client_secret }}" placeholder="Enter Discord Client Secret (for Activities)">
+                            </div>
                         </div>
                         <input type="submit" class="btn btn-primary" value="Save Discord Configuration">
                     </form>
