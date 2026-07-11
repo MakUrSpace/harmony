@@ -2864,6 +2864,7 @@ mod tests {
                 }
             ))),
             sessions: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            global_config: tokio::sync::Mutex::new(GlobalConfig::default()),
             chat_tx,
         };
 
