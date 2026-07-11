@@ -1392,6 +1392,7 @@ async fn canvas_data(
     let machine = state.machine.lock().await;
     let sessions = state.sessions.lock().await;
     let session = sessions.get(&view_id).cloned().unwrap_or_default();
+    let global_config = state.global_config.lock().await;
 
     let mut comp_cams = vec!["VirtualMap".to_string()];
     let mut other_cams: Vec<String> = machine.cc.cameras.keys().cloned().collect();
@@ -1497,10 +1498,12 @@ async fn canvas_data(
         constituent_axials.insert(oid.clone(), obj.constituent_axials.clone());
     }
 
-    let mut terrain = session.terrain.clone();
-    let mut moveable = session.moveable.clone();
-    let mut targetable = session.targetable.clone();
-    let mut selectable = session.selectable.clone();
+    let mut terrain = global_config.terrain.clone();
+    let mut moveable = session.effective_moveable(&global_config);
+    let mut allies = session.effective_allies(&global_config);
+    let mut enemies = session.effective_enemies(&global_config);
+    let mut targetable = enemies.clone();
+    let mut selectable = Vec::new();
     
     for (oid, obj) in &machine.memory {
         if obj.object_type == "Terrain" && !terrain.contains(oid) {
@@ -1515,6 +1518,13 @@ async fn canvas_data(
             selectable.push(oid.clone());
         }
     }
+    
+    selectable.extend(moveable.clone());
+    selectable.extend(allies.clone());
+    selectable.extend(enemies.clone());
+    selectable.extend(targetable.clone());
+    selectable.sort();
+    selectable.dedup();
 
     let mut published_selections = Vec::new();
     for session in sessions.values() {
@@ -1558,8 +1568,8 @@ async fn canvas_data(
         moveable,
         terrain,
         targetable,
-        enemies: session.enemies.clone(),
-        allies: session.allies.clone(),
+        enemies,
+        allies,
         selection: selection_json,
         constituent_axials,
         published_selections,
@@ -1852,6 +1862,7 @@ async fn get_objects(
     let mut selection_json = "[]".to_string();
     if let Some(vid) = query.viewId {
         let sessions = state.sessions.lock().await;
+        let global = state.global_config.lock().await;
         if let Some(session) = sessions.get(&vid) {
             let mut cells = Vec::new();
             if let Some(c) = session.selection.first_cell {
@@ -1864,12 +1875,19 @@ async fn get_objects(
             
             for obj in objects.iter_mut() {
                 let mut highest_tag = None;
-                if session.selectable.contains(&obj.oid) { highest_tag = Some("Selectable"); }
-                if session.terrain.contains(&obj.oid) { highest_tag = Some("Terrain"); }
-                if session.targetable.contains(&obj.oid) { highest_tag = Some("Targetable"); }
-                if session.enemies.contains(&obj.oid) { highest_tag = Some("Enemies"); }
-                if session.allies.contains(&obj.oid) { highest_tag = Some("Allies"); }
-                if session.moveable.contains(&obj.oid) { highest_tag = Some("Moveable"); }
+                let is_terrain = global.terrain.contains(&obj.oid);
+                let is_moveable = session.effective_moveable(&global).contains(&obj.oid);
+                let is_ally = session.effective_allies(&global).contains(&obj.oid);
+                let is_enemy = session.effective_enemies(&global).contains(&obj.oid);
+                let is_targetable = is_enemy;
+                let is_selectable = is_moveable || is_ally || is_enemy || is_targetable;
+                
+                if is_selectable { highest_tag = Some("Selectable"); }
+                if is_terrain { highest_tag = Some("Terrain"); }
+                if is_targetable { highest_tag = Some("Targetable"); }
+                if is_enemy { highest_tag = Some("Enemies"); }
+                if is_ally { highest_tag = Some("Allies"); }
+                if is_moveable { highest_tag = Some("Moveable"); }
                 
                 if let Some(tag) = highest_tag {
                     obj.object_type = tag.to_string();
@@ -1969,6 +1987,18 @@ async fn delete_object(
 ) -> impl IntoResponse {
     let mut machine = state.machine.lock().await;
     machine.memory.remove(&oid);
+    
+    let mut sessions = state.sessions.lock().await;
+    for session in sessions.values_mut() {
+        session.moveable_objects.retain(|x| x != &oid);
+    }
+    
+    let mut global = state.global_config.lock().await;
+    global.terrain.retain(|x| x != &oid);
+    for group_oids in global.groups.values_mut() {
+        group_oids.retain(|x| x != &oid);
+    }
+    
     axum::response::Html(format!("Object deleted: {}", oid))
 }
 
@@ -2100,10 +2130,13 @@ async fn update_object_type(
         
         let mut sessions = state.sessions.lock().await;
         for session in sessions.values_mut() {
-            session.terrain.retain(|x| x != &oid);
-            session.targetable.retain(|x| x != &oid);
             session.moveable_objects.retain(|x| x != &oid);
-            session.selectable.retain(|x| x != &oid);
+        }
+        
+        let mut global = state.global_config.lock().await;
+        global.terrain.retain(|x| x != &oid);
+        for group_oids in global.groups.values_mut() {
+            group_oids.retain(|x| x != &oid);
         }
         
         axum::response::Html(format!("Updated type for {}", oid))
@@ -2715,11 +2748,6 @@ async fn rename_object(
     {
         let mut sessions = state.sessions.lock().await;
         for session in sessions.values_mut() {
-            replace(&mut session.selectable);
-            replace(&mut session.terrain);
-            replace(&mut session.targetable);
-            replace(&mut session.enemies);
-            replace(&mut session.allies);
             replace(&mut session.moveable_objects);
         }
     }
