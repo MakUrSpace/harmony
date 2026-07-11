@@ -556,11 +556,24 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     return {
         render: draw,
         updateData: function (newData, forceSelection) {
-            // Client owns selection state — never let server overwrite it
+            // Client owns selection state locally to prevent flickering, but we want the server's 
+            // fully-populated polygons (e.g. for VirtualMap and other cameras) once it catches up.
             var clientSelection = data.selection;
             Object.assign(data, newData);
             if (!forceSelection) {
-                data.selection = clientSelection;
+                let keepClient = true;
+                if (clientSelection && clientSelection.firstCell && data.selection && data.selection.firstCell) {
+                    if (clientSelection.firstCell._q === data.selection.firstCell._q && 
+                        clientSelection.firstCell._r === data.selection.firstCell._r) {
+                        keepClient = false; // Server caught up, use server's fully-populated polygons
+                    }
+                } else if (!clientSelection || !clientSelection.firstCell) {
+                    keepClient = false; // Client has no selection, accept server's
+                }
+
+                if (keepClient) {
+                    data.selection = clientSelection;
+                }
             }
             draw();
         },
@@ -950,16 +963,18 @@ function gameWorldClick(camNum) {
         const camField = document.getElementById(`selectedCamera`);
         camField.value = 'All';
 
-        let html = `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; height: auto;">`;
+        let html = `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; height: 100%;">`;
         const allCams = window.harmonyCanvasData && window.harmonyCanvasData.cameras ? window.harmonyCanvasData.cameras : ["VirtualMap"];
         for(let i=0; i < allCams.length; i++) {
             let cName = allCams[i];
             if (!cName || cName === "No Camera") continue;
             let safeName = cName.replace(/[^a-zA-Z0-9_-]/g, '_');
             let encodedCName = encodeURIComponent(cName);
-            html += `<div style="position: relative; width: 100%; height: auto; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 20px; overflow: hidden;" class="border border-3 border-info">
-                        <img id="GameWorld_${safeName}" class="img-responsive" src="/harmony/camWithChanges/${encodedCName}/${view_id}" style="width: 100%; height: auto; display: block;">
-                        <canvas id="GameWorldOverlay_${safeName}" style="position:absolute; left:0; top:0; width: 100%; height: 100%; pointer-events:auto; display: block;"></canvas>
+            html += `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 20px; overflow: hidden;" class="border border-3 border-info">
+                        <div style="position: relative; display: inline-block; max-width: 100%; max-height: 100%;">
+                            <img id="GameWorld_${safeName}" class="img-responsive" src="/harmony/camWithChanges/${encodedCName}/${view_id}" style="max-width: 100%; max-height: 100%; width: auto; height: auto; display: block;">
+                            <canvas id="GameWorldOverlay_${safeName}" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>
+                        </div>
                      </div>`;
         }
         html += `</div>`;
