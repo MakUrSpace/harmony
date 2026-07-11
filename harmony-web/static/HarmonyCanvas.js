@@ -973,7 +973,7 @@ function gameWorldClick(camNum) {
             html += `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 20px; overflow: hidden;" class="border border-3 border-info">
                         <div style="position: relative; display: inline-block; max-width: 100%; max-height: 100%;">
                             <img id="GameWorld_${safeName}" class="img-responsive" src="/harmony/camWithChanges/${encodedCName}/${view_id}" style="max-width: 100%; max-height: 100%; width: auto; height: auto; display: block;">
-                            <canvas id="GameWorldOverlay_${safeName}" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>
+                            <canvas id="GameWorldOverlay_${safeName}" style="position:absolute; left:0; top:0; width: 100%; height: 100%; pointer-events:auto; display: block;"></canvas>
                         </div>
                      </div>`;
         }
@@ -1022,6 +1022,7 @@ function gameWorldClick(camNum) {
                         function (clickEvent) { handlePixelSelection(clickEvent, camNum); },
                         camNum
                     );
+                    window.harmonyEditor = ed;
                 }, 50);
             }
         }
