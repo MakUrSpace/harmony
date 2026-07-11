@@ -29,10 +29,12 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     // Resize canvas to match image
     function resizeCanvas() {
         if (!canvas || !imgElem) return;
-        canvas.width = imgElem.clientWidth;
-        canvas.height = imgElem.clientHeight;
-        canvas.style.width = imgElem.clientWidth + "px";
-        canvas.style.height = imgElem.clientHeight + "px";
+        const nw = imgElem.naturalWidth || getNaturalDims(camName).w;
+        const nh = imgElem.naturalHeight || getNaturalDims(camName).h;
+        canvas.width = nw;
+        canvas.height = nh;
+        canvas.style.width = (imgElem.clientWidth || 0) + "px";
+        canvas.style.height = (imgElem.clientHeight || 0) + "px";
         canvas.style.left = (imgElem.offsetLeft + imgElem.clientLeft) + "px";
         canvas.style.top = (imgElem.offsetTop + imgElem.clientTop) + "px";
         // Re-draw if needed
@@ -1082,6 +1084,18 @@ function syncCanvasData(viewId) {
                         fetchGridPolys("All", refetchAll);
                     } else if (refetchAll) {
                         fetchGridPolys(window.harmonyCanvasData.cameraName, true);
+                    }
+                }
+            }
+            if (serverData && serverData.selection && window.harmonyCanvasData && window.harmonyCanvasData.selection) {
+                // Merge missing camera polygons from server selection into client selection (e.g. VirtualMap)
+                let sSel = serverData.selection.firstCell;
+                let cSel = window.harmonyCanvasData.selection.firstCell;
+                if (sSel && cSel && sSel._q === cSel._q && sSel._r === cSel._r) {
+                    for (let key in sSel) {
+                        if (cSel[key] === undefined) {
+                            cSel[key] = sSel[key];
+                        }
                     }
                 }
             }
