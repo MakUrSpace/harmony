@@ -31,6 +31,8 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
         if (!canvas || !imgElem) return;
         canvas.width = imgElem.clientWidth;
         canvas.height = imgElem.clientHeight;
+        canvas.style.width = imgElem.clientWidth + "px";
+        canvas.style.height = imgElem.clientHeight + "px";
         canvas.style.left = (imgElem.offsetLeft + imgElem.clientLeft) + "px";
         canvas.style.top = (imgElem.offsetTop + imgElem.clientTop) + "px";
         // Re-draw if needed
@@ -973,7 +975,7 @@ function gameWorldClick(camNum) {
             html += `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 20px; overflow: hidden;" class="border border-3 border-info">
                         <div style="position: relative; display: inline-block; max-width: 100%; max-height: 100%;">
                             <img id="GameWorld_${safeName}" class="img-responsive" src="/harmony/camWithChanges/${encodedCName}/${view_id}" style="max-width: 100%; max-height: 100%; width: auto; height: auto; display: block;">
-                            <canvas id="GameWorldOverlay_${safeName}" style="position:absolute; left:0; top:0; width: 100%; height: 100%; pointer-events:auto; display: block;"></canvas>
+                            <canvas id="GameWorldOverlay_${safeName}" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>
                         </div>
                      </div>`;
         }
@@ -1011,7 +1013,7 @@ function gameWorldClick(camNum) {
         if (!document.getElementById('GameWorld') || (window.harmonyCanvasData && window.harmonyCanvasData.cameraName === 'All')) {
             container.innerHTML = `<div style="position: relative; width: 100%; height: auto; max-width: 95vw; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 20px; overflow: hidden;" class="border border-3 border-info mx-auto">
                                        <img id="GameWorld" class="img-responsive" src="/harmony/camWithChanges/${encodedCamNum}/${view_id}" style="width: 100%; height: auto; display: block;">
-                                       <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; width: 100%; height: 100%; pointer-events:auto; display: block;"></canvas>
+                                       <canvas id="GameWorldOverlay" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>
                                    </div>`;
             if (window.harmonyCanvasData) {
                 window.harmonyCanvasData.cameraName = camNum;
