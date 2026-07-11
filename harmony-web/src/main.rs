@@ -22,14 +22,20 @@ pub struct CellSelection {
     pub additional_cells: Vec<(i32, i32)>,
 }
 
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GlobalConfig {
+    pub terrain: Vec<String>,
+    pub groups: std::collections::HashMap<String, Vec<String>>,
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionConfig {
-    pub moveable: Vec<String>,
-    pub selectable: Vec<String>,
-    pub terrain: Vec<String>,
-    pub allies: Vec<String>,
-    pub enemies: Vec<String>,
-    pub targetable: Vec<String>,
+    pub is_gm: bool,
+    pub moveable_objects: Vec<String>,
+    pub moveable_groups: Vec<String>,
+    pub ally_groups: Vec<String>,
+    pub enemy_groups: Vec<String>,
+    pub targetable_groups: Vec<String>,
     pub selection: CellSelection,
     pub selected_oid: Option<String>,
     pub show_grid: bool,
@@ -41,12 +47,12 @@ pub struct SessionConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            moveable: vec![],
-            selectable: vec![],
-            terrain: vec![],
-            allies: vec![],
-            enemies: vec![],
-            targetable: vec![],
+            is_gm: false,
+            moveable_objects: vec![],
+            moveable_groups: vec![],
+            ally_groups: vec![],
+            enemy_groups: vec![],
+            targetable_groups: vec![],
             selection: CellSelection { first_cell: None, additional_cells: vec![] },
             selected_oid: None,
             show_grid: false,
@@ -54,6 +60,48 @@ impl Default for SessionConfig {
             can_publish_selection: true,
             published_selection: None,
         }
+    }
+}
+
+impl SessionConfig {
+    pub fn effective_moveable(&self, global: &GlobalConfig) -> Vec<String> {
+        let mut result = self.moveable_objects.clone();
+        for group in &self.moveable_groups {
+            if let Some(oids) = global.groups.get(group) {
+                result.extend(oids.clone());
+            }
+        }
+        result
+    }
+
+    pub fn effective_allies(&self, global: &GlobalConfig) -> Vec<String> {
+        let mut result = vec![];
+        for group in &self.ally_groups {
+            if let Some(oids) = global.groups.get(group) {
+                result.extend(oids.clone());
+            }
+        }
+        result
+    }
+
+    pub fn effective_enemies(&self, global: &GlobalConfig) -> Vec<String> {
+        let mut result = vec![];
+        for group in &self.enemy_groups {
+            if let Some(oids) = global.groups.get(group) {
+                result.extend(oids.clone());
+            }
+        }
+        result
+    }
+
+    pub fn effective_targetable(&self, global: &GlobalConfig) -> Vec<String> {
+        let mut result = vec![];
+        for group in &self.targetable_groups {
+            if let Some(oids) = global.groups.get(group) {
+                result.extend(oids.clone());
+            }
+        }
+        result
     }
 }
 
@@ -76,6 +124,7 @@ pub struct ChatMessage {
 struct AppState {
     machine: Arc<Mutex<HarmonyMachine>>,
     sessions: Mutex<std::collections::HashMap<String, SessionConfig>>,
+    global_config: Mutex<GlobalConfig>,
     chat_tx: tokio::sync::broadcast::Sender<ChatMessage>,
 }
 
@@ -454,6 +503,7 @@ async fn main() {
     let state = Arc::new(AppState {
         machine: machine.clone(),
         sessions: Mutex::new(std::collections::HashMap::new()),
+        global_config: Mutex::new(GlobalConfig::default()),
         chat_tx: chat_tx.clone(),
     });
 
@@ -1063,7 +1113,9 @@ struct SessionListTemplate {
 struct ControlPanelTemplate {
     viewId: String,
     config: SessionConfig,
+    global: GlobalConfig,
     objects: Vec<harmony_core::machine::TrackedObject>,
+    object_groups: std::collections::HashMap<String, String>,
 }
 
 const ADJECTIVES: &[&str] = &[
@@ -1641,12 +1693,15 @@ async fn select_pixel(
         }
         
         let is_admin = payload.is_admin.as_deref() == Some("true");
-        let html = render_interactor(&session, &machine, &payload.viewId, is_admin);
+        let html = {
+            let global = state.global_config.lock().await;
+            render_interactor(&session, &machine, &global, &payload.viewId, is_admin)
+        };
         axum::response::Html(html)
     }
 }
 
-pub fn render_interactor(session: &SessionConfig, machine: &harmony_core::machine::HarmonyMachine, view_id: &str, is_admin: bool) -> String {
+pub fn render_interactor(session: &SessionConfig, machine: &harmony_core::machine::HarmonyMachine, global_config: &GlobalConfig, view_id: &str, is_admin: bool) -> String {
     let first_cell_q = session.selection.first_cell.map(|c| c.0).unwrap_or(0);
     let first_cell_r = session.selection.first_cell.map(|c| c.1).unwrap_or(0);
     
@@ -1677,7 +1732,7 @@ pub fn render_interactor(session: &SessionConfig, machine: &harmony_core::machin
                 is_multi_cell = obj.constituent_axials.len() > 1;
             }
 
-            if is_multi_cell && (session.moveable.contains(oid) || is_admin) {
+            if is_multi_cell && (session.effective_moveable(global_config).contains(oid) || is_admin) {
                 let admin_input = if is_admin { "<input type='hidden' name='isAdmin' value='true'>" } else { "" };
                 interactor_html.push_str(&format!(
                     "<div class='d-flex justify-content-between mt-2'>
@@ -1699,7 +1754,7 @@ pub fn render_interactor(session: &SessionConfig, machine: &harmony_core::machin
             }
 
             if let Some(second_cell) = session.selection.additional_cells.first() {
-                if session.moveable.contains(oid) || is_admin {
+                if session.effective_moveable(global_config).contains(oid) || is_admin {
                     let admin_input = if is_admin { "<input type='hidden' name='isAdmin' value='true'>" } else { "" };
                     interactor_html.push_str(&format!(
                         "<form hx-post='/harmony/objects/{}/move' hx-target='#interactor' class='mt-2'>
@@ -1737,10 +1792,6 @@ pub fn render_interactor(session: &SessionConfig, machine: &harmony_core::machin
     interactor_html.push_str("</div>");
     interactor_html
 }
-
-// Ensure select_pixel is not broken by the extraction. I will update select_pixel to use the helper.
-// In the original file, the code I am replacing starts at line 1170 which is inside select_pixel.
-// Wait, I am replacing lines 1170 to 1250! So I must also finish `select_pixel` inside this block.
 
 #[derive(serde::Deserialize)]
 struct ClearSelectionPayload {
@@ -1935,8 +1986,6 @@ async fn move_object(
     axum::extract::Path(oid): axum::extract::Path<String>,
     axum::extract::Form(payload): axum::extract::Form<MoveObjectForm>,
 ) -> impl IntoResponse {
-    let mut result_html = format!("<div id='interactor'><h5>Failed to move {}</h5></div>", oid);
-    
     let is_admin = payload.is_admin.as_deref() == Some("true");
     
     {
@@ -1955,19 +2004,23 @@ async fn move_object(
         }
     }
     
-    let mut sessions = state.sessions.lock().await;
+    let (mut sessions, machine, global) = (
+        state.sessions.lock().await,
+        state.machine.lock().await,
+        state.global_config.lock().await,
+    );
+    
     if let Some(session) = sessions.get_mut(&payload.viewId) {
-        let machine = state.machine.lock().await;
         if let Some(obj) = machine.memory.get(&oid) {
             if !obj.constituent_axials.is_empty() {
                 session.selection.first_cell = Some(obj.constituent_axials[0]);
                 session.selection.additional_cells = obj.constituent_axials[1..].to_vec();
             }
         }
-        result_html = render_interactor(session, &machine, &payload.viewId, is_admin);
+        axum::response::Html(render_interactor(session, &machine, &global, &payload.viewId, is_admin))
+    } else {
+        axum::response::Html("<div id='interactor'><h5>Failed to move</h5></div>".to_string())
     }
-    
-    axum::response::Html(result_html)
 }
 
 #[derive(serde::Deserialize)]
@@ -1983,7 +2036,7 @@ async fn rotate_object(
     axum::extract::Path(oid): axum::extract::Path<String>,
     axum::extract::Form(payload): axum::extract::Form<RotateObjectForm>,
 ) -> impl IntoResponse {
-    let mut result_html = format!("<div id='interactor'><h5>Failed to rotate {}</h5></div>", oid);
+    let is_admin = payload.is_admin.as_deref() == Some("true");
     
     {
         let mut machine = state.machine.lock().await;
@@ -2007,25 +2060,27 @@ async fn rotate_object(
                     new_axials.push((center_q + new_dq, center_r + new_dr));
                 }
                 obj.constituent_axials = new_axials;
-                result_html = format!("<div id='interactor'><h5>Rotated {} ({})</h5></div>", oid, payload.direction);
             }
         }
     }
-    let is_admin = payload.is_admin.as_deref() == Some("true");
-
-    let mut sessions = state.sessions.lock().await;
+    
+    let (mut sessions, machine, global) = (
+        state.sessions.lock().await,
+        state.machine.lock().await,
+        state.global_config.lock().await,
+    );
+    
     if let Some(session) = sessions.get_mut(&payload.viewId) {
-        let machine = state.machine.lock().await;
         if let Some(obj) = machine.memory.get(&oid) {
             if !obj.constituent_axials.is_empty() {
                 session.selection.first_cell = Some(obj.constituent_axials[0]);
                 session.selection.additional_cells = obj.constituent_axials[1..].to_vec();
             }
         }
-        result_html = render_interactor(session, &machine, &payload.viewId, is_admin);
+        axum::response::Html(render_interactor(session, &machine, &global, &payload.viewId, is_admin))
+    } else {
+        axum::response::Html("<div id='interactor'><h5>Failed to rotate</h5></div>".to_string())
     }
-    
-    axum::response::Html(result_html)
 }
 
 #[derive(serde::Deserialize)]
@@ -2047,7 +2102,7 @@ async fn update_object_type(
         for session in sessions.values_mut() {
             session.terrain.retain(|x| x != &oid);
             session.targetable.retain(|x| x != &oid);
-            session.moveable.retain(|x| x != &oid);
+            session.moveable_objects.retain(|x| x != &oid);
             session.selectable.retain(|x| x != &oid);
         }
         
@@ -2443,9 +2498,10 @@ async fn session_control_panel(
     axum::extract::Path(view_id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     let view_id_lower = view_id.trim().to_lowercase();
-    let config = {
+    let (config, global) = {
         let sessions = state.sessions.lock().await;
-        sessions.get(&view_id_lower).cloned()
+        let global = state.global_config.lock().await;
+        (sessions.get(&view_id_lower).cloned(), global.clone())
     };
     
     if let Some(config) = config {
@@ -2454,10 +2510,23 @@ async fn session_control_panel(
             machine.memory.values().cloned().collect()
         };
         objects.sort_by(|a, b| a.oid.cmp(&b.oid));
+        let mut object_groups = std::collections::HashMap::new();
+        for obj in &objects {
+            let mut groups = Vec::new();
+            for (gname, goids) in &global.groups {
+                if goids.contains(&obj.oid) {
+                    groups.push(gname.clone());
+                }
+            }
+            object_groups.insert(obj.oid.clone(), groups.join(","));
+        }
+        
         let template = ControlPanelTemplate {
             viewId: view_id_lower.clone(),
             config: config.clone(),
             objects,
+            global,
+            object_groups,
         };
         match template.render() {
             Ok(html) => axum::response::Html(html).into_response(),
@@ -2475,7 +2544,7 @@ struct PublishSelectionForm {
 
 async fn publish_selection(
     State(state): State<Arc<AppState>>,
-    Form(payload): Form<PublishSelectionForm>,
+    axum::extract::Form(payload): axum::extract::Form<PublishSelectionForm>,
 ) -> impl IntoResponse {
     let view_id_lower = payload.viewId.trim().to_lowercase();
     let mut sessions = state.sessions.lock().await;
@@ -2499,7 +2568,7 @@ async fn publish_selection(
 
 async fn clear_published_selection(
     State(state): State<Arc<AppState>>,
-    Form(payload): Form<PublishSelectionForm>,
+    axum::extract::Form(payload): axum::extract::Form<PublishSelectionForm>,
 ) -> impl IntoResponse {
     let view_id_lower = payload.viewId.trim().to_lowercase();
     let mut sessions = state.sessions.lock().await;
@@ -2525,40 +2594,61 @@ async fn update_session_config(
     Form(form): Form<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let view_id_lower = view_id.trim().to_lowercase();
-    let mut sessions = state.sessions.lock().await;
-    if let Some(config) = sessions.get_mut(&view_id_lower) {
-        config.selectable.clear();
-        config.terrain.clear();
-        config.targetable.clear();
-        config.enemies.clear();
-        config.allies.clear();
-        config.moveable.clear();
-        config.can_publish_selection = false;
+    let mut config = SessionConfig::default();
+    let mut global_terrain = Vec::new();
+    let mut global_groups: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut can_publish = false;
+    let mut is_gm = false;
 
-        for (k, v) in form {
-            if v == "on" {
-                if k == "can_publish_selection" {
-                    config.can_publish_selection = true;
-                } else if let Some(oid) = k.strip_suffix("_selectable") {
-                    config.selectable.push(oid.to_string());
-                } else if let Some(oid) = k.strip_suffix("_terrain") {
-                    config.terrain.push(oid.to_string());
-                } else if let Some(oid) = k.strip_suffix("_targetable") {
-                    config.targetable.push(oid.to_string());
-                } else if let Some(oid) = k.strip_suffix("_enemies") {
-                    config.enemies.push(oid.to_string());
-                } else if let Some(oid) = k.strip_suffix("_allies") {
-                    config.allies.push(oid.to_string());
-                } else if let Some(oid) = k.strip_suffix("_moveable") {
-                    config.moveable.push(oid.to_string());
+    for (k, v) in form {
+        if k == "can_publish_selection" {
+            can_publish = true;
+        } else if k == "is_gm" {
+            is_gm = true;
+        } else if let Some(oid) = k.strip_suffix("_terrain") {
+            global_terrain.push(oid.to_string());
+        } else if let Some(oid) = k.strip_suffix("_moveable") {
+            config.moveable_objects.push(oid.to_string());
+        } else if k == "moveable_groups" {
+            config.moveable_groups = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        } else if k == "ally_groups" {
+            config.ally_groups = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        } else if k == "enemy_groups" {
+            config.enemy_groups = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        } else if k.starts_with("group_") {
+            let oid = k.strip_prefix("group_").unwrap().to_string();
+            for group in v.split(',') {
+                let group = group.trim().to_string();
+                if !group.is_empty() {
+                    global_groups.entry(group).or_default().push(oid.clone());
                 }
             }
         }
-        axum::response::Redirect::to(&format!("/harmony/control/{}", view_id_lower)).into_response()
-    } else {
-        (axum::http::StatusCode::NOT_FOUND, "Session not found").into_response()
     }
+    
+    config.can_publish_selection = can_publish;
+    config.is_gm = is_gm;
+
+    {
+        let mut sessions = state.sessions.lock().await;
+        let session = sessions.entry(view_id_lower.clone()).or_insert_with(SessionConfig::default);
+        config.selection = session.selection.clone();
+        config.selected_oid = session.selected_oid.clone();
+        config.show_grid = session.show_grid;
+        config.show_objects = session.show_objects;
+        config.published_selection = session.published_selection.clone();
+        *session = config;
+    }
+    
+    {
+        let mut global = state.global_config.lock().await;
+        global.terrain = global_terrain;
+        global.groups = global_groups;
+    }
+    
+    axum::response::Redirect::to(&format!("/harmony/control/{}", view_id_lower)).into_response()
 }
+
 #[derive(serde::Deserialize)]
 struct UpdateSessionIdForm {
     viewId: String,
@@ -2616,19 +2706,29 @@ async fn rename_object(
         machine.memory.insert(new_oid.to_string(), obj);
     }
     
-    let mut sessions = state.sessions.lock().await;
-    for session in sessions.values_mut() {
-        let replace = |list: &mut Vec<String>| {
-            if let Some(pos) = list.iter().position(|x| x == &old_oid) {
-                list[pos] = new_oid.to_string();
-            }
-        };
-        replace(&mut session.selectable);
-        replace(&mut session.terrain);
-        replace(&mut session.targetable);
-        replace(&mut session.enemies);
-        replace(&mut session.allies);
-        replace(&mut session.moveable);
+    let replace = |list: &mut Vec<String>| {
+        if let Some(pos) = list.iter().position(|x| x == &old_oid) {
+            list[pos] = new_oid.to_string();
+        }
+    };
+    
+    {
+        let mut sessions = state.sessions.lock().await;
+        for session in sessions.values_mut() {
+            replace(&mut session.selectable);
+            replace(&mut session.terrain);
+            replace(&mut session.targetable);
+            replace(&mut session.enemies);
+            replace(&mut session.allies);
+            replace(&mut session.moveable_objects);
+        }
+    }
+    {
+        let mut global = state.global_config.lock().await;
+        replace(&mut global.terrain);
+        for group_oids in global.groups.values_mut() {
+            replace(group_oids);
+        }
     }
     
     (axum::http::StatusCode::OK, "Renamed").into_response()
@@ -2638,6 +2738,7 @@ async fn rename_object(
 struct GameSave {
     memory: std::collections::HashMap<String, harmony_core::machine::TrackedObject>,
     sessions: std::collections::HashMap<String, SessionConfig>,
+    global_config: GlobalConfig,
 }
 
 #[derive(serde::Deserialize)]
@@ -2659,12 +2760,10 @@ async fn save_game(
 ) -> impl IntoResponse {
     let filename = format!("{}.json", sanitize_filename(&form.game_name));
     
-    let machine = state.machine.lock().await;
-    let sessions = state.sessions.lock().await;
-    
     let save_data = GameSave {
-        memory: machine.memory.clone(),
-        sessions: sessions.clone(),
+        memory: state.machine.lock().await.memory.clone(),
+        sessions: state.sessions.lock().await.clone(),
+        global_config: state.global_config.lock().await.clone(),
     };
     
     if let Ok(json_str) = serde_json::to_string_pretty(&save_data) {
