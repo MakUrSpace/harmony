@@ -259,7 +259,27 @@ fn spawn_camera_stream(
                                 );
                                 let mut dst = Mat::default();
                                 if opencv::core::bitwise_and(&frame, &frame, &mut dst, &mask).is_ok() {
-                                    processed_frame = dst;
+                                    if let Ok(c0) = contours.get(0) {
+                                        if let Ok(rect) = opencv::imgproc::bounding_rect(&c0) {
+                                            if rect.width > 0 && rect.height > 0 {
+                                                if let Ok(roi) = opencv::core::Mat::roi(&dst, rect) {
+                                                    if let Ok(cloned) = roi.try_clone() {
+                                                        processed_frame = cloned;
+                                                    } else {
+                                                        processed_frame = dst.clone();
+                                                    }
+                                                } else {
+                                                    processed_frame = dst.clone();
+                                                }
+                                            } else {
+                                                processed_frame = dst.clone();
+                                            }
+                                        } else {
+                                            processed_frame = dst.clone();
+                                        }
+                                    } else {
+                                        processed_frame = dst.clone();
+                                    }
                                 }
                             }
                         }
@@ -437,21 +457,47 @@ async fn main() {
         chat_tx: chat_tx.clone(),
     });
 
-    {
-        let m = machine.lock().await;
-        if let Some(token) = &m.cc.discord_token {
-            if let Some(channel_id_str) = &m.cc.discord_channel_id {
-                if let Ok(channel_id) = channel_id_str.parse::<u64>() {
-                    let token_clone = token.clone();
-                    let rx = chat_tx.subscribe();
-                    let tx = chat_tx.clone();
-                    tokio::spawn(async move {
-                        start_discord_bot(token_clone, channel_id, tx, rx).await;
-                    });
+    let tx_for_bot = chat_tx.clone();
+    let machine_for_bot = machine.clone();
+    tokio::spawn(async move {
+        let mut last_token = None;
+        let mut last_channel_id = None;
+        let mut current_bot_task: Option<tokio::task::JoinHandle<()>> = None;
+
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            
+            let (token, channel_id_str) = {
+                let m = machine_for_bot.lock().await;
+                (m.cc.discord_token.clone(), m.cc.discord_channel_id.clone())
+            };
+
+            if token != last_token || channel_id_str != last_channel_id {
+                if let Some(handle) = current_bot_task.take() {
+                    tracing::info!("Stopping old Discord bot task...");
+                    handle.abort();
+                }
+
+                last_token = token.clone();
+                last_channel_id = channel_id_str.clone();
+
+                if let (Some(t), Some(c_str)) = (token, channel_id_str) {
+                    if let Ok(cid) = c_str.trim().parse::<u64>() {
+                        tracing::info!("Starting Discord bot with channel ID: {}", cid);
+                        let token_clone = t.clone();
+                        let rx = tx_for_bot.subscribe();
+                        let tx_clone = tx_for_bot.clone();
+                        let handle = tokio::spawn(async move {
+                            start_discord_bot(token_clone, cid, tx_clone, rx).await;
+                        });
+                        current_bot_task = Some(handle);
+                    } else {
+                        tracing::warn!("Failed to parse Discord channel ID: {:?}", c_str);
+                    }
                 }
             }
         }
-    }
+    });
 
     tokio::spawn(async move {
         loop {
@@ -1282,6 +1328,7 @@ struct CanvasData {
     published_selections: Vec<Vec<(i32, i32)>>,
     virtual_map_boundary: Vec<Vec<(i32, i32)>>,
     virtual_map_rect: (i32, i32, i32, i32),
+    camera_rects: std::collections::HashMap<String, (i32, i32, i32, i32)>,
 }
 
 async fn canvas_data(
@@ -1440,6 +1487,17 @@ async fn canvas_data(
         }
     }
 
+    let mut camera_rects = std::collections::HashMap::new();
+    for (cam_name, cam) in &machine.cc.cameras {
+        let mut pts = opencv::core::Vector::<opencv::core::Point>::new();
+        for p in &cam.active_zone {
+            pts.push(*p);
+        }
+        if let Ok(rect) = opencv::imgproc::bounding_rect(&pts) {
+            camera_rects.insert(cam_name.clone(), (rect.x, rect.y, rect.width, rect.height));
+        }
+    }
+
     let data = CanvasData {
         grid_cache_key: "default".to_string(), // Rust backend doesn't implement caching yet
         objects: objects_json,
@@ -1455,6 +1513,7 @@ async fn canvas_data(
         published_selections,
         virtual_map_boundary,
         virtual_map_rect,
+        camera_rects,
     };
 
     axum::response::Json(data)
