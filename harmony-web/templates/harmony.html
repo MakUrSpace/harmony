@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/bootstrap.min.css">
     <script src="/bootstrap.min.js?v=2"></script>
     <script src="/htmx.min.js?v=2"></script>
-    <script src="/discord_ui_events.js?v=3"></script>
+    <script src="/discord_ui_events.js?v=4"></script>
 
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/HarmonyTemplate.css?v=2">
@@ -26,7 +26,7 @@
                 <button class="btn btn-sm btn-outline-secondary ms-2"
                     onclick="document.getElementById('updateSessionForm').hidden = !document.getElementById('updateSessionForm').hidden">Edit</button>
                 <span class="mx-2 text-muted">|</span>
-                <button id="chatToggleButton" class="btn btn-sm btn-outline-primary" onclick="toggleChatVisibility()">💬 Open Chat</button>
+                <button id="chatToggleButton" class="btn btn-sm btn-outline-primary">💬 Open Chat</button>
             </h4>
             {% if embed_compcon %}
             <div class="d-flex justify-content-center flex-grow-1">
@@ -62,7 +62,7 @@
                 <div id="GameWorldWrapper">
                 <h3 id="GameWorldHeader" style="position: relative;">
                     <span id="GameWorldHeaderText">Game World View -- {{ default_camera }}</span>
-                    <button type="button" class="btn btn-sm btn-outline-info" style="position: absolute; right: 0; bottom: 10px;" onclick="toggleGameWorldFullscreen()" id="expandViewerBtn">⤢ Expand</button>
+                    <button type="button" class="btn btn-sm btn-outline-info" style="position: absolute; right: 0; bottom: 10px;" id="expandViewerBtn">⤢ Expand</button>
                 </h3>
                 <form id="selectPixelForm" hx-post="{{ harmony_url }}select_pixel" hx-target="#interactor" hx-sync="this:queue all">
                     <input type="hidden" name="selectedCamera" id="selectedCamera" value="{{ default_camera }}">
@@ -74,19 +74,11 @@
                 <div id="GameWorldViewer" style="position: relative; display: inline-block;">
                     <img id="GameWorld" class="img-responsive border border-3 border-info bg-primary"
                         src="{{ harmony_url }}camWithChanges/{{ default_camera }}/{{ view_id }}"
-                        style="border-radius: 40px; max-width: 90%; max-height: 70vh; object-fit: contain;">
+                        style="border-radius: 40px; max-width: 90%; max-height: 70vh;">
                     <canvas id="GameWorldOverlay"
                         style="position:absolute; left:0; top:0; pointer-events:auto;"></canvas>
                 </div>
                 <script src="/HarmonyCanvas.js?v=2"></script>
-                <script>
-                    // Initialize Canvas
-                    window.addEventListener('load', function () {
-                        initHarmonyCanvas();
-                        // Poll every 1 second
-                        setInterval(function () { syncCanvasData(document.getElementById("viewId").value); }, 1000);
-                    });
-                </script>
             </div>
             <div class="container justify-content-center mb-3" align="center">
                 <div class="d-inline-block border border-secondary p-2" style="border-radius: 8px;">
@@ -140,26 +132,6 @@
                     </div>
                 </div>
                 </div>
-            <script>
-                function toggleGameWorldFullscreen() {
-                    const wrapper = document.getElementById('GameWorldWrapper');
-                    const btn = document.getElementById('expandViewerBtn');
-                    
-                    wrapper.classList.toggle('fullscreen-viewer');
-                    document.body.classList.toggle('fullscreen-active');
-                    
-                    if (wrapper.classList.contains('fullscreen-viewer')) {
-                        btn.innerText = '⤡ Collapse';
-                        btn.classList.replace('btn-outline-info', 'btn-outline-warning');
-                    } else {
-                        btn.innerText = '⤢ Expand';
-                        btn.classList.replace('btn-outline-warning', 'btn-outline-info');
-                    }
-                    
-                    // Trigger a resize event to ensure Canvas redraws
-                    setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
-                }
-            </script>
             <script>
                 function toggleHarmonyOverlays() {
                     let formData = new URLSearchParams();
@@ -465,27 +437,11 @@
             box-shadow: 0 0 10px var(--secondary-color);
         }
     </style>
-    <script>
-        function toggleChatVisibility() {
-            const chatWidget = document.getElementById('discordChatWidget');
-            const toggleBtn = document.getElementById('chatToggleButton');
-            if (chatWidget.style.display === 'none') {
-                chatWidget.style.display = 'flex';
-                if (toggleBtn) {
-                    toggleBtn.innerHTML = '💬 Close Chat';
-                    toggleBtn.classList.remove('btn-warning');
-                    toggleBtn.classList.add('btn-outline-primary');
-                }
-            } else {
-                chatWidget.style.display = 'none';
-                if (toggleBtn) toggleBtn.innerHTML = '💬 Open Chat';
-            }
-        }
-    </script>
+
     <div id="discordChatWidget" style="display: none;">
         <div class="chat-header">
             <span style="font-weight: bold;">Discord Chat <span id="widgetChatStatus" style="font-weight: normal; font-size: 0.85em; margin-left: 10px;">(Stopped)</span></span>
-            <button onclick="toggleChatVisibility()" style="background: transparent; border: none; color: var(--danger-color); font-size: 1.2rem; line-height: 1; text-shadow: 0 0 5px var(--danger-color);">&times;</button>
+            <button class="closeChatBtn" style="background: transparent; border: none; color: var(--danger-color); font-size: 1.2rem; line-height: 1; text-shadow: 0 0 5px var(--danger-color);">&times;</button>
         </div>
         <ul class="nav nav-tabs" id="chatTabs" role="tablist">
             <li class="nav-item" role="presentation">

@@ -13,6 +13,12 @@ document.addEventListener('DOMContentLoaded', function() {
             window.currentChatChannel = e.target.closest('.chat-nav-btn').getAttribute('data-channel');
         }
         if (e.target.closest('#sendChatBtn') || e.target.closest('#chatSendBtn')) sendChatMessage();
+        if (e.target.closest('#chatToggleButton') || e.target.closest('.closeChatBtn')) {
+            if (typeof toggleChatVisibility === 'function') toggleChatVisibility();
+        }
+        if (e.target.closest('#expandViewerBtn')) {
+            if (typeof toggleGameWorldFullscreen === 'function') toggleGameWorldFullscreen();
+        }
     });
 
     document.addEventListener('change', function(e) {
@@ -71,6 +77,46 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Sync chat tabs periodically
     setInterval(syncChatTabs, 1000);
+
+
+
+    // Collapse persistence logic
+    if (!window._harmonyCollapseBound) {
+        window._harmonyCollapseBound = true;
+        document.body.addEventListener('hidden.bs.collapse', function(e) {
+            if (e.target.id && e.target.id.startsWith('collapse-')) {
+                sessionStorage.setItem('collapseState_' + e.target.id, 'hidden');
+            }
+        });
+        document.body.addEventListener('shown.bs.collapse', function(e) {
+            if (e.target.id && e.target.id.startsWith('collapse-')) {
+                sessionStorage.setItem('collapseState_' + e.target.id, 'shown');
+            }
+        });
+        document.body.addEventListener('htmx:afterSwap', function(e) {
+            if (e.target.id === 'objectFilterRetriever') {
+                document.querySelectorAll('.object-group-collapse').forEach(function(el) {
+                    var state = sessionStorage.getItem('collapseState_' + el.id);
+                    if (state === 'shown') {
+                        el.classList.add('show');
+                    } else {
+                        el.classList.remove('show');
+                    }
+                });
+            }
+        });
+    }
+});
+
+// Ensure canvas initializes after all scripts and images are fully loaded
+window.addEventListener('load', function() {
+    if (typeof initHarmonyCanvas === 'function') {
+        initHarmonyCanvas();
+        let viewIdInput = document.getElementById('viewId');
+        if (viewIdInput) {
+            setInterval(function () { syncCanvasData(viewIdInput.value); }, 1000);
+        }
+    }
 });
 
 window.syncChatTabs = function() {
@@ -159,6 +205,26 @@ window.toggleHarmonyOverlays = function() {
     
     if (window.harmonyEditor) window.harmonyEditor.render();
     if (window.harmonyEditors) window.harmonyEditors.forEach(ed => ed.render());
+}
+
+window.toggleGameWorldFullscreen = function() {
+    const wrapper = document.getElementById('GameWorldWrapper');
+    const btn = document.getElementById('expandViewerBtn');
+    if (!wrapper || !btn) return;
+    
+    wrapper.classList.toggle('fullscreen-viewer');
+    document.body.classList.toggle('fullscreen-active');
+    
+    if (wrapper.classList.contains('fullscreen-viewer')) {
+        btn.innerText = '⤡ Collapse';
+        btn.classList.replace('btn-outline-info', 'btn-outline-warning');
+    } else {
+        btn.innerText = '⤢ Expand';
+        btn.classList.replace('btn-outline-warning', 'btn-outline-info');
+    }
+    
+    // Trigger a resize event to ensure Canvas redraws
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
 }
 
 window.submitCreateObject = function(event) {

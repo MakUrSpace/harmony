@@ -49,31 +49,4 @@
 </div>
 {% endfor %}
 
-<script>
-(function() {
-    // Save state on toggle
-    if (!window._harmonyCollapseBound) {
-        window._harmonyCollapseBound = true;
-        document.body.addEventListener('hidden.bs.collapse', function(e) {
-            if (e.target.id && e.target.id.startsWith('collapse-')) {
-                sessionStorage.setItem('collapseState_' + e.target.id, 'hidden');
-            }
-        });
-        document.body.addEventListener('shown.bs.collapse', function(e) {
-            if (e.target.id && e.target.id.startsWith('collapse-')) {
-                sessionStorage.setItem('collapseState_' + e.target.id, 'shown');
-            }
-        });
-    }
 
-    // Apply state immediately
-    document.querySelectorAll('.object-group-collapse').forEach(function(el) {
-        var state = sessionStorage.getItem('collapseState_' + el.id);
-        if (state === 'shown') {
-            el.classList.add('show');
-        } else {
-            el.classList.remove('show');
-        }
-    });
-})();
-</script>
