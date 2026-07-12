@@ -657,7 +657,6 @@ async fn main() {
         .route("/harmony/control/:view_id", get(session_control_panel))
         .route("/harmony/control/:view_id/update", post(update_session_config))
         .route("/harmony/control/world/update", post(update_world_config))
-        .route("/harmony/update_session_id", post(update_session_id))
         .route("/harmony/publish_selection", post(publish_selection))
         .route("/harmony/clear_published_selection", post(clear_published_selection))
         .route("/harmony/clear_all_published_selections", post(clear_all_published_selections))
