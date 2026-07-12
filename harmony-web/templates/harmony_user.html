@@ -217,7 +217,6 @@
             </div>
             </div>
             </div>
-            </div>
             {% if embed_compcon %}
             <div class="col-7" id="compconColumn">
                 <div class="w-100 sticky-top" style="height: 80vh; top: 20px;">
@@ -346,8 +345,8 @@
     <style>
         #discordChatWidget {
             position: fixed;
-            bottom: 80px;
-            right: 20px;
+            top: 60px;
+            left: 20px;
             width: 350px;
             height: 450px;
             background: var(--panel-color) !important;
@@ -420,7 +419,7 @@
 
     <div id="discordChatWidget" style="display: none;">
         <div class="chat-header">
-            <span style="font-weight: bold;">Discord Chat</span>
+            <span style="font-weight: bold;">Discord Chat <span id="widgetChatStatus" style="font-weight: normal; font-size: 0.85em; margin-left: 10px;">(Stopped)</span></span>
             <button onclick="toggleChatVisibility()" style="background: transparent; border: none; color: var(--danger-color); font-size: 1.2rem; line-height: 1; text-shadow: 0 0 5px var(--danger-color);">&times;</button>
         </div>
         <ul class="nav nav-tabs" id="chatTabs" role="tablist">
@@ -435,7 +434,7 @@
         </div>
         <div style="padding: 10px; border-top: 1px solid var(--dim-color); display: flex; background: var(--panel-color);">
             <input type="text" id="chatInput" class="form-control me-2" placeholder="Type a message..." onkeypress="if(event.key === 'Enter') sendChatMessage()">
-            <button onclick="sendChatMessage()" class="btn btn-primary">Send</button>
+            <button id="sendChatBtn" onclick="sendChatMessage()" class="btn btn-primary">Send</button>
         </div>
     </div>
 </body>

@@ -229,25 +229,31 @@
             {% endif %}
         </div>
         <hr class="mt-4 mb-3">
-        <div class="row align-items-center mb-4">
-            <div class="col-md-6" align="left">
-                <div class="d-flex flex-column gap-2">
-                    <form hx-post="{{ harmony_url }}save" hx-swap="none" class="d-flex align-items-center m-0">
-                        <input class="btn btn-success me-2" type="submit" value="Save Game">
-                        <input class="form-control" value="Harmony" id="game_name" name="game_name" style="max-width: 150px;">
+        <div class="row mb-4">
+            <div class="col-md-4 d-flex flex-column gap-2" align="left">
+                <form hx-post="{{ harmony_url }}save" hx-swap="none" class="d-flex align-items-center m-0">
+                    <input class="btn btn-success me-2" type="submit" value="Save Game">
+                    <input class="form-control" value="Harmony" id="game_name" name="game_name" style="max-width: 150px;">
+                </form>
+                <div class="d-flex align-items-center mt-2">
+                    <input class="btn btn-warning me-2" type="button" value="Load Game" onclick="loadGame()">
+                    <form id="load_game" hx-post="{{ harmony_url }}load" hx-target="#load_status" hx-swap="innerHTML" class="m-0">
+                        <input type="hidden" value="Harmony" id="load_game_name" name="game_name">
                     </form>
-                    <div class="d-flex align-items-center mt-2">
-                        <input class="btn btn-warning me-2" type="button" value="Load Game" onclick="loadGame()">
-                        <form id="load_game" hx-post="{{ harmony_url }}load" hx-target="#load_status" hx-swap="innerHTML" class="m-0">
-                            <input type="hidden" value="Harmony" id="load_game_name" name="game_name">
-                        </form>
-                        <div id="load_status" class="text-sm text-muted ms-2"></div>
-                    </div>
+                    <div id="load_status" class="text-sm text-muted ms-2"></div>
+                </div>
+                <div class="mt-2">
+                    <input class="btn btn-danger" type="button" value="Reset Game" hx-get="{{ harmony_url }}reset">
                 </div>
             </div>
-            <div class="col-md-6" align="right">
-                <div class="d-flex flex-column align-items-end gap-2">
-                    <h6 class="text-muted m-0">Chat Controls</h6>
+            
+            <div class="col-md-4 d-flex flex-column align-items-center gap-3">
+                <div>
+                    <button class="btn btn-info" onclick="window.open('{{ harmony_url }}control','_blank')">Session Control Panels</button>
+                    <button class="btn btn-secondary ms-2" onclick="window.open('/configurator/','_blank')">Configurator</button>
+                </div>
+                <div class="d-flex flex-column align-items-center gap-2">
+                    <h6 class="text-muted m-0">Chat Controls (<span id="chatStatusIndicator">Stopped</span>)</h6>
                     <div class="btn-group">
                         <button class="btn btn-success" hx-post="{{ harmony_url }}chat/start" hx-swap="none">▶ Start</button>
                         <button class="btn btn-warning" hx-post="{{ harmony_url }}chat/pause" hx-swap="none">⏸ Pause</button>
@@ -255,25 +261,19 @@
                     </div>
                 </div>
             </div>
-        </div>
-                <script>
-                    function loadGame() {
-                        const gameNameVal = document.getElementById(`game_name`).value
-                        const loadGameField = document.getElementById(`load_game_name`)
-                        loadGameField.value = gameNameVal
-                        const loadGameForm = document.getElementById(`load_game`)
-                        loadGameForm.requestSubmit()
-                    }
-                </script>
-            </div>
-            <div class="col-md-4" align="center">
-                <button class="btn btn-info" onclick="window.open('{{ harmony_url }}control','_blank')">Session Control Panels</button>
-                <button class="btn btn-secondary ms-2" onclick="window.open('/configurator/','_blank')">Configurator</button>
-            </div>
-            <div class="col-md-4" align="right">
-                <input class="btn btn-danger" type="button" value="Reset Game" hx-get="{{ harmony_url }}reset">
+            
+            <div class="col-md-4">
             </div>
         </div>
+        <script>
+            function loadGame() {
+                const gameNameVal = document.getElementById(`game_name`).value;
+                const loadGameField = document.getElementById(`load_game_name`);
+                loadGameField.value = gameNameVal;
+                const loadGameForm = document.getElementById(`load_game`);
+                loadGameForm.requestSubmit();
+            }
+        </script>
     </div>
     <script>
         function toggleLayout(mode) {
@@ -394,8 +394,8 @@
     <style>
         #discordChatWidget {
             position: fixed;
-            bottom: 80px;
-            right: 20px;
+            top: 60px;
+            left: 20px;
             width: 350px;
             height: 450px;
             background: var(--panel-color) !important;
@@ -471,7 +471,11 @@
             const toggleBtn = document.getElementById('chatToggleButton');
             if (chatWidget.style.display === 'none') {
                 chatWidget.style.display = 'flex';
-                if (toggleBtn) toggleBtn.innerHTML = '💬 Close Chat';
+                if (toggleBtn) {
+                    toggleBtn.innerHTML = '💬 Close Chat';
+                    toggleBtn.classList.remove('btn-warning');
+                    toggleBtn.classList.add('btn-outline-primary');
+                }
             } else {
                 chatWidget.style.display = 'none';
                 if (toggleBtn) toggleBtn.innerHTML = '💬 Open Chat';
@@ -480,7 +484,7 @@
     </script>
     <div id="discordChatWidget" style="display: none;">
         <div class="chat-header">
-            <span style="font-weight: bold;">Discord Chat</span>
+            <span style="font-weight: bold;">Discord Chat <span id="widgetChatStatus" style="font-weight: normal; font-size: 0.85em; margin-left: 10px;">(Stopped)</span></span>
             <button onclick="toggleChatVisibility()" style="background: transparent; border: none; color: var(--danger-color); font-size: 1.2rem; line-height: 1; text-shadow: 0 0 5px var(--danger-color);">&times;</button>
         </div>
         <ul class="nav nav-tabs" id="chatTabs" role="tablist">
@@ -494,46 +498,12 @@
             </div>
         </div>
         <div style="padding: 10px; border-top: 1px solid var(--dim-color); display: flex; background: var(--panel-color);">
-            <input type="text" id="chatInput" class="form-control me-2" placeholder="Type a message..." onkeypress="if(event.key === 'Enter') sendChatMessage()">
-            <button onclick="sendChatMessage()" class="btn btn-primary">Send</button>
+            <input type="text" id="chatInput" class="form-control me-2" placeholder="Type a message...">
+            <button id="chatSendBtn" class="btn btn-primary">Send</button>
         </div>
     </div>
 
-    <script>
-        window.currentChatChannel = 'group';
-        let chatWsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        let chatWs = new WebSocket(chatWsProtocol + '//' + window.location.host + '/harmony/chat_ws');
-        
-        chatWs.onmessage = function(event) {
-            let msg = JSON.parse(event.data);
-            let channel = msg.channel || 'group';
-            let container = document.getElementById('chat-messages-' + channel);
-            if (container) {
-                let msgEl = document.createElement('div');
-                msgEl.style.marginBottom = '8px';
-                msgEl.style.fontSize = '0.9rem';
-                msgEl.innerHTML = '<strong style="color: #5865F2;">' + msg.author + ':</strong> ' + msg.content;
-                container.appendChild(msgEl);
-                container.scrollTop = container.scrollHeight;
-            }
-        };
-        
-        function sendChatMessage() {
-            let input = document.getElementById('chatInput');
-            let text = input.value.trim();
-            if (text !== '') {
-                let msg = {
-                    author: '{{ view_id }}',
-                    content: text,
-                    channel: window.currentChatChannel,
-                    timestamp: 0,
-                    from_discord: false
-                };
-                chatWs.send(JSON.stringify(msg));
-                input.value = '';
-            }
-        }
-    </script>
+
 </body>
 
 </html>

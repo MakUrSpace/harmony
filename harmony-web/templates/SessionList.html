@@ -4,26 +4,20 @@
 <head>
     <meta charset="utf-8">
     <title>Harmony Sessions</title>
-    <link rel="stylesheet" href="/bootstrap.min.css">
-    <script src="/bootstrap.min.js"></script>
-    <script src="/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/bootstrap.min.css">
+    <script src="/static/bootstrap.min.js"></script>
+    <script src="/static/htmx.min.js"></script>
     <style>
-        .table td,
-        .table th {
-            vertical-align: middle;
-            text-align: center;
-        }
-
-        .oid-col {
-            text-align: left !important;
-            font-weight: bold;
+        table, th, td {
+          border: 1px solid black;
+          padding: 15px;
         }
     </style>
 </head>
 
 <body>
     <div class="container mt-4">
-        <h1>Harmony System Control</h1>
+        <h1 align="center">Harmony System Control</h1>
         <p>Manage active sessions and configure global world tags.</p>
 
         <!-- Tabs Navigation -->
@@ -37,7 +31,7 @@
         </ul>
 
         <!-- Tabs Content -->
-        <div class="tab-content border border-top-0 p-3 mb-3 bg-white" id="mainTabsContent">
+        <div class="tab-content border border-top-0 p-3 mb-3" id="mainTabsContent">
             
             <!-- Sessions Tab -->
             <div class="tab-pane fade show active" id="sessions" role="tabpanel">
@@ -66,8 +60,8 @@
                     <h5>Global Objects & Factions</h5>
                     <p class="text-muted small">These settings affect all sessions globally. "Terrain" is shared universally. Assign objects to groups using comma separated names (e.g., <code>heroes</code>, <code>goblins</code>).</p>
                     <div class="table-responsive">
-                        <table class="table table-striped table-hover table-bordered table-sm">
-                            <thead class="table-dark">
+                        <table class="table">
+                            <thead>
                                 <tr>
                                     <th class="oid-col">Object ID</th>
                                     <th>Is Terrain?</th>

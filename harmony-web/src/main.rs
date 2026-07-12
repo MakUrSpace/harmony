@@ -169,8 +169,9 @@ impl EventHandler for Handler {
 }
 
 async fn start_discord_bot(token: String, channel_id: u64, chat_tx: tokio::sync::broadcast::Sender<ChatMessage>, mut chat_rx: tokio::sync::broadcast::Receiver<ChatMessage>) {
+    let token_prefix = if token.starts_with("Bot ") { token.clone() } else { format!("Bot {}", token.trim()) };
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
-    let mut client = match Client::builder(&token, intents)
+    let mut client = match Client::builder(&token_prefix, intents)
         .event_handler(Handler { chat_tx: chat_tx.clone(), channel_id })
         .await
     {
@@ -181,18 +182,7 @@ async fn start_discord_bot(token: String, channel_id: u64, chat_tx: tokio::sync:
         }
     };
 
-    let http = client.http.clone();
-    
-    tokio::spawn(async move {
-        while let Ok(msg) = chat_rx.recv().await {
-            if !msg.from_discord && msg.channel == "group" {
-                let text = format!("**Session {}**: {}", msg.author, msg.content);
-                if let Err(e) = serenity::model::id::ChannelId::new(channel_id).say(&http, &text).await {
-                    tracing::error!("Failed to send message to Discord: {:?}", e);
-                }
-            }
-        }
-    });
+    drop(chat_rx);
 
     if let Err(why) = client.start().await {
         tracing::error!("Discord client error: {:?}", why);
@@ -560,7 +550,25 @@ async fn main() {
         while let Ok(msg) = central_rx.recv().await {
             if msg.author != "System" {
                 let mut log = state_for_log.chat_log.lock().await;
-                log.push(msg);
+                log.push(msg.clone());
+                
+                if msg.channel == "group" && !msg.from_discord {
+                    let m = state_for_log.machine.lock().await;
+                    let token = m.cc.discord_token.clone();
+                    let channel_id_str = m.cc.discord_channel_id.clone();
+                    if let (Some(t), Some(c_str)) = (token, channel_id_str) {
+                        if let Ok(cid) = c_str.trim().parse::<u64>() {
+                            let content = format!("**{}**: {}", msg.author, msg.content);
+                            tokio::spawn(async move {
+                                let token_prefix = if t.starts_with("Bot ") { t.clone() } else { format!("Bot {}", t.trim()) };
+                                let http = serenity::http::Http::new(&token_prefix);
+                                if let Err(e) = serenity::model::id::ChannelId::new(cid).say(&http, &content).await {
+                                    tracing::error!("Failed to post group message to Discord: {:?}", e);
+                                }
+                            });
+                        }
+                    }
+                }
             }
         }
     });
@@ -1179,6 +1187,7 @@ struct ControlPanelTemplate {
     viewId: String,
     config: SessionConfig,
     objects: Vec<harmony_core::machine::TrackedObject>,
+    object_groups: std::collections::HashMap<String, String>,
 }
 
 const ADJECTIVES: &[&str] = &[
@@ -1445,6 +1454,7 @@ struct CanvasData {
     virtual_map_boundary: Vec<Vec<(i32, i32)>>,
     virtual_map_rect: (i32, i32, i32, i32),
     camera_rects: std::collections::HashMap<String, (i32, i32, i32, i32)>,
+    chat_status: String,
 }
 
 async fn canvas_data(
@@ -1624,6 +1634,15 @@ async fn canvas_data(
         }
     }
 
+    let chat_status = {
+        let status = state.chat_status.lock().await;
+        match *status {
+            ChatStatus::Running => "Running",
+            ChatStatus::Paused => "Paused",
+            ChatStatus::Stopped => "Stopped",
+        }.to_string()
+    };
+
     let data = CanvasData {
         grid_cache_key: "default".to_string(), // Rust backend doesn't implement caching yet
         objects: objects_json,
@@ -1641,6 +1660,7 @@ async fn canvas_data(
         virtual_map_boundary,
         virtual_map_rect,
         camera_rects,
+        chat_status,
     };
 
     axum::response::Json(data)
@@ -2229,19 +2249,13 @@ async fn reset_game(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 async fn start_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let mut status = state.chat_status.lock().await;
     *status = ChatStatus::Running;
-    
-    let mut headers = axum::http::HeaderMap::new();
-    headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
-    (axum::http::StatusCode::OK, headers, "Chat Started").into_response()
+    axum::response::Html("Chat Started".to_string())
 }
 
 async fn pause_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let mut status = state.chat_status.lock().await;
     *status = ChatStatus::Paused;
-    
-    let mut headers = axum::http::HeaderMap::new();
-    headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
-    (axum::http::StatusCode::OK, headers, "Chat Paused").into_response()
+    axum::response::Html("Chat Paused".to_string())
 }
 
 async fn stop_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -2299,7 +2313,8 @@ async fn stop_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 }
                 
                 tokio::spawn(async move {
-                    let http = serenity::http::Http::new(&t);
+                    let token_prefix = if t.starts_with("Bot ") { t.clone() } else { format!("Bot {}", t.trim()) };
+                    let http = serenity::http::Http::new(&token_prefix);
                     for chunk in chunks {
                         if let Err(e) = serenity::model::id::ChannelId::new(cid).say(&http, &chunk).await {
                             tracing::error!("Failed to post session collated log to Discord: {:?}", e);
@@ -2310,9 +2325,7 @@ async fn stop_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         }
     }
 
-    let mut headers = axum::http::HeaderMap::new();
-    headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
-    (axum::http::StatusCode::OK, headers, "Chat Stopped & Logs Collated").into_response()
+    axum::response::Html("Chat Stopped & Logs Collated".to_string()).into_response()
 }
 
 #[derive(serde::Deserialize)]
@@ -2721,10 +2734,19 @@ async fn session_control_panel(
         };
         objects.sort_by(|a, b| a.oid.cmp(&b.oid));
         
+        let groups = state.global_config.lock().await.groups.clone();
+        let mut object_groups = std::collections::HashMap::new();
+        for (group_name, oids) in groups {
+            for oid in oids {
+                object_groups.insert(oid, group_name.clone());
+            }
+        }
+        
         let template = ControlPanelTemplate {
             viewId: view_id_lower.clone(),
             config: config.clone(),
             objects,
+            object_groups,
         };
         match template.render() {
             Ok(html) => axum::response::Html(html).into_response(),
@@ -2994,9 +3016,11 @@ async fn load_game(
                 Ok(save_data) => {
                     let mut machine = state.machine.lock().await;
                     let mut sessions = state.sessions.lock().await;
+                    let mut global_config = state.global_config.lock().await;
                     
                     machine.memory = save_data.memory;
                     *sessions = save_data.sessions;
+                    *global_config = save_data.global_config;
                     
                     let mut headers = axum::http::HeaderMap::new();
                     headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));

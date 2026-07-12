@@ -208,8 +208,8 @@
     <style>
         #discordChatWidget {
             position: fixed;
-            bottom: 80px;
-            right: 20px;
+            top: 60px;
+            left: 20px;
             width: 350px;
             height: 450px;
             background: var(--panel-color) !important;
@@ -282,7 +282,7 @@
     <!-- Inline script removed -->
     <div id="discordChatWidget" style="display: none;">
         <div class="chat-header">
-            <span style="font-weight: bold;">Discord Chat</span>
+            <span style="font-weight: bold;">Discord Chat <span id="widgetChatStatus" style="font-weight: normal; font-size: 0.85em; margin-left: 10px;">(Stopped)</span></span>
             <button class="closeChatBtn" style="background: transparent; border: none; color: var(--danger-color); font-size: 1.2rem; line-height: 1; text-shadow: 0 0 5px var(--danger-color);">&times;</button>
         </div>
         <ul class="nav nav-tabs" id="chatTabs" role="tablist">

@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.target.closest('.chat-nav-btn')) {
             window.currentChatChannel = e.target.closest('.chat-nav-btn').getAttribute('data-channel');
         }
-        if (e.target.closest('#sendChatBtn')) sendChatMessage();
+        if (e.target.closest('#sendChatBtn') || e.target.closest('#chatSendBtn')) sendChatMessage();
     });
 
     document.addEventListener('change', function(e) {
@@ -58,6 +58,14 @@ document.addEventListener('DOMContentLoaded', function() {
             msgEl.innerHTML = '<strong style="color: #5865F2;">' + msg.author + ':</strong> ' + msg.content;
             container.appendChild(msgEl);
             container.scrollTop = container.scrollHeight;
+            
+            let chatWidget = document.getElementById('discordChatWidget');
+            let toggleBtn = document.getElementById('chatToggleButton');
+            if (chatWidget && chatWidget.style.display === 'none' && toggleBtn) {
+                toggleBtn.innerHTML = '💬 Open Chat (New!)';
+                toggleBtn.classList.remove('btn-outline-primary');
+                toggleBtn.classList.add('btn-warning');
+            }
         }
     };
     
@@ -238,7 +246,11 @@ window.toggleChatVisibility = function() {
     if (!chatWidget) return;
     if (chatWidget.style.display === 'none') {
         chatWidget.style.display = 'flex';
-        if (toggleBtn) toggleBtn.innerHTML = '💬 Close Chat';
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '💬 Close Chat';
+            toggleBtn.classList.remove('btn-warning');
+            toggleBtn.classList.add('btn-outline-primary');
+        }
     } else {
         chatWidget.style.display = 'none';
         if (toggleBtn) toggleBtn.innerHTML = '💬 Open Chat';
@@ -246,6 +258,7 @@ window.toggleChatVisibility = function() {
 }
 
 window.sendChatMessage = function() {
+    if (window.chatStatus !== 'Running') return;
     let input = document.getElementById('chatInput');
     if (!input) return;
     let text = input.value.trim();
@@ -305,3 +318,28 @@ window.doRename = function() {
             }
         });
 }
+
+window.onChatStatusUpdate = function(status) {
+    let indicator = document.getElementById('chatStatusIndicator');
+    if (indicator) indicator.textContent = status;
+    
+    let widgetStatus = document.getElementById('widgetChatStatus');
+    if (widgetStatus) widgetStatus.textContent = '(' + status + ')';
+    
+    let input = document.getElementById('chatInput');
+    let btn = document.getElementById('sendChatBtn') || document.getElementById('chatSendBtn');
+    
+    if (status !== 'Running') {
+        if (input) {
+            input.disabled = true;
+            input.placeholder = "Chat is " + status;
+        }
+        if (btn) btn.disabled = true;
+    } else {
+        if (input) {
+            input.disabled = false;
+            input.placeholder = "Type a message...";
+        }
+        if (btn) btn.disabled = false;
+    }
+};

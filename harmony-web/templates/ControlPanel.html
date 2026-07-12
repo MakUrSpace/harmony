@@ -4,26 +4,20 @@
 <head>
     <meta charset="utf-8">
     <title>Harmony Control Panel</title>
-    <link rel="stylesheet" href="/bootstrap.min.css">
-    <script src="/bootstrap.min.js"></script>
-    <script src="/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/bootstrap.min.css">
+    <script src="/static/bootstrap.min.js"></script>
+    <script src="/static/htmx.min.js"></script>
     <style>
-        .table td,
-        .table th {
-            vertical-align: middle;
-            text-align: center;
-        }
-
-        .oid-col {
-            text-align: left !important;
-            font-weight: bold;
+        table, th, td {
+          border: 1px solid black;
+          padding: 15px;
         }
     </style>
 </head>
 
 <body>
     <div class="container mt-4 mb-5">
-        <h1>Control Panel</h1>
+        <h1 align="center">Control Panel</h1>
         <h5>Session: <small class="text-muted">{{ viewId }}</small></h5>
         <div class="d-flex align-items-center mb-3 flex-wrap">
             <a href="/harmony/control" class="btn btn-secondary btn-sm me-2">&larr; Back to Session List</a>
@@ -41,7 +35,7 @@
         </div>
         
         <form method="POST" action="/harmony/control/{{ viewId }}/update">
-            <div class="border p-3 mb-3 bg-white">
+            <div class="border p-3 mb-3">
                 <div class="row">
                     <div class="col-md-6">
                         <h5>Session Properties</h5>
@@ -76,9 +70,10 @@
                 <p class="text-muted small">Objects the player explicitly controls, overriding group rules. Useful for players who only control 1-2 objects.</p>
                 <div class="table-responsive">
                     <table class="table table-striped table-hover table-sm">
-                        <thead class="table-light">
+                        <thead>
                             <tr>
                                 <th class="oid-col">Object ID</th>
+                                <th>Group</th>
                                 <th>Is Moveable by Player</th>
                             </tr>
                         </thead>
@@ -91,6 +86,7 @@
                             {% for obj in objects %}
                             <tr>
                                 <td class="oid-col">{{ obj.oid }}</td>
+                                <td>{% match object_groups.get(obj.oid) %}{% when Some with (group) %}{{ group }}{% when None %}<span class="text-muted">None</span>{% endmatch %}</td>
                                 <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_moveable" {% if config.moveable_objects.contains(obj.oid) %}checked{% endif %}></td>
                             </tr>
                             {% endfor %}

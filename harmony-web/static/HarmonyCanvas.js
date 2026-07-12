@@ -1115,7 +1115,7 @@ function syncCanvasData(viewId) {
     }
 
     isSyncingCanvas = true;
-    fetch(`/harmony/canvas_data/${viewId}`)
+    fetch(`/harmony/canvas_data/${viewId}`, { cache: "no-store" })
         .then(response => response.json())
         .then(serverData => {
             if (serverData && serverData.cameras) {
@@ -1149,6 +1149,12 @@ function syncCanvasData(viewId) {
             }
             // Strip selection from server data — client owns selection exclusively
             delete serverData.selection;
+            if (serverData && serverData.chat_status !== undefined) {
+                window.chatStatus = serverData.chat_status;
+                if (typeof window.onChatStatusUpdate === 'function') {
+                    window.onChatStatusUpdate(serverData.chat_status);
+                }
+            }
             if (window.harmonyEditor) {
                 window.harmonyEditor.updateData(serverData);
             }
