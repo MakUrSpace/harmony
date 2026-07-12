@@ -41,116 +41,67 @@
         </div>
         
         <form method="POST" action="/harmony/control/{{ viewId }}/update">
-            <!-- Tabs Navigation -->
-            <ul class="nav nav-tabs" id="configTabs" role="tablist">
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="session-tab" data-bs-toggle="tab" data-bs-target="#session" type="button" role="tab">Session Settings</button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="world-tab" data-bs-toggle="tab" data-bs-target="#world" type="button" role="tab">World Settings</button>
-                </li>
-            </ul>
-            
-            <!-- Tabs Content -->
-            <div class="tab-content border border-top-0 p-3 mb-3 bg-white" id="configTabsContent">
-                
-                <!-- Session Settings Tab -->
-                <div class="tab-pane fade show active" id="session" role="tabpanel">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h5>Session Properties</h5>
-                            <div class="form-check form-switch mb-2">
-                                <input class="form-check-input" type="checkbox" id="is_gm" name="is_gm" {% if config.is_gm %}checked{% endif %}>
-                                <label class="form-check-label" for="is_gm">Game Master Role (Can move everything, ignore fog)</label>
-                            </div>
-                            <div class="form-check form-switch mb-3">
-                                <input class="form-check-input" type="checkbox" id="can_publish_selection" name="can_publish_selection" {% if config.can_publish_selection %}checked{% endif %}>
-                                <label class="form-check-label" for="can_publish_selection">Can Broadcast Selection Globally</label>
-                            </div>
+            <div class="border p-3 mb-3 bg-white">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>Session Properties</h5>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="is_gm" name="is_gm" {% if config.is_gm %}checked{% endif %}>
+                            <label class="form-check-label" for="is_gm">Game Master Role (Can move everything, ignore fog)</label>
                         </div>
-                        <div class="col-md-6">
-                            <h5>Faction / Group Rules</h5>
-                            <div class="mb-2">
-                                <label class="form-label mb-1">Moveable Groups (Comma separated)</label>
-                                <input type="text" class="form-control form-control-sm" name="moveable_groups" value='{{ config.moveable_groups.join(",") }}' placeholder="e.g. heroes, summon_faction">
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label mb-1">Ally Groups (Comma separated)</label>
-                                <input type="text" class="form-control form-control-sm" name="ally_groups" value='{{ config.ally_groups.join(",") }}' placeholder="e.g. heroes, peasants">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label mb-1">Enemy Groups (Comma separated)</label>
-                                <input type="text" class="form-control form-control-sm" name="enemy_groups" value='{{ config.enemy_groups.join(",") }}' placeholder="e.g. goblins, undead">
-                            </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="can_publish_selection" name="can_publish_selection" {% if config.can_publish_selection %}checked{% endif %}>
+                            <label class="form-check-label" for="can_publish_selection">Can Broadcast Selection Globally</label>
                         </div>
                     </div>
-                    
-                    <hr>
-                    <h5>Explicitly Controlled Objects</h5>
-                    <p class="text-muted small">Objects the player explicitly controls, overriding group rules. Useful for players who only control 1-2 objects.</p>
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover table-sm">
-                            <thead class="table-light">
-                                <tr>
-                                    <th class="oid-col">Object ID</th>
-                                    <th>Is Moveable by Player</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% if objects.is_empty() %}
-                                <tr>
-                                    <td colspan="2">No objects found in memory.</td>
-                                </tr>
-                                {% else %}
-                                {% for obj in objects %}
-                                <tr>
-                                    <td class="oid-col">{{ obj.oid }}</td>
-                                    <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_moveable" {% if config.moveable_objects.contains(obj.oid) %}checked{% endif %}></td>
-                                </tr>
-                                {% endfor %}
-                                {% endif %}
-                            </tbody>
-                        </table>
+                    <div class="col-md-6">
+                        <h5>Faction / Group Rules</h5>
+                        <div class="mb-2">
+                            <label class="form-label mb-1">Moveable Groups (Comma separated)</label>
+                            <input type="text" class="form-control form-control-sm" name="moveable_groups" value='{{ config.moveable_groups.join(",") }}' placeholder="e.g. heroes, summon_faction">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label mb-1">Ally Groups (Comma separated)</label>
+                            <input type="text" class="form-control form-control-sm" name="ally_groups" value='{{ config.ally_groups.join(",") }}' placeholder="e.g. heroes, peasants">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label mb-1">Enemy Groups (Comma separated)</label>
+                            <input type="text" class="form-control form-control-sm" name="enemy_groups" value='{{ config.enemy_groups.join(",") }}' placeholder="e.g. goblins, undead">
+                        </div>
                     </div>
                 </div>
-
-                <!-- World Settings Tab -->
-                <div class="tab-pane fade" id="world" role="tabpanel">
-                    <h5>Global Objects & Factions</h5>
-                    <p class="text-muted small">These settings affect all sessions globally. "Terrain" is shared universally. Assign objects to groups using comma separated names (e.g., <code>heroes</code>, <code>goblins</code>).</p>
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover table-bordered table-sm">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th class="oid-col">Object ID</th>
-                                    <th>Is Terrain?</th>
-                                    <th>Groups / Factions (Comma separated)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% if objects.is_empty() %}
-                                <tr>
-                                    <td colspan="3">No objects found in memory.</td>
-                                </tr>
-                                {% else %}
-                                {% for obj in objects %}
-                                <tr>
-                                    <td class="oid-col">{{ obj.oid }}</td>
-                                    <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_terrain" {% if global.terrain.contains(obj.oid) %}checked{% endif %}></td>
-                                    <td>
-                                        <input type="text" class="form-control form-control-sm text-center mx-auto" style="max-width: 300px;" name="group_{{ obj.oid }}" value="{% match object_groups.get(obj.oid) %}{% when Some with (val) %}{{ val }}{% when None %}{% endmatch %}">
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                                {% endif %}
-                            </tbody>
-                        </table>
-                    </div>
+                
+                <hr>
+                <h5>Explicitly Controlled Objects</h5>
+                <p class="text-muted small">Objects the player explicitly controls, overriding group rules. Useful for players who only control 1-2 objects.</p>
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover table-sm">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="oid-col">Object ID</th>
+                                <th>Is Moveable by Player</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if objects.is_empty() %}
+                            <tr>
+                                <td colspan="2">No objects found in memory.</td>
+                            </tr>
+                            {% else %}
+                            {% for obj in objects %}
+                            <tr>
+                                <td class="oid-col">{{ obj.oid }}</td>
+                                <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_moveable" {% if config.moveable_objects.contains(obj.oid) %}checked{% endif %}></td>
+                            </tr>
+                            {% endfor %}
+                            {% endif %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
             
             <div class="d-grid gap-2">
-                <input type="submit" class="btn btn-primary btn-lg" value="Save Changes">
+                <input type="submit" class="btn btn-primary btn-lg" value="Save Session Changes">
             </div>
         </form>
     </div>

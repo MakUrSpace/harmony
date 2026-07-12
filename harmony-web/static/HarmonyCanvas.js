@@ -168,6 +168,53 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
     }
 
     function draw() {
+        if (!canvas || !imgElem) return;
+        const nw = imgElem.naturalWidth || getNaturalDims(camName).w;
+        const nh = imgElem.naturalHeight || getNaturalDims(camName).h;
+        
+        // Auto-correct if natural dimensions changed after initial load (avoids ResizeObserver missing updates)
+        let expectedLeft = imgElem.offsetLeft + imgElem.clientLeft;
+        let expectedTop = imgElem.offsetTop + imgElem.clientTop;
+        
+        let renderWidth = imgElem.clientWidth;
+        let renderHeight = imgElem.clientHeight;
+        
+        // Handle object-fit: contain letterboxing for All Perspectives view
+        if (nw > 0 && nh > 0 && renderWidth > 0 && renderHeight > 0) {
+            const imgAspect = nw / nh;
+            const containerAspect = renderWidth / renderHeight;
+            if (imgAspect > containerAspect) {
+                // Constrained by width
+                const newHeight = renderWidth / imgAspect;
+                expectedTop += (renderHeight - newHeight) / 2;
+                renderHeight = newHeight;
+            } else {
+                // Constrained by height
+                const newWidth = renderHeight * imgAspect;
+                expectedLeft += (renderWidth - newWidth) / 2;
+                renderWidth = newWidth;
+            }
+        }
+        
+        const styleLeft = expectedLeft + "px";
+        const styleTop = expectedTop + "px";
+        const styleWidth = renderWidth + "px";
+        const styleHeight = renderHeight + "px";
+        
+        if (canvas.width !== nw || canvas.height !== nh || 
+            canvas.style.width !== styleWidth || 
+            canvas.style.height !== styleHeight ||
+            canvas.style.left !== styleLeft ||
+            canvas.style.top !== styleTop) {
+            
+            canvas.width = nw;
+            canvas.height = nh;
+            canvas.style.width = styleWidth;
+            canvas.style.height = styleHeight;
+            canvas.style.left = styleLeft;
+            canvas.style.top = styleTop;
+        }
+        
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         const scale = getScale(canvas, camName);
         const drawnSet = new Set();
@@ -963,7 +1010,8 @@ function gameWorldClick(camNum) {
     const showObjects = showObjectsElem ? showObjectsElem.checked : true;
 
     if (camNum === 'All') {
-        header.innerText = `Game World View -- All Views`;
+        const headerText = document.querySelector("#GameWorldHeaderText");
+        if (headerText) headerText.innerText = `Game World View -- All Views`;
         const camField = document.getElementById(`selectedCamera`);
         camField.value = 'All';
 
@@ -1024,7 +1072,7 @@ function gameWorldClick(camNum) {
                     let ed = initCanvasEditor("GameWorldOverlay", window.harmonyCanvasData,
                         function (updatedData) { console.log("Data updated for", camNum, updatedData); },
                         function (clickEvent) { handlePixelSelection(clickEvent, camNum); },
-                        camNum
+                        null
                     );
                     window.harmonyEditor = ed;
                 }, 50);
@@ -1036,8 +1084,8 @@ function gameWorldClick(camNum) {
         if (img.src !== newSrc) {
             img.src = newSrc;
         }
-
-        header.innerText = `Game World View -- ${camNum}`;
+        const headerText = document.querySelector("#GameWorldHeaderText");
+        if (headerText) headerText.innerText = `Game World View -- ${camNum}`;
         const camField = document.getElementById(`selectedCamera`);
         camField.value = camNum;
 

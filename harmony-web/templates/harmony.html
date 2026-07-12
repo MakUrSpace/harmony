@@ -7,11 +7,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 
     <link rel="stylesheet" href="/bootstrap.min.css">
-    <script src="/bootstrap.min.js"></script>
-    <script src="/htmx.min.js"></script>
+    <script src="/bootstrap.min.js?v=2"></script>
+    <script src="/htmx.min.js?v=2"></script>
+    <script src="/discord_ui_events.js?v=3"></script>
 
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/HarmonyTemplate.css">
+    <link rel="stylesheet" href="/HarmonyTemplate.css?v=2">
 
     <title>Harmony</title>
 </head>
@@ -28,6 +29,16 @@
                 <button id="chatToggleButton" class="btn btn-sm btn-outline-primary" onclick="toggleChatVisibility()">💬 Open Chat</button>
             </h4>
             {% if embed_compcon %}
+            <div class="d-flex justify-content-center flex-grow-1">
+                <ul class="nav nav-pills" id="layoutNavTabs" style="display: none;">
+                    <li class="nav-item">
+                        <button class="nav-link active" id="tab-harmony" onclick="switchTab('harmony')">Observer</button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" id="tab-compcon" onclick="switchTab('compcon')">Comp/Con</button>
+                    </li>
+                </ul>
+            </div>
             <div class="text-end">
                 <div class="btn-group btn-group-sm" role="group" aria-label="Layout Toggle">
                     <input type="radio" class="btn-check" name="layoutToggle" id="layoutSplit" autocomplete="off" checked onchange="toggleLayout('split')">
@@ -45,20 +56,14 @@
                 <button type="submit" class="btn btn-primary">Update</button>
             </form>
         </div>
-        {% if embed_compcon %}
-        <ul class="nav nav-tabs mb-3 justify-content-center" id="layoutNavTabs" style="display: none;">
-            <li class="nav-item">
-                <button class="nav-link active" id="tab-harmony" onclick="switchTab('harmony')">Observer</button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" id="tab-compcon" onclick="switchTab('compcon')">Comp/Con</button>
-            </li>
-        </ul>
-        {% endif %}
         <div class="row flex-nowrap" style="min-width: 500px" id="mainLayoutRow">
             <div class="{% if embed_compcon %}col-5{% else %}col-12{% endif %}" id="harmonyColumn">
                 <div class="container-fluid justify-content-center" align="center">
-                <h3 id="GameWorldHeader">Game World View -- {{ default_camera }}</h3>
+                <div id="GameWorldWrapper">
+                <h3 id="GameWorldHeader" style="position: relative;">
+                    <span id="GameWorldHeaderText">Game World View -- {{ default_camera }}</span>
+                    <button type="button" class="btn btn-sm btn-outline-info" style="position: absolute; right: 0; bottom: 10px;" onclick="toggleGameWorldFullscreen()" id="expandViewerBtn">⤢ Expand</button>
+                </h3>
                 <form id="selectPixelForm" hx-post="{{ harmony_url }}select_pixel" hx-target="#interactor" hx-sync="this:queue all">
                     <input type="hidden" name="selectedCamera" id="selectedCamera" value="{{ default_camera }}">
                     <input type="hidden" name="selectedPixel" id="selectedPixel" value="">
@@ -69,11 +74,11 @@
                 <div id="GameWorldViewer" style="position: relative; display: inline-block;">
                     <img id="GameWorld" class="img-responsive border border-3 border-info bg-primary"
                         src="{{ harmony_url }}camWithChanges/{{ default_camera }}/{{ view_id }}"
-                        style="border-radius: 40px; max-width: 90%;">
+                        style="border-radius: 40px; max-width: 90%; max-height: 70vh; object-fit: contain;">
                     <canvas id="GameWorldOverlay"
                         style="position:absolute; left:0; top:0; pointer-events:auto;"></canvas>
                 </div>
-                <script src="/HarmonyCanvas.js"></script>
+                <script src="/HarmonyCanvas.js?v=2"></script>
                 <script>
                     // Initialize Canvas
                     window.addEventListener('load', function () {
@@ -134,7 +139,27 @@
                         </form>
                     </div>
                 </div>
-            </div>
+                </div>
+            <script>
+                function toggleGameWorldFullscreen() {
+                    const wrapper = document.getElementById('GameWorldWrapper');
+                    const btn = document.getElementById('expandViewerBtn');
+                    
+                    wrapper.classList.toggle('fullscreen-viewer');
+                    document.body.classList.toggle('fullscreen-active');
+                    
+                    if (wrapper.classList.contains('fullscreen-viewer')) {
+                        btn.innerText = '⤡ Collapse';
+                        btn.classList.replace('btn-outline-info', 'btn-outline-warning');
+                    } else {
+                        btn.innerText = '⤢ Expand';
+                        btn.classList.replace('btn-outline-warning', 'btn-outline-info');
+                    }
+                    
+                    // Trigger a resize event to ensure Canvas redraws
+                    setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+                }
+            </script>
             <script>
                 function toggleHarmonyOverlays() {
                     let formData = new URLSearchParams();
@@ -194,9 +219,10 @@
                 </div>
                 </div>
             </div>
+            </div>
             {% if embed_compcon %}
             <div class="col-7" id="compconColumn">
-                <div class="w-100 sticky-top" style="height: 90vh; top: 20px;">
+                <div class="w-100 sticky-top" style="height: 80vh; top: 20px;">
                     <iframe src="https://compcon.app/" width="100%" height="100%" style="border: 1px solid #ccc; border-radius: 8px;"></iframe>
                 </div>
             </div>
@@ -204,7 +230,7 @@
         </div>
         <hr class="mt-4 mb-3">
         <div class="row align-items-center mb-4">
-            <div class="col-md-4" align="left">
+            <div class="col-md-6" align="left">
                 <div class="d-flex flex-column gap-2">
                     <form hx-post="{{ harmony_url }}save" hx-swap="none" class="d-flex align-items-center m-0">
                         <input class="btn btn-success me-2" type="submit" value="Save Game">
@@ -218,6 +244,18 @@
                         <div id="load_status" class="text-sm text-muted ms-2"></div>
                     </div>
                 </div>
+            </div>
+            <div class="col-md-6" align="right">
+                <div class="d-flex flex-column align-items-end gap-2">
+                    <h6 class="text-muted m-0">Chat Controls</h6>
+                    <div class="btn-group">
+                        <button class="btn btn-success" hx-post="{{ harmony_url }}chat/start" hx-swap="none">▶ Start</button>
+                        <button class="btn btn-warning" hx-post="{{ harmony_url }}chat/pause" hx-swap="none">⏸ Pause</button>
+                        <button class="btn btn-danger" hx-post="{{ harmony_url }}chat/stop" hx-swap="none">⏹ Stop & Publish</button>
+                    </div>
+                </div>
+            </div>
+        </div>
                 <script>
                     function loadGame() {
                         const gameNameVal = document.getElementById(`game_name`).value
@@ -365,7 +403,7 @@
             box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
             display: flex;
             flex-direction: column;
-            z-index: 1000;
+            z-index: 1050;
             font-family: 'Share Tech Mono', monospace;
         }
         #discordChatWidget .chat-header {
@@ -447,24 +485,12 @@
         </div>
         <ul class="nav nav-tabs" id="chatTabs" role="tablist">
             <li class="nav-item" role="presentation">
-                <button class="nav-link active" id="group-tab" data-bs-toggle="tab" data-bs-target="#chat-group" type="button" role="tab" onclick="window.currentChatChannel='group'">Group</button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="team-tab" data-bs-toggle="tab" data-bs-target="#chat-team" type="button" role="tab" onclick="window.currentChatChannel='team'">Team</button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="dms-tab" data-bs-toggle="tab" data-bs-target="#chat-dms" type="button" role="tab" onclick="window.currentChatChannel='dms'">DMs</button>
+                <button class="nav-link active chat-nav-btn" data-bs-toggle="tab" data-bs-target="#chat-group" type="button" role="tab" data-channel="group">Group</button>
             </li>
         </ul>
         <div class="tab-content" id="chatTabContent">
-            <div class="tab-pane fade show active h-100" id="chat-group" role="tabpanel">
+            <div class="tab-pane fade show active h-100" id="chat-group" role="tabpanel" data-channel-content="group">
                 <div id="chat-messages-group" style="height: 100%; overflow-y: auto;"></div>
-            </div>
-            <div class="tab-pane fade h-100" id="chat-team" role="tabpanel">
-                <div id="chat-messages-team" style="height: 100%; overflow-y: auto;"></div>
-            </div>
-            <div class="tab-pane fade h-100" id="chat-dms" role="tabpanel">
-                <div id="chat-messages-dms" style="height: 100%; overflow-y: auto;"></div>
             </div>
         </div>
         <div style="padding: 10px; border-top: 1px solid var(--dim-color); display: flex; background: var(--panel-color);">

@@ -179,3 +179,43 @@
         .text-muted {
             color: #4a6c6c !important;
         }
+
+/* Fullscreen Viewer Expansion */
+.fullscreen-viewer {
+    position: fixed !important;
+    top: 2%;
+    left: 2%;
+    width: 96vw !important;
+    height: 96vh !important;
+    z-index: 1050;
+    background: var(--bg-color);
+    border: 2px solid var(--secondary-color);
+    padding: 20px;
+    overflow-y: auto;
+    box-shadow: 0 0 30px rgba(0,0,0,0.8);
+    border-radius: 10px;
+    /* Centers children if needed, but keeping block flow is safer for bootstrap containers */
+}
+
+.fullscreen-viewer #GameWorldViewer {
+    margin-top: 15px;
+    height: 80vh !important;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.fullscreen-viewer #GameWorldViewer > div {
+    height: 100% !important;
+}
+
+.fullscreen-viewer #GameWorldViewer img {
+    max-height: 80vh !important;
+    max-width: 100% !important;
+    object-fit: contain;
+}
+
+/* Prevent body scrolling when fullscreen is active */
+body.fullscreen-active {
+    overflow: hidden;
+}

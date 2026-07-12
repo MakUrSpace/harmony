@@ -121,11 +121,20 @@ pub struct ChatMessage {
     pub channel: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+pub enum ChatStatus {
+    Running,
+    Paused,
+    Stopped,
+}
+
 struct AppState {
     machine: Arc<Mutex<HarmonyMachine>>,
     sessions: Mutex<std::collections::HashMap<String, SessionConfig>>,
     global_config: Mutex<GlobalConfig>,
     chat_tx: tokio::sync::broadcast::Sender<ChatMessage>,
+    chat_log: Mutex<Vec<ChatMessage>>,
+    chat_status: Mutex<ChatStatus>,
 }
 
 struct Handler {
@@ -190,35 +199,71 @@ async fn start_discord_bot(token: String, channel_id: u64, chat_tx: tokio::sync:
     }
 }
 
-async fn chat_ws(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_chat_socket(socket, state))
+#[derive(serde::Deserialize)]
+struct ChatQuery {
+    view_id: Option<String>,
 }
 
-async fn handle_chat_socket(socket: WebSocket, state: Arc<AppState>) {
+async fn chat_ws(
+    ws: WebSocketUpgrade,
+    axum::extract::Query(query): axum::extract::Query<ChatQuery>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let view_id = query.view_id.unwrap_or_else(|| "unknown".to_string());
+    ws.on_upgrade(move |socket| handle_chat_socket(socket, state, view_id))
+}
+
+async fn handle_chat_socket(socket: WebSocket, state: Arc<AppState>, view_id: String) {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.chat_tx.subscribe();
+    let state_for_send = state.clone();
+    let view_id_for_send = view_id.clone();
 
     let mut send_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&msg) {
-                if sender.send(WsMessage::Text(json)).await.is_err() {
-                    break;
+            let status = *state_for_send.chat_status.lock().await;
+            if status != ChatStatus::Running && msg.author != "System" {
+                continue;
+            }
+
+            let mut should_send = false;
+            
+            if msg.channel == "group" {
+                should_send = true;
+            } else {
+                let sessions = state_for_send.sessions.lock().await;
+                if let Some(receiver_session) = sessions.get(&view_id_for_send) {
+                    if receiver_session.is_gm || receiver_session.ally_groups.contains(&msg.channel) {
+                        should_send = true;
+                    }
+                }
+                if view_id_for_send == msg.author {
+                    should_send = true;
+                }
+            }
+
+            if should_send {
+                if let Ok(json) = serde_json::to_string(&msg) {
+                    if sender.send(WsMessage::Text(json)).await.is_err() {
+                        break;
+                    }
                 }
             }
         }
     });
 
     let tx = state.chat_tx.clone();
+    let state_for_recv = state.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(WsMessage::Text(text))) = receiver.next().await {
             match serde_json::from_str::<ChatMessage>(&text) {
                 Ok(mut msg) => {
-                    msg.from_discord = false;
-                    msg.timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                    let _ = tx.send(msg);
+                    let status = *state_for_recv.chat_status.lock().await;
+                    if status == ChatStatus::Running {
+                        msg.from_discord = false;
+                        msg.timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                        let _ = tx.send(msg);
+                    }
                 },
                 Err(e) => {
                     tracing::error!("Failed to parse ChatMessage: {} from payload: {}", e, text);
@@ -505,6 +550,19 @@ async fn main() {
         sessions: Mutex::new(std::collections::HashMap::new()),
         global_config: Mutex::new(GlobalConfig::default()),
         chat_tx: chat_tx.clone(),
+        chat_log: Mutex::new(Vec::new()),
+        chat_status: Mutex::new(ChatStatus::Stopped),
+    });
+
+    let mut central_rx = chat_tx.subscribe();
+    let state_for_log = state.clone();
+    tokio::spawn(async move {
+        while let Ok(msg) = central_rx.recv().await {
+            if msg.author != "System" {
+                let mut log = state_for_log.chat_log.lock().await;
+                log.push(msg);
+            }
+        }
     });
 
     let tx_for_bot = chat_tx.clone();
@@ -591,10 +649,15 @@ async fn main() {
         .route("/harmony/save", post(save_game))
         .route("/harmony/load", post(load_game))
         .route("/harmony/reset", get(reset_game))
+        .route("/harmony/chat/start", post(start_chat))
+        .route("/harmony/chat/pause", post(pause_chat))
+        .route("/harmony/chat/stop", post(stop_chat))
         .route("/harmony/set_overlays", post(set_overlays))
         .route("/harmony/control", get(session_list))
         .route("/harmony/control/:view_id", get(session_control_panel))
         .route("/harmony/control/:view_id/update", post(update_session_config))
+        .route("/harmony/control/world/update", post(update_world_config))
+        .route("/harmony/update_session_id", post(update_session_id))
         .route("/harmony/publish_selection", post(publish_selection))
         .route("/harmony/clear_published_selection", post(clear_published_selection))
         .route("/harmony/clear_all_published_selections", post(clear_all_published_selections))
@@ -1105,6 +1168,9 @@ struct HarmonyUserTemplate {
 #[template(path = "SessionList.html")]
 struct SessionListTemplate {
     sessions: Vec<String>,
+    objects: Vec<harmony_core::machine::TrackedObject>,
+    global: GlobalConfig,
+    object_groups: std::collections::HashMap<String, String>,
 }
 
 #[derive(Template)]
@@ -1113,9 +1179,7 @@ struct SessionListTemplate {
 struct ControlPanelTemplate {
     viewId: String,
     config: SessionConfig,
-    global: GlobalConfig,
     objects: Vec<harmony_core::machine::TrackedObject>,
-    object_groups: std::collections::HashMap<String, String>,
 }
 
 const ADJECTIVES: &[&str] = &[
@@ -1375,6 +1439,7 @@ struct CanvasData {
     targetable: Vec<String>,
     enemies: Vec<String>,
     allies: Vec<String>,
+    ally_groups: Vec<String>,
     selection: serde_json::Value,
     constituent_axials: std::collections::HashMap<String, Vec<(i32, i32)>>,
     published_selections: Vec<Vec<(i32, i32)>>,
@@ -1570,6 +1635,7 @@ async fn canvas_data(
         targetable,
         enemies,
         allies,
+        ally_groups: session.ally_groups.clone(),
         selection: selection_json,
         constituent_axials,
         published_selections,
@@ -2161,6 +2227,95 @@ async fn reset_game(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (axum::http::StatusCode::OK, headers, "Game Reset").into_response()
 }
 
+async fn start_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut status = state.chat_status.lock().await;
+    *status = ChatStatus::Running;
+    
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
+    (axum::http::StatusCode::OK, headers, "Chat Started").into_response()
+}
+
+async fn pause_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut status = state.chat_status.lock().await;
+    *status = ChatStatus::Paused;
+    
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
+    (axum::http::StatusCode::OK, headers, "Chat Paused").into_response()
+}
+
+async fn stop_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut status = state.chat_status.lock().await;
+    *status = ChatStatus::Stopped;
+
+    let mut collated_text = String::new();
+    {
+        let mut log = state.chat_log.lock().await;
+        if !log.is_empty() {
+            collated_text.push_str("**=== Session Ended: Chat Log ===**\n");
+            
+            let group_msgs: Vec<_> = log.iter().filter(|m| m.channel == "group").collect();
+            if !group_msgs.is_empty() {
+                collated_text.push_str("\n**Session Log:**\n");
+                for m in group_msgs {
+                    collated_text.push_str(&format!("[{}] {}: {}\n", m.timestamp, m.author, m.content));
+                }
+            }
+
+            let mut team_channels: std::collections::HashMap<String, Vec<&ChatMessage>> = std::collections::HashMap::new();
+            for m in log.iter().filter(|m| m.channel != "group") {
+                team_channels.entry(m.channel.clone()).or_default().push(m);
+            }
+
+            for (channel, msgs) in team_channels {
+                collated_text.push_str(&format!("\n**Team/Faction Log: {}**\n", channel));
+                for m in msgs {
+                    collated_text.push_str(&format!("[{}] {}: {}\n", m.timestamp, m.author, m.content));
+                }
+            }
+
+            log.clear();
+        }
+    }
+
+    if !collated_text.is_empty() {
+        let m = state.machine.lock().await;
+        let token = m.cc.discord_token.clone();
+        let channel_id_str = m.cc.discord_channel_id.clone();
+        if let (Some(t), Some(c_str)) = (token, channel_id_str) {
+            if let Ok(cid) = c_str.trim().parse::<u64>() {
+                let mut chunks = vec![];
+                let mut current_chunk = String::new();
+                for line in collated_text.lines() {
+                    if current_chunk.len() + line.len() > 1900 {
+                        chunks.push(current_chunk.clone());
+                        current_chunk = String::new();
+                    }
+                    current_chunk.push_str(line);
+                    current_chunk.push('\n');
+                }
+                if !current_chunk.is_empty() {
+                    chunks.push(current_chunk);
+                }
+                
+                tokio::spawn(async move {
+                    let http = serenity::http::Http::new(&t);
+                    for chunk in chunks {
+                        if let Err(e) = serenity::model::id::ChannelId::new(cid).say(&http, &chunk).await {
+                            tracing::error!("Failed to post session collated log to Discord: {:?}", e);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
+    (axum::http::StatusCode::OK, headers, "Chat Stopped & Logs Collated").into_response()
+}
+
 #[derive(serde::Deserialize)]
 struct SetOverlaysForm {
     show_grid: bool,
@@ -2519,7 +2674,31 @@ async fn raw_video_feed(
 async fn session_list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let sessions = state.sessions.lock().await;
     let sids: Vec<String> = sessions.keys().cloned().collect();
-    let template = SessionListTemplate { sessions: sids };
+    
+    let global = state.global_config.lock().await.clone();
+    let mut objects: Vec<harmony_core::machine::TrackedObject> = {
+        let machine = state.machine.lock().await;
+        machine.memory.values().cloned().collect()
+    };
+    objects.sort_by(|a, b| a.oid.cmp(&b.oid));
+    
+    let mut object_groups = std::collections::HashMap::new();
+    for obj in &objects {
+        let mut groups = Vec::new();
+        for (gname, goids) in &global.groups {
+            if goids.contains(&obj.oid) {
+                groups.push(gname.clone());
+            }
+        }
+        object_groups.insert(obj.oid.clone(), groups.join(","));
+    }
+
+    let template = SessionListTemplate { 
+        sessions: sids,
+        objects,
+        global,
+        object_groups,
+    };
     match template.render() {
         Ok(html) => axum::response::Html(html).into_response(),
         Err(err) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Template error: {}", err)).into_response(),
@@ -2531,10 +2710,9 @@ async fn session_control_panel(
     axum::extract::Path(view_id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     let view_id_lower = view_id.trim().to_lowercase();
-    let (config, global) = {
+    let config = {
         let sessions = state.sessions.lock().await;
-        let global = state.global_config.lock().await;
-        (sessions.get(&view_id_lower).cloned(), global.clone())
+        sessions.get(&view_id_lower).cloned()
     };
     
     if let Some(config) = config {
@@ -2543,23 +2721,11 @@ async fn session_control_panel(
             machine.memory.values().cloned().collect()
         };
         objects.sort_by(|a, b| a.oid.cmp(&b.oid));
-        let mut object_groups = std::collections::HashMap::new();
-        for obj in &objects {
-            let mut groups = Vec::new();
-            for (gname, goids) in &global.groups {
-                if goids.contains(&obj.oid) {
-                    groups.push(gname.clone());
-                }
-            }
-            object_groups.insert(obj.oid.clone(), groups.join(","));
-        }
         
         let template = ControlPanelTemplate {
             viewId: view_id_lower.clone(),
             config: config.clone(),
             objects,
-            global,
-            object_groups,
         };
         match template.render() {
             Ok(html) => axum::response::Html(html).into_response(),
@@ -2621,33 +2787,16 @@ async fn clear_all_published_selections(
     axum::response::Html("<p>All broadcasts cleared.</p>")
 }
 
-async fn update_session_config(
+async fn update_world_config(
     State(state): State<Arc<AppState>>,
-    axum::extract::Path(view_id): axum::extract::Path<String>,
     Form(form): Form<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let view_id_lower = view_id.trim().to_lowercase();
-    let mut config = SessionConfig::default();
     let mut global_terrain = Vec::new();
     let mut global_groups: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    let mut can_publish = false;
-    let mut is_gm = false;
 
     for (k, v) in form {
-        if k == "can_publish_selection" {
-            can_publish = true;
-        } else if k == "is_gm" {
-            is_gm = true;
-        } else if let Some(oid) = k.strip_suffix("_terrain") {
+        if let Some(oid) = k.strip_suffix("_terrain") {
             global_terrain.push(oid.to_string());
-        } else if let Some(oid) = k.strip_suffix("_moveable") {
-            config.moveable_objects.push(oid.to_string());
-        } else if k == "moveable_groups" {
-            config.moveable_groups = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-        } else if k == "ally_groups" {
-            config.ally_groups = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-        } else if k == "enemy_groups" {
-            config.enemy_groups = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         } else if k.starts_with("group_") {
             let oid = k.strip_prefix("group_").unwrap().to_string();
             for group in v.split(',') {
@@ -2656,6 +2805,40 @@ async fn update_session_config(
                     global_groups.entry(group).or_default().push(oid.clone());
                 }
             }
+        }
+    }
+    
+    {
+        let mut global = state.global_config.lock().await;
+        global.terrain = global_terrain;
+        global.groups = global_groups;
+    }
+    axum::response::Redirect::to("/harmony/control").into_response()
+}
+
+async fn update_session_config(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(view_id): axum::extract::Path<String>,
+    Form(form): Form<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let view_id_lower = view_id.trim().to_lowercase();
+    let mut config = SessionConfig::default();
+    let mut can_publish = false;
+    let mut is_gm = false;
+
+    for (k, v) in form {
+        if k == "can_publish_selection" {
+            can_publish = true;
+        } else if k == "is_gm" {
+            is_gm = true;
+        } else if let Some(oid) = k.strip_suffix("_moveable") {
+            config.moveable_objects.push(oid.to_string());
+        } else if k == "moveable_groups" {
+            config.moveable_groups = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        } else if k == "ally_groups" {
+            config.ally_groups = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        } else if k == "enemy_groups" {
+            config.enemy_groups = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         }
     }
     
@@ -2671,12 +2854,6 @@ async fn update_session_config(
         config.show_objects = session.show_objects;
         config.published_selection = session.published_selection.clone();
         *session = config;
-    }
-    
-    {
-        let mut global = state.global_config.lock().await;
-        global.terrain = global_terrain;
-        global.groups = global_groups;
     }
     
     axum::response::Redirect::to(&format!("/harmony/control/{}", view_id_lower)).into_response()
@@ -2866,6 +3043,8 @@ mod tests {
             sessions: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             global_config: tokio::sync::Mutex::new(GlobalConfig::default()),
             chat_tx,
+            chat_log: tokio::sync::Mutex::new(Vec::new()),
+            chat_status: tokio::sync::Mutex::new(ChatStatus::Stopped),
         };
 
         // 1. Build context with mixed-case session

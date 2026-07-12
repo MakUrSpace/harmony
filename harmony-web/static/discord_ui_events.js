@@ -1,12 +1,6 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Global Event Delegation for all previously inline handlers
     document.addEventListener('click', function(e) {
-        if (e.target.closest('.cam-btn')) {
-            gameWorldClick(e.target.closest('.cam-btn').getAttribute('data-camera'));
-        }
-        if (e.target.closest('#chatToggleButton') || e.target.closest('.closeChatBtn')) {
-            toggleChatVisibility();
-        }
         if (e.target.closest('#tab-harmony')) switchTab('harmony');
         if (e.target.closest('#tab-compcon')) switchTab('compcon');
         if (e.target.closest('.clearSelectionBtn')) clearSelection();
@@ -15,9 +9,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (form) form.hidden = !form.hidden;
         }
         if (e.target.closest('#renameModalSubmit')) doRename();
-        if (e.target.closest('#group-tab')) window.currentChatChannel = 'group';
-        if (e.target.closest('#team-tab')) window.currentChatChannel = 'team';
-        if (e.target.closest('#dms-tab')) window.currentChatChannel = 'dms';
+        if (e.target.closest('.chat-nav-btn')) {
+            window.currentChatChannel = e.target.closest('.chat-nav-btn').getAttribute('data-channel');
+        }
         if (e.target.closest('#sendChatBtn')) sendChatMessage();
     });
 
@@ -49,7 +43,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize Chat WebSocket
     window.currentChatChannel = 'group';
     let chatWsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    window.chatWs = new WebSocket(chatWsProtocol + '//' + window.location.host + '/harmony/chat_ws');
+    let viewIdInput = document.getElementById('viewId');
+    let vId = viewIdInput ? viewIdInput.value : '';
+    window.chatWs = new WebSocket(chatWsProtocol + '//' + window.location.host + '/harmony/chat_ws?view_id=' + encodeURIComponent(vId));
     
     window.chatWs.onmessage = function(event) {
         let msg = JSON.parse(event.data);
@@ -64,7 +60,82 @@ document.addEventListener('DOMContentLoaded', function() {
             container.scrollTop = container.scrollHeight;
         }
     };
+    
+    // Sync chat tabs periodically
+    setInterval(syncChatTabs, 1000);
 });
+
+window.syncChatTabs = function() {
+    let cd = window.harmonyCanvasData;
+    if (!cd || !cd.ally_groups) return;
+    
+    let tabsUl = document.getElementById('chatTabs');
+    let contentDiv = document.getElementById('chatTabContent');
+    if (!tabsUl || !contentDiv) return;
+
+    let neededChannels = ['group'];
+    cd.ally_groups.forEach(g => neededChannels.push(g));
+    // Remove "dms" and "team" if they exist, let's keep only what's in neededChannels
+    
+    let currentChannels = Array.from(tabsUl.querySelectorAll('.chat-nav-btn')).map(b => b.getAttribute('data-channel'));
+    
+    // Check if we need to rebuild
+    let needsRebuild = false;
+    if (neededChannels.length !== currentChannels.length) needsRebuild = true;
+    else {
+        for(let i=0; i<neededChannels.length; i++) {
+            if(neededChannels[i] !== currentChannels[i]) needsRebuild = true;
+        }
+    }
+    
+    if (needsRebuild) {
+        tabsUl.innerHTML = '';
+        
+        let existingContents = new Map();
+        Array.from(contentDiv.children).forEach(child => {
+            let ch = child.getAttribute('data-channel-content');
+            if (ch) existingContents.set(ch, child);
+        });
+        
+        contentDiv.innerHTML = '';
+        
+        neededChannels.forEach((ch, idx) => {
+            let li = document.createElement('li');
+            li.className = 'nav-item';
+            li.setAttribute('role', 'presentation');
+            
+            let btn = document.createElement('button');
+            let isActive = window.currentChatChannel === ch || (idx === 0 && !neededChannels.includes(window.currentChatChannel));
+            if (isActive) window.currentChatChannel = ch;
+            
+            btn.className = 'nav-link chat-nav-btn' + (isActive ? ' active' : '');
+            btn.setAttribute('data-bs-toggle', 'tab');
+            btn.setAttribute('data-bs-target', '#chat-' + ch);
+            btn.setAttribute('type', 'button');
+            btn.setAttribute('role', 'tab');
+            btn.setAttribute('data-channel', ch);
+            btn.innerText = ch.charAt(0).toUpperCase() + ch.slice(1);
+            li.appendChild(btn);
+            tabsUl.appendChild(li);
+            
+            let pane = existingContents.get(ch);
+            if (!pane) {
+                pane = document.createElement('div');
+                pane.className = 'tab-pane fade h-100';
+                pane.id = 'chat-' + ch;
+                pane.setAttribute('role', 'tabpanel');
+                pane.setAttribute('data-channel-content', ch);
+                pane.innerHTML = `<div id="chat-messages-${ch}" style="height: 100%; overflow-y: auto;"></div>`;
+            }
+            if (isActive) {
+                pane.classList.add('show', 'active');
+            } else {
+                pane.classList.remove('show', 'active');
+            }
+            contentDiv.appendChild(pane);
+        });
+    }
+}
 
 window.toggleHarmonyOverlays = function() {
     let formData = new URLSearchParams();
