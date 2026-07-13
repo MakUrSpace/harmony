@@ -4,18 +4,35 @@
 const POLL_INTERVAL = 1000;
 const HEX_SIZE = 0.5; // Radius of a hex in meters
 
-// Pointy top: x = size * sqrt(3) * (q + r/2), z = size * 3/2 * r
 function axialToCartesian(q, r, size) {
     const x = size * Math.sqrt(3) * (q + r / 2);
     const z = size * 1.5 * r;
     return { x, z };
 }
 
+// Point in polygon for pixel coordinates
+function pointInPolygon(point, vs) {
+    let x = point[0], y = point[1];
+    let inside = false;
+    for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        let xi = vs[i][0], yi = vs[i][1];
+        let xj = vs[j][0], yj = vs[j][1];
+        let intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
 let lastObjects = {};
 let lastData = null;
 let camerasCreated = false;
+let boardInitialized = false;
 
-// Overlay Colors
+// Store DOM elements of the grid hexes { "q,r": cylinderElement }
+let boardHexes = {};
+let objectLabels = {};
+
+// Overlay Colors (for 2D camera canvases)
 const overlayColors = {
     selectable: [180, 190, 205],
     terrain: [120, 125, 135],
@@ -28,7 +45,7 @@ const overlayColors = {
     default: [255, 255, 255]
 };
 
-// Hexadecimal colors for A-Frame cylinders
+// Hexadecimal colors for A-Frame cylinders (3D Board)
 const hexColors = {
     selectable: "#B4BECD",
     terrain: "#787D87",
@@ -38,7 +55,7 @@ const hexColors = {
     allies: "#00D278",
     moveable: "#AA50FF",
     selection: "#FFD246",
-    default: "#FFFFFF"
+    default: "#2A2A2A" // Dark transparent gray for empty grid hexes
 };
 
 async function fetchCanvasData() {
@@ -46,9 +63,15 @@ async function fetchCanvasData() {
         const response = await fetch('/harmony/canvas_data/' + VIEW_ID);
         if (!response.ok) return;
         const data = await response.json();
-        
         lastData = data;
+        
+        if (!boardInitialized) {
+            await initializeBoard(data);
+            boardInitialized = true;
+        }
+
         updateObjects(data);
+        
         if (!camerasCreated && data.cameras && data.cameras.length > 0) {
             createCameras(data.cameras);
             camerasCreated = true;
@@ -58,29 +81,80 @@ async function fetchCanvasData() {
     }
 }
 
-function updateObjects(data) {
-    const scene = document.querySelector('a-scene');
-    const virtualMap = document.getElementById('virtual-map');
-
-    const newObjectKeys = new Set(Object.keys(data.objects));
-    
-    // Remove deleted objects
-    for (const oid in lastObjects) {
-        if (!newObjectKeys.has(oid)) {
-            const el = document.getElementById('obj-' + oid);
-            if (el) el.parentNode.removeChild(el);
-        }
+async function initializeBoard(data) {
+    const virtualBoard = document.getElementById('virtual-board');
+    if (!data.virtual_map_boundary || data.virtual_map_boundary.length === 0) {
+        console.warn("No virtual map boundary available to generate board.");
+        return;
     }
 
-    // Add or update objects
+    try {
+        const res = await fetch('/harmony/grid_polys/VirtualMap');
+        const gridPolys = await res.json();
+        
+        gridPolys.forEach(hex => {
+            // Find center of hex polygon
+            let cx = 0, cy = 0;
+            hex.poly.forEach(p => { cx += p[0]; cy += p[1]; });
+            cx /= hex.poly.length;
+            cy /= hex.poly.length;
+            
+            // Check if center falls inside ANY of the virtual_map_boundary polygons
+            const isActive = data.virtual_map_boundary.some(boundary => pointInPolygon([cx, cy], boundary));
+            
+            if (isActive) {
+                const q = hex.q;
+                const r = hex.r;
+                const key = `${q},${r}`;
+                const pos = axialToCartesian(q, r, HEX_SIZE);
+                
+                const cylinder = document.createElement('a-cylinder');
+                cylinder.setAttribute('segments-radial', '6');
+                cylinder.setAttribute('radius', HEX_SIZE * 0.95);
+                // Unscaled HEX_SIZE is 0.5. Scale is 0.05, so hex diameter is 0.05m (2 inches).
+                // Physical thickness requested is 6 inches (0.15m). Unscaled thickness = 0.15 / 0.05 = 3.0.
+                cylinder.setAttribute('height', '3.0');
+                cylinder.setAttribute('color', hexColors.default);
+                cylinder.setAttribute('material', 'opacity: 0.8; transparent: true');
+                // Cylinder origin is center, so raise by half height to rest on y=0
+                cylinder.setAttribute('position', `${pos.x} 1.5 ${pos.z}`);
+                cylinder.setAttribute('class', 'clickable'); // Raycaster target
+                
+                cylinder.onclick = () => {
+                    fetch('/harmony/select_pixel', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            view_id: VIEW_ID,
+                            cam_name: 'VirtualMap',
+                            x: q, y: r
+                        })
+                    });
+                };
+                
+                virtualBoard.appendChild(cylinder);
+                boardHexes[key] = cylinder;
+            }
+        });
+        
+    } catch (e) {
+        console.error("Failed to initialize grid board", e);
+    }
+}
+
+function updateObjects(data) {
+    const virtualBoard = document.getElementById('virtual-board');
+    
+    // Build a map of axial -> { oid, obj, color, isSelectable }
+    const hexMap = {};
+    const newObjectKeys = new Set(Object.keys(data.objects));
+    
     for (const oid in data.objects) {
         const obj = data.objects[oid];
-        let el = document.getElementById('obj-' + oid);
         
-        let color = hexColors.default;
+        let color = "#FFFFFF";
         let isSelectable = false;
         
-        // Priority coloring matching HarmonyCanvas.js
         if (data.selectable && (data.selectable.includes(oid) || data.selectable.includes(obj.name))) {
             color = hexColors.selectable;
             isSelectable = true;
@@ -95,71 +169,66 @@ function updateObjects(data) {
         
         if (!obj.constituent_axials || obj.constituent_axials.length === 0) continue;
         
-        // Render each constituent axial as a separate hex cylinder under the same entity
-        // or just render the first one if multi-hex is too complex. We will render all of them.
-        
-        if (!el) {
-            el = document.createElement('a-entity');
-            el.setAttribute('id', 'obj-' + oid);
-            
-            // Text label positioned above the center of the first hex
-            const text = document.createElement('a-text');
-            text.setAttribute('value', obj.name || obj.object_type);
-            text.setAttribute('align', 'center');
-            text.setAttribute('scale', '0.5 0.5 0.5');
-            text.setAttribute('color', 'white');
-            text.setAttribute('class', 'label');
-            el.appendChild(text);
-
-            virtualMap.appendChild(el);
-        }
-        
-        // Sync cylinders
-        const existingCylinders = el.querySelectorAll('a-cylinder');
-        // If the number of hexes changed, it's easier to just recreate them, but let's try to reuse or just wipe and recreate if it mismatches
-        if (existingCylinders.length !== obj.constituent_axials.length) {
-            existingCylinders.forEach(c => c.parentNode.removeChild(c));
-            obj.constituent_axials.forEach((axial, index) => {
-                const cylinder = document.createElement('a-cylinder');
-                cylinder.setAttribute('segments-radial', '6');
-                cylinder.setAttribute('class', 'clickable');
-                el.appendChild(cylinder);
-            });
-        }
-        
-        const cylinders = el.querySelectorAll('a-cylinder');
-        const height = isSelectable ? 0.25 : 0.5;
-        const yPos = height / 2;
-        
-        obj.constituent_axials.forEach((axial, index) => {
-            const pos = axialToCartesian(axial[0], axial[1], HEX_SIZE);
-            const cyl = cylinders[index];
-            if (cyl) {
-                cyl.setAttribute('position', `${pos.x} ${yPos} ${pos.z}`);
-                cyl.setAttribute('radius', HEX_SIZE * 0.95);
-                cyl.setAttribute('height', height);
-                cyl.setAttribute('color', color);
-                
-                if (index === 0) {
-                    const text = el.querySelector('.label');
-                    if (text) {
-                        text.setAttribute('position', `${pos.x} ${height/2 + 0.2} ${pos.z}`);
-                    }
-                    
-                    cyl.onclick = () => {
-                        fetch('/harmony/select_pixel', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                view_id: VIEW_ID,
-                                cam_name: 'VirtualMap',
-                                x: axial[0], y: axial[1] // If API needs axial coords or just select object
-                            })
-                        });
-                    };
-                }
-            }
+        obj.constituent_axials.forEach((axial, idx) => {
+            const key = `${axial[0]},${axial[1]}`;
+            // If multiple objects overlap, last one wins (or we could prioritize)
+            hexMap[key] = { oid, obj, color, isSelectable, isPrimary: (idx === 0) };
         });
+    }
+    
+    // Update board hexes
+    for (const key in boardHexes) {
+        const cyl = boardHexes[key];
+        if (hexMap[key]) {
+            const info = hexMap[key];
+            const height = info.isSelectable ? 3.5 : 4.0; // Taller than empty hex
+            cyl.setAttribute('color', info.color);
+            cyl.setAttribute('height', height);
+            cyl.setAttribute('position', `${cyl.getAttribute('position').x} ${height / 2} ${cyl.getAttribute('position').z}`);
+            cyl.setAttribute('material', 'opacity: 1; transparent: false');
+        } else {
+            // Empty hex
+            cyl.setAttribute('color', hexColors.default);
+            cyl.setAttribute('height', '3.0');
+            cyl.setAttribute('position', `${cyl.getAttribute('position').x} 1.5 ${cyl.getAttribute('position').z}`);
+            cyl.setAttribute('material', 'opacity: 0.8; transparent: true');
+        }
+    }
+    
+    // Handle Labels
+    for (const oid in objectLabels) {
+        if (!newObjectKeys.has(oid)) {
+            const lbl = objectLabels[oid];
+            if (lbl && lbl.parentNode) lbl.parentNode.removeChild(lbl);
+            delete objectLabels[oid];
+        }
+    }
+    
+    for (const oid in data.objects) {
+        const obj = data.objects[oid];
+        if (!obj.constituent_axials || obj.constituent_axials.length === 0) continue;
+        
+        const key = `${obj.constituent_axials[0][0]},${obj.constituent_axials[0][1]}`;
+        const pos = axialToCartesian(obj.constituent_axials[0][0], obj.constituent_axials[0][1], HEX_SIZE);
+        
+        // Only show label if the hex is on the board
+        if (!boardHexes[key]) continue;
+        
+        let lbl = objectLabels[oid];
+        if (!lbl) {
+            lbl = document.createElement('a-text');
+            lbl.setAttribute('align', 'center');
+            lbl.setAttribute('scale', '10 10 10'); // Scaled up because board is scaled 0.05
+            lbl.setAttribute('color', 'white');
+            virtualBoard.appendChild(lbl);
+            objectLabels[oid] = lbl;
+        }
+        
+        lbl.setAttribute('value', obj.name || obj.object_type);
+        const height = hexMap[key] && hexMap[key].isSelectable ? 3.5 : 4.0;
+        lbl.setAttribute('position', `${pos.x} ${height + 0.5} ${pos.z}`);
+        
+        lbl.setAttribute('rotation', '-90 0 0');
     }
     
     lastObjects = data.objects;
@@ -179,7 +248,6 @@ window.drawCameraOverlay = function(ctx, camName, width, height) {
     function drawPoly(poly, r, g, b, alpha=0.3) {
         if (!poly || poly.length === 0) return;
         
-        // Handle multi-poly
         let isMultiPoly = false;
         if (Array.isArray(poly[0])) {
             if (Array.isArray(poly[0][0]) || (typeof poly[0][0] === 'object' && poly[0][0] !== null && 'x' in poly[0][0])) {
@@ -261,7 +329,7 @@ function createCameras(cameras) {
         plane.setAttribute('height', '1.125'); // 16:9 ratio
         plane.setAttribute('material', `shader: flat; src: #canvas-${safeName}; side: double`);
         plane.setAttribute('mjpeg-texture', `image: #stream-${safeName}; canvas: #canvas-${safeName}; camName: ${camName}; fps: 15`);
-        plane.setAttribute('visible', 'false'); // Hidden until naturalWidth > 0
+        plane.setAttribute('visible', 'false');
         
         const label = document.createElement('a-text');
         label.setAttribute('value', camName);
