@@ -253,6 +253,8 @@
     var currentRow = {};
     var colAnchor = {};  // axial [q, r] of the first point in the current column
     var loadedCams = {};
+    var dragAllStartPos = null;
+    var dragAllActive = false;
 
     cameraNames.forEach(function (name) {
         manualPoints[name] = [];
@@ -327,6 +329,7 @@
     function stopDrag() {
         dragPointIndex = -1;
         dragCamName = null;
+        dragAllActive = false;
     }
 
     // Attach global mouseup to catch releases outside canvas
@@ -387,6 +390,11 @@
                     return;
                 }
             }
+            // If not near a point, drag all calibration + active zone
+            dragAllStartPos = { x: x, y: y };
+            dragCamName = camName;
+            dragAllActive = true;
+            return;
         } else {
             var col = currentCol[camName] || 0;
             var row = currentRow[camName] || 0;
@@ -457,6 +465,13 @@
     }
 
     function onMouseMove(camName, event) {
+        var canvas = document.getElementById('overlayCanvas_' + camName);
+        var pos = getMousePos(canvas, event);
+        var w = canvas.clientWidth;
+        var h = canvas.clientHeight;
+        var x = pos.x;
+        var y = pos.y;
+
         if (dragPointIndex !== -1 && dragCamName === camName) {
             // Safety check
             if (!manualPoints[camName] || !manualPoints[camName][dragPointIndex]) {
@@ -464,11 +479,38 @@
                 return;
             }
 
-            var canvas = document.getElementById('overlayCanvas_' + camName);
-            var pos = getMousePos(canvas, event);
-            var w = canvas.clientWidth;
-            var h = canvas.clientHeight;
-            manualPoints[camName][dragPointIndex] = [pos.x / w, pos.y / h];
+            manualPoints[camName][dragPointIndex] = [x / w, y / h];
+            drawPoints(camName);
+            renderActiveCalibrationTable(camName);
+        } else if (dragAllActive && dragCamName === camName) {
+            var dx = x - dragAllStartPos.x;
+            var dy = y - dragAllStartPos.y;
+            var dxNorm = dx / w;
+            var dyNorm = dy / h;
+
+            if (manualPoints[camName]) {
+                for (var i = 0; i < manualPoints[camName].length; i++) {
+                    manualPoints[camName][i][0] += dxNorm;
+                    manualPoints[camName][i][1] += dyNorm;
+                }
+            }
+
+            var formField = document.getElementById(`cam${camName}_ActiveZone`);
+            if (formField) {
+                try {
+                    var azPts = JSON.parse(formField.value);
+                    if (azPts && azPts.length > 0) {
+                        for (var i = 0; i < azPts.length; i++) {
+                            azPts[i][0] += (dx / w) * canvas.width;
+                            azPts[i][1] += (dy / h) * canvas.height;
+                        }
+                        formField.value = JSON.stringify(azPts);
+                        formField.dispatchEvent(new Event('change'));
+                    }
+                } catch (e) {}
+            }
+
+            dragAllStartPos = { x: x, y: y };
             drawPoints(camName);
             renderActiveCalibrationTable(camName);
         }

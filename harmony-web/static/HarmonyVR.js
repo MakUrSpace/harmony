@@ -167,11 +167,11 @@ function updateObjects(data) {
         if (data.moveable && (data.moveable.includes(oid) || data.moveable.includes(obj.name))) color = hexColors.moveable;
         if (data.selection && data.selection.selected_oid === oid) color = hexColors.selection;
         
-        if (!obj.constituent_axials || obj.constituent_axials.length === 0) continue;
+        const axials = data.constituent_axials && data.constituent_axials[oid] ? data.constituent_axials[oid] : [];
+        if (axials.length === 0) continue;
         
-        obj.constituent_axials.forEach((axial, idx) => {
+        axials.forEach((axial, idx) => {
             const key = `${axial[0]},${axial[1]}`;
-            // If multiple objects overlap, last one wins (or we could prioritize)
             hexMap[key] = { oid, obj, color, isSelectable, isPrimary: (idx === 0) };
         });
     }
@@ -206,10 +206,11 @@ function updateObjects(data) {
     
     for (const oid in data.objects) {
         const obj = data.objects[oid];
-        if (!obj.constituent_axials || obj.constituent_axials.length === 0) continue;
+        const axials = data.constituent_axials && data.constituent_axials[oid] ? data.constituent_axials[oid] : [];
+        if (axials.length === 0) continue;
         
-        const key = `${obj.constituent_axials[0][0]},${obj.constituent_axials[0][1]}`;
-        const pos = axialToCartesian(obj.constituent_axials[0][0], obj.constituent_axials[0][1], HEX_SIZE);
+        const key = `${axials[0][0]},${axials[0][1]}`;
+        const pos = axialToCartesian(axials[0][0], axials[0][1], HEX_SIZE);
         
         // Only show label if the hex is on the board
         if (!boardHexes[key]) continue;
@@ -224,7 +225,7 @@ function updateObjects(data) {
             objectLabels[oid] = lbl;
         }
         
-        lbl.setAttribute('value', obj.name || obj.object_type);
+        lbl.setAttribute('value', obj.name || obj.object_type || oid);
         const height = hexMap[key] && hexMap[key].isSelectable ? 3.5 : 4.0;
         lbl.setAttribute('position', `${pos.x} ${height + 0.5} ${pos.z}`);
         
@@ -280,7 +281,10 @@ window.drawCameraOverlay = function(ctx, camName, width, height) {
         ctx.stroke();
     }
     
-    for (const oid in lastData.objects) {
+    // Sort object IDs so drawing order is stable to prevent z-fighting / flashing
+    const sortedOids = Object.keys(lastData.objects).sort();
+    
+    for (const oid of sortedOids) {
         const objData = lastData.objects[oid];
         const poly = objData[camName];
         if (!poly) continue;
@@ -304,7 +308,7 @@ function createCameras(cameras) {
     const streamsDiv = document.getElementById('mjpeg-streams');
     const container = document.getElementById('camera-windows');
     
-    let activeCameras = cameras.filter(c => c !== "VirtualMap");
+    let activeCameras = cameras.filter(c => c !== "VirtualMap" && c !== "No Camera");
     let xOffset = - (activeCameras.length * 2.0) / 2;
 
     activeCameras.forEach((camName, i) => {
