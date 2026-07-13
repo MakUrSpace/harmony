@@ -138,21 +138,24 @@
           name = "harmony-ngrok";
           runtimeInputs = [ self'.packages.harmony-rs ngrok tmux ];
           text = ''
-            # Starts a tmux session with 4 panes:
-            #   1. Rust server (port 8081/8080/8082)
+            # Starts a tmux session with 5 panes:
+            #   1. Rust server (port 8081/8080/8082/8083)
             #   2. ngrok tunnel for Harmony (8081)
             #   3. ngrok tunnel for Admin (8080)
             #   4. ngrok tunnel for Discord (8082)
+            #   5. ngrok tunnel for VR (8083)
             
             SESSION_NAME="harmony"
             PORT="''${PORT:-8081}"
             ADMIN_PORT="''${ADMIN_PORT:-8080}"
             DISCORD_PORT="''${DISCORD_PORT:-8082}"
+            VR_PORT="''${VR_PORT:-8083}"
             
             # Arguments for URLs
             ADMIN_URL="''${1:-harmony-admin.ngrok.app}"
             HARMONY_URL="''${2:-harmony.ngrok.app}"
             DISCORD_URL="''${3:-harmony-discord.ngrok.app}"
+            VR_URL="''${4:-harmony-vr.ngrok.app}"
             
             # If the session already exists, just attach
             if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
@@ -177,6 +180,10 @@
             # Split for Discord Ngrok
             tmux split-window -t "$SESSION_NAME:0.2" -v \
               "echo 'Exposing Discord Activity on $DISCORD_URL -> $DISCORD_PORT'; ngrok http $DISCORD_PORT --domain=$DISCORD_URL; read"
+
+            # Split for VR Ngrok
+            tmux split-window -t "$SESSION_NAME:0.3" -v \
+              "echo 'Exposing VR on $VR_URL -> $VR_PORT'; ngrok http $VR_PORT --domain=$VR_URL; read"
             
             # Reorganize tiles
             tmux select-layout -t "$SESSION_NAME:0" tiled

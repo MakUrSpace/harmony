@@ -2,11 +2,28 @@ use crate::observer::HexCaptureConfiguration;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+fn default_height_one() -> i32 {
+    1
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrackedObject {
     pub oid: String,
     pub object_type: String,
     pub constituent_axials: Vec<(i32, i32)>,
+    #[serde(default = "default_height_one")]
+    pub height: i32,
+}
+
+impl Default for TrackedObject {
+    fn default() -> Self {
+        Self {
+            oid: String::new(),
+            object_type: String::new(),
+            constituent_axials: Vec::new(),
+            height: 1,
+        }
+    }
 }
 
 impl TrackedObject {

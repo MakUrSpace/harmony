@@ -25,6 +25,8 @@ pub struct CellSelection {
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GlobalConfig {
     pub terrain: Vec<String>,
+    #[serde(default)]
+    pub structures: Vec<String>,
     pub groups: std::collections::HashMap<String, Vec<String>>,
 }
 
@@ -272,6 +274,7 @@ async fn handle_chat_socket(socket: WebSocket, state: Arc<AppState>, view_id: St
 fn spawn_camera_stream(
     cam_name: String,
     cam_path: String,
+    auth: Vec<String>,
     machine: Arc<tokio::sync::Mutex<HarmonyMachine>>,
     tx: tokio::sync::watch::Sender<Vec<u8>>,
     raw_tx: tokio::sync::watch::Sender<Vec<u8>>
@@ -284,7 +287,18 @@ fn spawn_camera_stream(
         
         let mut final_cam_path = cam_path.clone();
         if !final_cam_path.starts_with("http://") && !final_cam_path.starts_with("https://") && !final_cam_path.starts_with("rtsp://") && !final_cam_path.starts_with("/") && !final_cam_path.is_empty() {
-            final_cam_path = format!("rtsp://{}", final_cam_path);
+            if auth.len() == 2 {
+                let user = urlencoding::encode(&auth[0]);
+                let pass = urlencoding::encode(&auth[1]);
+                final_cam_path = format!("rtsp://{}:{}@{}", user, pass, final_cam_path);
+            } else {
+                final_cam_path = format!("rtsp://{}", final_cam_path);
+            }
+        } else if final_cam_path.starts_with("rtsp://") && auth.len() == 2 {
+            let user = urlencoding::encode(&auth[0]);
+            let pass = urlencoding::encode(&auth[1]);
+            let rest = final_cam_path.trim_start_matches("rtsp://");
+            final_cam_path = format!("rtsp://{}:{}@{}", user, pass, rest);
         }
 
         std::env::set_var("OPENCV_FFMPEG_CAPTURE_OPTIONS", "fflags;nobuffer|flags;low_delay");
@@ -528,7 +542,7 @@ async fn main() {
             let tx = cam.frame_tx.take();
             let raw_tx = cam.raw_frame_tx.take();
             if let (Some(tx), Some(raw_tx)) = (tx, raw_tx) {
-                spawn_camera_stream(cam_name.clone(), cam.cam_path.clone(), machine.clone(), tx, raw_tx);
+                spawn_camera_stream(cam_name.clone(), cam.cam_path.clone(), cam.auth.clone(), machine.clone(), tx, raw_tx);
             }
         }
     }
@@ -670,6 +684,7 @@ async fn main() {
         .route("/harmony/clear_all_published_selections", post(clear_all_published_selections))
         .route("/harmony/update_session_id", post(update_session_id))
         .route("/harmony/objects/:oid/rename", post(rename_object))
+        .route("/harmony/objects/:oid/height", post(update_object_height))
         .route("/observer", get(observer))
         .route("/configurator", get(configurator).post(configurator_save))
         .route("/configurator/delete_cam/:name", post(configurator_delete_cam))
@@ -713,6 +728,7 @@ async fn main() {
         .route("/harmony/clear_published_selection", post(clear_published_selection))
         .route("/harmony/update_session_id", post(update_session_id))
         .route("/harmony/objects/:oid/rename", post(rename_object))
+        .route("/harmony/objects/:oid/height", post(update_object_height))
         .route("/harmony/camWithChanges/:cam_name/:view_id", get(cam_with_changes_feed))
         .route("/compcon/", get(proxy_compcon_root))
         .route("/assets/*path", get(proxy_compcon_assets))
@@ -739,11 +755,36 @@ async fn main() {
         .route("/harmony/clear_published_selection", post(clear_published_selection))
         .route("/harmony/update_session_id", post(update_session_id))
         .route("/harmony/objects/:oid/rename", post(rename_object))
+        .route("/harmony/objects/:oid/height", post(update_object_height))
         .route("/harmony/camWithChanges/:cam_name/:view_id", get(cam_with_changes_feed))
         .route("/compcon/", get(proxy_compcon_root))
         .route("/assets/*path", get(proxy_compcon_assets))
         .route("/icons/*path", get(proxy_compcon_icons))
         .route("/manifest.webmanifest", get(proxy_compcon_manifest))
+        .nest_service("/static", ServeDir::new(static_dir.clone()))
+        .fallback_service(ServeDir::new(static_dir.clone()))
+        .with_state(state.clone());
+
+    let vr_app = Router::new()
+        .route("/", get(harmony_vr))
+        .route("/harmony_vr", get(harmony_vr))
+        .route("/harmony/chat_ws", axum::routing::get(chat_ws))
+        .route("/harmony/canvas_data/:view_id", get(canvas_data))
+        .route("/harmony/grid_polys/:cam_name", get(grid_polys))
+        .route("/harmony/select_pixel", post(select_pixel))
+        .route("/harmony/clear_selection", post(clear_selection))
+        .route("/harmony/objects", get(get_objects))
+        .route("/harmony/objects/:oid/snapshot/:cam_name", get(object_snapshot_feed))
+        .route("/harmony/objects/:oid/move", post(move_object))
+        .route("/harmony/objects/:oid/rotate", post(rotate_object))
+        .route("/harmony/set_overlays", post(set_overlays))
+        .route("/harmony/publish_selection", post(publish_selection))
+        .route("/harmony/clear_published_selection", post(clear_published_selection))
+        .route("/harmony/update_session_id", post(update_session_id))
+        .route("/harmony/objects/:oid/rename", post(rename_object))
+        .route("/harmony/objects/:oid/height", post(update_object_height))
+        .route("/harmony/camWithChanges/:cam_name/:view_id", get(cam_with_changes_feed))
+        .route("/video_feed/:cam_name", get(raw_video_feed))
         .nest_service("/static", ServeDir::new(static_dir.clone()))
         .fallback_service(ServeDir::new(static_dir))
         .with_state(state);
@@ -751,10 +792,12 @@ async fn main() {
     let admin_addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let user_addr = SocketAddr::from(([0, 0, 0, 0], 8081));
     let discord_addr = SocketAddr::from(([0, 0, 0, 0], 8082));
+    let vr_addr = SocketAddr::from(([0, 0, 0, 0], 8083));
     
     tracing::info!("Admin server listening on {}", admin_addr);
     tracing::info!("User server listening on {}", user_addr);
     tracing::info!("Discord server listening on {}", discord_addr);
+    tracing::info!("VR server listening on {}", vr_addr);
 
     tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(&admin_addr).await.unwrap();
@@ -764,6 +807,11 @@ async fn main() {
     tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(&discord_addr).await.unwrap();
         axum::serve(listener, discord_app).await.unwrap();
+    });
+
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(&vr_addr).await.unwrap();
+        axum::serve(listener, vr_app).await.unwrap();
     });
 
     let listener = tokio::net::TcpListener::bind(&user_addr).await.unwrap();
@@ -1077,7 +1125,16 @@ async fn new_camera_submit(
         cam_path = format!("rtsp://{}", cam_path);
     }
     
-    spawn_camera_stream(form.cam_name.clone(), cam_path.clone(), state.machine.clone(), tx, raw_tx);
+    let mut auth = vec![];
+    if let Some(auth_str) = form.cam_auth {
+        let parts: Vec<&str> = auth_str.split(',').collect();
+        if parts.len() == 2 {
+            auth.push(parts[0].trim().to_string());
+            auth.push(parts[1].trim().to_string());
+        }
+    }
+    
+    spawn_camera_stream(form.cam_name.clone(), cam_path.clone(), auth.clone(), state.machine.clone(), tx, raw_tx);
 
     let new_cam = harmony_core::observer::Camera {
         name: form.cam_name.clone(),
@@ -1085,7 +1142,7 @@ async fn new_camera_submit(
 
         active_zone: vec![],
         rotate: false,
-        auth: vec![],
+        auth: auth.clone(),
         image_buffer: vec![],
         reference_frame: None,
         frame_rx: Some(rx),
@@ -1423,6 +1480,35 @@ async fn harmony_user(
             let machine = state.machine.lock().await;
             machine.cc.embed_compcon
         },
+    };
+
+    let updated_jar = jar.add(Cookie::new("session_view_id", view_id.clone()));
+
+    match askama::Template::render(&template) {
+        Ok(html) => (updated_jar, Html(html)).into_response(),
+        Err(err) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to render template: {}", err),
+        ).into_response(),
+    }
+}
+
+#[derive(Template)]
+#[template(path = "harmony_vr.html")]
+struct HarmonyVrTemplate {
+    view_id: String,
+}
+
+async fn harmony_vr(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<HarmonyQuery>,
+    jar: CookieJar,
+) -> impl IntoResponse {
+    tracing::info!("Route hit: /harmony_vr");
+    let (view_id, _, _, _, _) = build_harmony_context(&state, &query, &jar).await;
+
+    let template = HarmonyVrTemplate {
+        view_id: view_id.clone(),
     };
 
     let updated_jar = jar.add(Cookie::new("session_view_id", view_id.clone()));
@@ -1960,6 +2046,7 @@ async fn get_objects(
             
             for obj in objects.iter_mut() {
                 let mut highest_tag = None;
+                let is_structure = global.structures.contains(&obj.oid);
                 let is_terrain = global.terrain.contains(&obj.oid);
                 let is_moveable = session.effective_moveable(&global).contains(&obj.oid);
                 let is_ally = session.effective_allies(&global).contains(&obj.oid);
@@ -1968,6 +2055,7 @@ async fn get_objects(
                 let is_selectable = is_moveable || is_ally || is_enemy || is_targetable;
                 
                 if is_selectable { highest_tag = Some("Selectable"); }
+                if is_structure { highest_tag = Some("Structure"); }
                 if is_terrain { highest_tag = Some("Terrain"); }
                 if is_targetable { highest_tag = Some("Targetable"); }
                 if is_enemy { highest_tag = Some("Enemies"); }
@@ -1987,7 +2075,7 @@ async fn get_objects(
     }
     
     let mut groups = Vec::new();
-    let order = ["Moveable", "Allies", "Enemies", "Targetable", "Terrain", "Selectable"];
+    let order = ["Moveable", "Allies", "Enemies", "Targetable", "Structure", "Terrain", "Selectable"];
     for name in order {
         if let Some(objs) = groups_map.remove(name) {
             groups.push(ObjectGroup { 
@@ -2059,6 +2147,7 @@ async fn define_object(
         oid: oid.clone(),
         object_type: "Selectable".to_string(),
         constituent_axials: vec![],
+        height: 1,
     });
     
     obj.constituent_axials = axials;
@@ -2815,11 +2904,14 @@ async fn update_world_config(
     Form(form): Form<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let mut global_terrain = Vec::new();
+    let mut global_structures = Vec::new();
     let mut global_groups: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
 
     for (k, v) in form {
         if let Some(oid) = k.strip_suffix("_terrain") {
             global_terrain.push(oid.to_string());
+        } else if let Some(oid) = k.strip_suffix("_structure") {
+            global_structures.push(oid.to_string());
         } else if k.starts_with("group_") {
             let oid = k.strip_prefix("group_").unwrap().to_string();
             for group in v.split(',') {
@@ -2833,8 +2925,20 @@ async fn update_world_config(
     
     {
         let mut global = state.global_config.lock().await;
-        global.terrain = global_terrain;
+        global.terrain = global_terrain.clone();
+        global.structures = global_structures;
         global.groups = global_groups;
+    }
+    
+    {
+        let mut machine = state.machine.lock().await;
+        for oid in &global_terrain {
+            if let Some(obj) = machine.memory.get_mut(oid) {
+                if obj.height == 1 {
+                    obj.height = 0;
+                }
+            }
+        }
     }
     axum::response::Redirect::to("/harmony/control").into_response()
 }
@@ -2960,6 +3064,24 @@ async fn rename_object(
     }
     
     (axum::http::StatusCode::OK, "Renamed").into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateHeightForm {
+    new_height: i32,
+}
+
+async fn update_object_height(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(oid): axum::extract::Path<String>,
+    axum::extract::Form(form): axum::extract::Form<UpdateHeightForm>,
+) -> impl IntoResponse {
+    let mut machine = state.machine.lock().await;
+    if let Some(obj) = machine.memory.get_mut(&oid) {
+        obj.height = form.new_height;
+    }
+    
+    (axum::http::StatusCode::OK, "Height updated").into_response()
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

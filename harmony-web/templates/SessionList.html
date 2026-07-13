@@ -65,6 +65,7 @@
                                 <tr>
                                     <th class="oid-col">Object ID</th>
                                     <th>Is Terrain?</th>
+                                    <th>Is Structure?</th>
                                     <th>Groups / Factions (Comma separated)</th>
                                 </tr>
                             </thead>
@@ -78,6 +79,7 @@
                                 <tr>
                                     <td class="oid-col">{{ obj.oid }}</td>
                                     <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_terrain" {% if global.terrain.contains(obj.oid) %}checked{% endif %}></td>
+                                    <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_structure" {% if global.structures.contains(obj.oid) %}checked{% endif %}></td>
                                     <td>
                                         <input type="text" class="form-control form-control-sm text-center mx-auto" style="max-width: 300px;" name="group_{{ obj.oid }}" value="{% match object_groups.get(obj.oid) %}{% when Some with (val) %}{{ val }}{% when None %}{% endmatch %}">
                                     </td>
