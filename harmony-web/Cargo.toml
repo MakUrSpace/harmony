@@ -22,3 +22,4 @@ axum-extra = { version = "0.9", features = ["cookie"] }
 opencv = "0.94.4"
 serenity = { version = "0.12", default-features = false, features = ["rustls_backend", "client", "gateway", "model"] }
 reqwest = { version = "0.12", features = ["json"] }
+urlencoding = "2.1.3"

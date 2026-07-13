@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Global Event Delegation for all previously inline handlers
     document.addEventListener('click', function(e) {
+        if (!e.target || typeof e.target.closest !== 'function') return;
         if (e.target.closest('#tab-harmony')) switchTab('harmony');
         if (e.target.closest('#tab-compcon')) switchTab('compcon');
         if (e.target.closest('.clearSelectionBtn')) clearSelection();
@@ -83,12 +84,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Collapse persistence logic
     if (!window._harmonyCollapseBound) {
         window._harmonyCollapseBound = true;
-        document.body.addEventListener('hidden.bs.collapse', function(e) {
+        document.body.addEventListener('hide.bs.collapse', function(e) {
             if (e.target.id && e.target.id.startsWith('collapse-')) {
                 sessionStorage.setItem('collapseState_' + e.target.id, 'hidden');
             }
         });
-        document.body.addEventListener('shown.bs.collapse', function(e) {
+        document.body.addEventListener('show.bs.collapse', function(e) {
             if (e.target.id && e.target.id.startsWith('collapse-')) {
                 sessionStorage.setItem('collapseState_' + e.target.id, 'shown');
             }

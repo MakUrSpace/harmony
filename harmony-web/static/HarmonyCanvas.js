@@ -1000,7 +1000,7 @@ function initHarmonyCanvas() {
 }
 
 document.addEventListener('click', function(e) {
-    if (e.target && e.target.classList.contains('cam-btn')) {
+    if (e.target && e.target.classList && e.target.classList.contains('cam-btn')) {
         gameWorldClick(e.target.getAttribute('data-camera'));
     }
 });
