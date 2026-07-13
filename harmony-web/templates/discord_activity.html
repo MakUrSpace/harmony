@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="/bootstrap.min.css">
     <script src="/bootstrap.min.js"></script>
     <script src="/htmx.min.js"></script>
+    <script src="/idiomorph-ext.js?v=1"></script>
     <script src="/discord_ui_events.js?v=4"></script>
 
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -129,7 +130,7 @@
             </div>
             <div class="row justify-content-center" align="center" style="min-width: 500px">
                 <div id="objectTable" class="row w-100 justify-content-center">
-                    <div id="objectFilterRetriever" hx-get="{{ harmony_url }}objects?isUserUI=true" hx-trigger="every 1s"
+                    <div id="objectFilterRetriever" hx-ext="morph" hx-swap="morph:innerHTML" hx-get="{{ harmony_url }}objects?isUserUI=true" hx-trigger="every 1s"
                         hx-include="#viewId" hx-target="#objectFilterRetriever"></div>
                 <!-- Inline script removed -->
                 </div>

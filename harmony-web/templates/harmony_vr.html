@@ -8,14 +8,17 @@
   <script>
     AFRAME.registerComponent("mjpeg-texture", {
       schema: {
-        image:  { type: "selector" },
-        canvas: { type: "selector" },
-        fps:    { type: "number", default: 15 }
+        image:   { type: "selector" },
+        canvas:  { type: "selector" },
+        camName: { type: "string", default: "" },
+        fps:     { type: "number", default: 15 }
       },
 
       init() {
         this.ctx = this.data.canvas.getContext("2d");
         this.lastFrameTime = 0;
+        // Start hidden, will show when image loads
+        this.el.setAttribute("visible", "false");
       },
 
       tick(time) {
@@ -32,6 +35,10 @@
           return;
         }
 
+        if (this.el.getAttribute("visible") === false) {
+          this.el.setAttribute("visible", "true");
+        }
+
         this.ctx.drawImage(
           image,
           0,
@@ -39,6 +46,10 @@
           canvas.width,
           canvas.height
         );
+
+        if (window.drawCameraOverlay && this.data.camName) {
+            window.drawCameraOverlay(this.ctx, this.data.camName, canvas.width, canvas.height);
+        }
 
         const mesh = this.el.getObject3D("mesh");
         const material = mesh?.material;

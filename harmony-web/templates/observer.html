@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/bootstrap.min.css">
     <script src="/static/bootstrap.min.js"></script>
     <script src="/static/htmx.min.js"></script>
+    <script src="/static/idiomorph-ext.js"></script>
 
     <style>
         table, th, td {
@@ -65,7 +66,7 @@
             <hr class="mt-2 mb-3">
             <div class="row justify-content-center">
                 <div id="objectInteractor" class="container">
-                    <div id="objectTable" hx-get="/objects" hx-trigger="every 1s"></div>
+                    <div id="objectTable" hx-ext="morph" hx-swap="morph:innerHTML" hx-get="/objects" hx-trigger="every 1s"></div>
                 </div>
             </div>
         </div>
