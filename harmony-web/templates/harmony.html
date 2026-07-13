@@ -78,7 +78,7 @@
                     <canvas id="GameWorldOverlay"
                         style="position:absolute; left:0; top:0; pointer-events:auto;"></canvas>
                 </div>
-                <script src="/HarmonyCanvas.js?v=3"></script>
+                <script src="/HarmonyCanvas.js?v=4"></script>
             </div>
             <div class="container justify-content-center mb-3" align="center">
                 <div class="d-inline-block border border-secondary p-2" style="border-radius: 8px;">
@@ -460,6 +460,59 @@
     </div>
 
 
+    <script>
+        function showToast(message, type = 'success') {
+            let toastContainer = document.getElementById('toast-container');
+            if (!toastContainer) {
+                toastContainer = document.createElement('div');
+                toastContainer.id = 'toast-container';
+                toastContainer.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+                toastContainer.style.zIndex = '1055';
+                document.body.appendChild(toastContainer);
+            }
+            
+            let toastEl = document.createElement('div');
+            toastEl.className = `toast align-items-center text-white bg-${type} border-0`;
+            toastEl.setAttribute('role', 'alert');
+            toastEl.setAttribute('aria-live', 'assertive');
+            toastEl.setAttribute('aria-atomic', 'true');
+            
+            toastEl.innerHTML = `
+              <div class="d-flex">
+                <div class="toast-body">
+                  ${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+              </div>
+            `;
+            
+            toastContainer.appendChild(toastEl);
+            let toast = new bootstrap.Toast(toastEl, { delay: 3000 });
+            toast.show();
+            
+            toastEl.addEventListener('hidden.bs.toast', () => {
+                toastEl.remove();
+            });
+        }
+
+        document.body.addEventListener('htmx:afterRequest', function(evt) {
+            if (evt.detail.successful) {
+                let path = evt.detail.pathInfo.requestPath;
+                if (path.endsWith('/save')) {
+                    showToast(evt.detail.xhr.responseText || 'Game saved successfully!');
+                }
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            let match = document.cookie.match(new RegExp('(^| )harmony_flash=([^;]+)'));
+            if (match) {
+                let msg = decodeURIComponent(match[2].replace(/\+/g, ' '));
+                showToast(msg);
+                document.cookie = "harmony_flash=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            }
+        });
+    </script>
 </body>
 
 </html>

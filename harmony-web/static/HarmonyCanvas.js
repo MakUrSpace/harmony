@@ -59,6 +59,21 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
 
 
 
+    function getDrawOffset(cName) {
+        let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : (window.harmonyCanvasData || (typeof data !== 'undefined' ? data : null));
+        let vmr = editorData && editorData.virtual_map_rect ? editorData.virtual_map_rect : [0,0,1200,1200];
+        let mappedCam = cName;
+        if (mappedCam && mappedCam.startsWith("RTSPCamera")) {
+            mappedCam = mappedCam.replace("RTSPCamera", "");
+        }
+        if (cName === 'VirtualMap') {
+            return { x: -vmr[0], y: -vmr[1] };
+        } else if (editorData && editorData.camera_rects && editorData.camera_rects[mappedCam]) {
+            return { x: -editorData.camera_rects[mappedCam][0], y: -editorData.camera_rects[mappedCam][1] };
+        }
+        return { x: 0, y: 0 };
+    }
+
     function drawPoly(poly, scale, fill = true, r = 255, g = 255, b = 0, customAlpha = null, strokeAlpha = 1) {
         if (!poly || poly.length === 0) return;
 
@@ -76,23 +91,10 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
             return;
         }
 
-        let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : (window.harmonyCanvasData || data);
-        let vmr = editorData && editorData.virtual_map_rect ? editorData.virtual_map_rect : [0,0,1200,1200];
         const currentCam = camName || (document.getElementById(`selectedCamera`) ? document.getElementById(`selectedCamera`).value : null);
-        let mappedCam = currentCam;
-        if (mappedCam && mappedCam.startsWith("RTSPCamera")) {
-            mappedCam = mappedCam.replace("RTSPCamera", "");
-        }
-
-        let offsetX = 0;
-        let offsetY = 0;
-        if (currentCam === 'VirtualMap') {
-            offsetX = -vmr[0];
-            offsetY = -vmr[1];
-        } else if (editorData && editorData.camera_rects && editorData.camera_rects[mappedCam]) {
-            offsetX = -editorData.camera_rects[mappedCam][0];
-            offsetY = -editorData.camera_rects[mappedCam][1];
-        }
+        const offset = getDrawOffset(currentCam);
+        let offsetX = offset.x;
+        let offsetY = offset.y;
 
         // Draw edges
         if (poly.length > 1) {
@@ -304,7 +306,8 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                             cx += pt.x;
                             cy += pt.y;
                         });
-                        firstCenterSingle = { x: cx / poly.length, y: cy / poly.length };
+                        const offset = getDrawOffset(currentCam);
+                        firstCenterSingle = { x: (cx / poly.length) + offset.x, y: (cy / poly.length) + offset.y };
                     }
                 }
             }
@@ -374,7 +377,8 @@ function initCanvasEditor(canvasId, data, onUpdate, onClick, camName) {
                                     cx += pt.x;
                                     cy += pt.y;
                                 });
-                                const currentCenter = { x: cx / poly.length, y: cy / poly.length };
+                                const offset = getDrawOffset(currentCam);
+                                const currentCenter = { x: (cx / poly.length) + offset.x, y: (cy / poly.length) + offset.y };
 
                                 ctx.beginPath();
                                 ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";

@@ -2243,6 +2243,8 @@ async fn reset_game(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     
     let mut headers = axum::http::HeaderMap::new();
     headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
+    let cookie_val = "harmony_flash=Game%20Reset; Path=/; Max-Age=10";
+    headers.insert(axum::http::header::SET_COOKIE, axum::http::HeaderValue::from_static(cookie_val));
     (axum::http::StatusCode::OK, headers, "Game Reset").into_response()
 }
 
@@ -3024,7 +3026,10 @@ async fn load_game(
                     
                     let mut headers = axum::http::HeaderMap::new();
                     headers.insert("HX-Refresh", axum::http::HeaderValue::from_static("true"));
-                    (axum::http::StatusCode::OK, headers, format!("Loaded {}", filename)).into_response()
+                    let msg = format!("Loaded {}", filename);
+                    let cookie_val = format!("harmony_flash={}; Path=/; Max-Age=10", urlencoding::encode(&msg));
+                    headers.insert(axum::http::header::SET_COOKIE, axum::http::HeaderValue::from_str(&cookie_val).unwrap());
+                    (axum::http::StatusCode::OK, headers, msg).into_response()
                 }
                 Err(e) => {
                     tracing::error!("Failed to deserialize game save {}: {}", filename, e);

@@ -49,4 +49,32 @@
 </div>
 {% endfor %}
 
-
+<script>
+    if (!window.objectCollapseStateTracked) {
+        window.expandedObjectGroups = new Set();
+        document.addEventListener('show.bs.collapse', function (e) {
+            if (e.target && e.target.classList && e.target.classList.contains('object-group-collapse')) {
+                window.expandedObjectGroups.add(e.target.id);
+            }
+        });
+        document.addEventListener('hide.bs.collapse', function (e) {
+            if (e.target && e.target.classList && e.target.classList.contains('object-group-collapse')) {
+                window.expandedObjectGroups.delete(e.target.id);
+            }
+        });
+        window.objectCollapseStateTracked = true;
+    }
+    
+    if (window.expandedObjectGroups) {
+        window.expandedObjectGroups.forEach(id => {
+            let el = document.getElementById(id);
+            if (el) {
+                el.classList.add('show');
+                let btn = document.querySelector(`[data-bs-target="#${id}"]`);
+                if (btn) {
+                    btn.setAttribute('aria-expanded', 'true');
+                }
+            }
+        });
+    }
+</script>
