@@ -246,7 +246,7 @@ window.drawCameraOverlay = function(ctx, camName, width, height) {
     const scaleX = width / nw;
     const scaleY = height / nh;
     
-    function drawPoly(poly, r, g, b, alpha=0.3) {
+    function drawPoly(poly, r, g, b, alpha=0.6) {
         if (!poly || poly.length === 0) return;
         
         let isMultiPoly = false;
@@ -309,7 +309,7 @@ function createCameras(cameras) {
     const container = document.getElementById('camera-windows');
     
     let activeCameras = cameras.filter(c => c !== "VirtualMap" && c !== "No Camera");
-    let xOffset = - (activeCameras.length * 2.0) / 2;
+    let xOffset = 0.5; // Start placing cameras to the right of the center since map is at -2.0
 
     activeCameras.forEach((camName, i) => {
         const safeName = camName.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -328,9 +328,9 @@ function createCameras(cameras) {
         assets.appendChild(canvas);
 
         const plane = document.createElement('a-plane');
-        plane.setAttribute('position', `${xOffset + i * 2.2} 0 0`);
-        plane.setAttribute('width', '2.0');
-        plane.setAttribute('height', '1.125'); // 16:9 ratio
+        plane.setAttribute('position', `${xOffset + i * 2.8} 0 0`);
+        plane.setAttribute('width', '2.66');
+        plane.setAttribute('height', '1.5'); // 16:9 ratio
         plane.setAttribute('material', `shader: flat; src: #canvas-${safeName}; side: double`);
         plane.setAttribute('mjpeg-texture', `image: #stream-${safeName}; canvas: #canvas-${safeName}; camName: ${camName}; fps: 15`);
         plane.setAttribute('visible', 'false');
