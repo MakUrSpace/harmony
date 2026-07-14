@@ -69,8 +69,10 @@ impl SessionConfig {
     pub fn effective_moveable(&self, global: &GlobalConfig) -> Vec<String> {
         let mut result = self.moveable_objects.clone();
         for group in &self.moveable_groups {
-            if let Some(oids) = global.groups.get(group) {
-                result.extend(oids.clone());
+            for (gname, oids) in &global.groups {
+                if gname.eq_ignore_ascii_case(group) {
+                    result.extend(oids.clone());
+                }
             }
         }
         result
@@ -79,8 +81,10 @@ impl SessionConfig {
     pub fn effective_allies(&self, global: &GlobalConfig) -> Vec<String> {
         let mut result = vec![];
         for group in &self.ally_groups {
-            if let Some(oids) = global.groups.get(group) {
-                result.extend(oids.clone());
+            for (gname, oids) in &global.groups {
+                if gname.eq_ignore_ascii_case(group) {
+                    result.extend(oids.clone());
+                }
             }
         }
         result
@@ -89,8 +93,10 @@ impl SessionConfig {
     pub fn effective_enemies(&self, global: &GlobalConfig) -> Vec<String> {
         let mut result = vec![];
         for group in &self.enemy_groups {
-            if let Some(oids) = global.groups.get(group) {
-                result.extend(oids.clone());
+            for (gname, oids) in &global.groups {
+                if gname.eq_ignore_ascii_case(group) {
+                    result.extend(oids.clone());
+                }
             }
         }
         result
@@ -99,8 +105,10 @@ impl SessionConfig {
     pub fn effective_targetable(&self, global: &GlobalConfig) -> Vec<String> {
         let mut result = vec![];
         for group in &self.targetable_groups {
-            if let Some(oids) = global.groups.get(group) {
-                result.extend(oids.clone());
+            for (gname, oids) in &global.groups {
+                if gname.eq_ignore_ascii_case(group) {
+                    result.extend(oids.clone());
+                }
             }
         }
         result
@@ -2795,7 +2803,9 @@ async fn session_list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 groups.push(gname.clone());
             }
         }
-        object_groups.insert(obj.oid.clone(), groups.join(","));
+        if !groups.is_empty() {
+            object_groups.insert(obj.oid.clone(), groups.join(", "));
+        }
     }
 
     let template = SessionListTemplate { 
@@ -2829,12 +2839,17 @@ async fn session_control_panel(
         
         let groups = state.global_config.lock().await.groups.clone();
         let mut object_groups = std::collections::HashMap::new();
-        for (group_name, oids) in groups {
-            for oid in oids {
-                object_groups.insert(oid, group_name.clone());
+        for obj in &objects {
+            let mut matched_groups = Vec::new();
+            for (gname, goids) in &groups {
+                if goids.contains(&obj.oid) {
+                    matched_groups.push(gname.clone());
+                }
+            }
+            if !matched_groups.is_empty() {
+                object_groups.insert(obj.oid.clone(), matched_groups.join(", "));
             }
         }
-        
         let template = ControlPanelTemplate {
             viewId: view_id_lower.clone(),
             config: config.clone(),

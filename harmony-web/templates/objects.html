@@ -18,7 +18,7 @@
             <!-- Left column: Object info -->
             <div class="d-flex flex-column pe-2" style="flex: 1;">
                 <div class="mb-1 border-bottom border-info border-1 pb-1 d-flex align-items-center justify-content-between">
-                    <h5 class="mb-0 me-2 text-truncate" style="max-width: 100px;" title="{{ obj.oid }}">{{ obj.oid }}</h5>
+                    <h5 class="mb-0 me-2 text-truncate" style="max-width: 250px;" title="{{ obj.oid }}">{{ obj.oid }}</h5>
                     {% if !is_user_ui || obj.object_type == "Moveable" %}
                     <form hx-post="/harmony/objects/{{ obj.oid }}/rename" hx-swap="none" class="d-flex m-0 p-0" style="flex:1; justify-content: flex-end;">
                         <input type="text" id="rename_input_{{ obj.oid }}" name="new_oid" class="form-control form-control-sm me-1" placeholder="Rename" style="max-width: 90px;" required>
@@ -73,19 +73,22 @@
                 window.expandedObjectGroups.delete(e.target.id);
             }
         });
-        window.objectCollapseStateTracked = true;
-    }
-    
-    if (window.expandedObjectGroups) {
-        window.expandedObjectGroups.forEach(id => {
-            let el = document.getElementById(id);
-            if (el) {
-                el.classList.add('show');
-                let btn = document.querySelector(`[data-bs-target="#${id}"]`);
-                if (btn) {
-                    btn.setAttribute('aria-expanded', 'true');
-                }
+
+        document.body.addEventListener('htmx:beforeSwap', function(evt) {
+            if ((evt.detail.target.id === 'objectFilterRetriever' || evt.detail.target.id === 'objectTable') && window.expandedObjectGroups) {
+                let html = evt.detail.serverResponse;
+                window.expandedObjectGroups.forEach(id => {
+                    let search = `class="collapse object-group-collapse" id="${id}"`;
+                    let replace = `class="collapse object-group-collapse show" id="${id}"`;
+                    html = html.split(search).join(replace);
+                    
+                    let btnRegex = new RegExp(`data-bs-target="#${id}"\\s*aria-expanded="false"`, 'g');
+                    html = html.replace(btnRegex, `data-bs-target="#${id}" aria-expanded="true"`);
+                });
+                evt.detail.serverResponse = html;
             }
         });
+
+        window.objectCollapseStateTracked = true;
     }
 </script>

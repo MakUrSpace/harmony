@@ -128,6 +128,7 @@
                                         <th>Pixel Y</th>
                                         <th>Axial Q</th>
                                         <th>Axial R</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody></tbody>
@@ -777,13 +778,17 @@
                 <td><input type="number" step="0.0001" class="form-control form-control-sm text-center" value="${py}" onchange="updateManualPoint('${camName}', ${i}, 'y', this.value)"></td>
                 <td><input type="number" class="form-control form-control-sm text-center" value="${q}" onchange="updateAxialPoint('${camName}', ${i}, 'q', this.value)"></td>
                 <td><input type="number" class="form-control form-control-sm text-center" value="${r}" onchange="updateAxialPoint('${camName}', ${i}, 'r', this.value)"></td>
+                <td>
+                    <button class="btn btn-sm btn-outline-success py-0 px-1" onclick="insertPoint('${camName}', ${i})" title="Insert point after this one">+</button>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deletePoint('${camName}', ${i})" title="Delete this point">&times;</button>
+                </td>
             `;
 
             if (i === points.length - 1) {
                 // Latest point
                 var latestTable = document.createElement('table');
                 latestTable.className = 'table table-sm table-bordered table-success text-center mb-0';
-                latestTable.innerHTML = `<thead><tr><th>Latest Point</th><th>Pixel X</th><th>Pixel Y</th><th>Axial Q</th><th>Axial R</th></tr></thead><tbody><tr>${rowHtml}</tr></tbody>`;
+                latestTable.innerHTML = `<thead><tr><th>Latest Point</th><th>Pixel X</th><th>Pixel Y</th><th>Axial Q</th><th>Axial R</th><th>Actions</th></tr></thead><tbody><tr>${rowHtml}</tr></tbody>`;
                 latestContainer.appendChild(latestTable);
             } else {
                 // Older points
@@ -808,6 +813,46 @@
         if (!isNaN(val)) {
             if (axis === 'q') axialPoints[camName][index][0] = val;
             if (axis === 'r') axialPoints[camName][index][1] = val;
+        }
+    }
+
+    function deletePoint(camName, index) {
+        if (manualPoints[camName] && manualPoints[camName].length > index) {
+            manualPoints[camName].splice(index, 1);
+            axialPoints[camName].splice(index, 1);
+            if (currentRow[camName] > 0) {
+                currentRow[camName]--;
+            }
+            drawPoints(camName);
+            renderActiveCalibrationTable(camName);
+            updateNextClickDisplay(camName);
+            showPendingFlag();
+        }
+    }
+
+    function insertPoint(camName, index) {
+        if (manualPoints[camName] && manualPoints[camName].length > index) {
+            var pt = manualPoints[camName][index];
+            var ax = axialPoints[camName][index];
+            var newPt = [pt[0], pt[1]];
+            var newAx = [ax[0], ax[1]];
+            
+            if (index + 1 < manualPoints[camName].length) {
+                var nextPt = manualPoints[camName][index + 1];
+                var nextAx = axialPoints[camName][index + 1];
+                newPt = [(pt[0] + nextPt[0]) / 2, (pt[1] + nextPt[1]) / 2];
+                newAx = [Math.round((ax[0] + nextAx[0]) / 2), Math.round((ax[1] + nextAx[1]) / 2)];
+            } else {
+                newPt = [pt[0] + 0.01, pt[1] + 0.01];
+            }
+            
+            manualPoints[camName].splice(index + 1, 0, newPt);
+            axialPoints[camName].splice(index + 1, 0, newAx);
+            currentRow[camName]++;
+            drawPoints(camName);
+            renderActiveCalibrationTable(camName);
+            updateNextClickDisplay(camName);
+            showPendingFlag();
         }
     }
 
