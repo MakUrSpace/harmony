@@ -3,7 +3,7 @@
 </div>
 
 {% for group in groups %}
-<div class="mb-3 object-group-container">
+<div class="mb-3 object-group-container" id="group-container-{{ group.id_name }}">
     <div class="d-flex justify-content-between align-items-center mb-2 px-2 py-1 bg-light border" 
          style="cursor: pointer; border-radius: 4px;"
          data-bs-toggle="collapse" 
@@ -14,7 +14,7 @@
     </div>
     <div class="collapse object-group-collapse" id="collapse-{{ group.id_name }}">
         {% for obj in group.objects %}
-        <div class="d-flex flex-row justify-content-between align-items-center mb-2 border border-secondary border-2 p-2" style="border-radius: 8px;">
+        <div class="d-flex flex-row justify-content-between align-items-center mb-2 border border-secondary border-2 p-2" style="border-radius: 8px;" id="object-row-{{ obj.oid }}">
             <!-- Left column: Object info -->
             <div class="d-flex flex-column pe-2" style="flex: 1;">
                 <div class="mb-1 border-bottom border-info border-1 pb-1 d-flex align-items-center justify-content-between">
