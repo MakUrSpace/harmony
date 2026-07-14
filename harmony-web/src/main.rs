@@ -1680,7 +1680,7 @@ async fn canvas_data(
     let mut terrain = global_config.terrain.clone();
     let mut moveable = session.effective_moveable(&global_config);
     let mut allies = session.effective_allies(&global_config);
-    let mut enemies = session.effective_enemies(&global_config);
+    let enemies = session.effective_enemies(&global_config);
     let mut targetable = enemies.clone();
     let mut selectable = Vec::new();
     
@@ -3333,6 +3333,7 @@ mod tests {
         let query = HarmonyQuery {
             view_id: Some("Test-Session-123".to_string()),
             mode: None,
+            new_session: None,
         };
         let jar = axum_extra::extract::CookieJar::new();
         let (vid_1, _, _, _, _) = build_harmony_context(&state, &query, &jar).await;
@@ -3344,6 +3345,7 @@ mod tests {
         let query_lower = HarmonyQuery {
             view_id: Some("test-session-123".to_string()),
             mode: None,
+            new_session: None,
         };
         let (vid_2, _, _, _, _) = build_harmony_context(&state, &query_lower, &jar).await;
 
