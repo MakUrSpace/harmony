@@ -30,7 +30,6 @@ let boardInitialized = false;
 
 // Store DOM elements of the grid hexes { "q,r": cylinderElement }
 let boardHexes = {};
-let objectLabels = {};
 
 // Overlay Colors (for 2D camera canvases)
 const overlayColors = {
@@ -121,14 +120,16 @@ async function initializeBoard(data) {
                 cylinder.setAttribute('class', 'clickable'); // Raycaster target
                 
                 cylinder.onclick = () => {
+                    const params = new URLSearchParams();
+                    params.append('view_id', VIEW_ID);
+                    params.append('cam_name', 'VirtualMap');
+                    params.append('x', q);
+                    params.append('y', r);
+
                     fetch('/harmony/select_pixel', {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            view_id: VIEW_ID,
-                            cam_name: 'VirtualMap',
-                            x: q, y: r
-                        })
+                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                        body: params.toString()
                     });
                 };
                 
@@ -185,53 +186,17 @@ function updateObjects(data) {
             cyl.setAttribute('color', info.color);
             cyl.setAttribute('height', height);
             cyl.setAttribute('position', `${cyl.getAttribute('position').x} ${height / 2} ${cyl.getAttribute('position').z}`);
-            cyl.setAttribute('material', 'opacity: 1; transparent: false');
+            cyl.setAttribute('material', 'shader: flat; opacity: 1; transparent: false');
         } else {
             // Empty hex
             cyl.setAttribute('color', hexColors.default);
             cyl.setAttribute('height', '3.0');
             cyl.setAttribute('position', `${cyl.getAttribute('position').x} 1.5 ${cyl.getAttribute('position').z}`);
-            cyl.setAttribute('material', 'opacity: 0.8; transparent: true');
+            cyl.setAttribute('material', 'shader: flat; opacity: 0.8; transparent: true');
         }
     }
     
-    // Handle Labels
-    for (const oid in objectLabels) {
-        if (!newObjectKeys.has(oid)) {
-            const lbl = objectLabels[oid];
-            if (lbl && lbl.parentNode) lbl.parentNode.removeChild(lbl);
-            delete objectLabels[oid];
-        }
-    }
-    
-    for (const oid in data.objects) {
-        const obj = data.objects[oid];
-        const axials = data.constituent_axials && data.constituent_axials[oid] ? data.constituent_axials[oid] : [];
-        if (axials.length === 0) continue;
-        
-        const key = `${axials[0][0]},${axials[0][1]}`;
-        const pos = axialToCartesian(axials[0][0], axials[0][1], HEX_SIZE);
-        
-        // Only show label if the hex is on the board
-        if (!boardHexes[key]) continue;
-        
-        let lbl = objectLabels[oid];
-        if (!lbl) {
-            lbl = document.createElement('a-text');
-            lbl.setAttribute('align', 'center');
-            lbl.setAttribute('scale', '10 10 10'); // Scaled up because board is scaled 0.05
-            lbl.setAttribute('color', 'white');
-            virtualBoard.appendChild(lbl);
-            objectLabels[oid] = lbl;
-        }
-        
-        lbl.setAttribute('value', obj.name || obj.object_type || oid);
-        const height = hexMap[key] && hexMap[key].isSelectable ? 3.5 : 4.0;
-        lbl.setAttribute('position', `${pos.x} ${height + 0.5} ${pos.z}`);
-        
-        lbl.setAttribute('rotation', '-90 0 0');
-    }
-    
+    // Labels removed per user request
     lastObjects = data.objects;
 }
 
@@ -265,7 +230,9 @@ window.drawCameraOverlay = function(ctx, camName, width, height) {
         ctx.beginPath();
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
         ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 1.0)`;
-        ctx.lineWidth = 2;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = `rgb(${r}, ${g}, ${b})`;
+        ctx.lineWidth = 4;
         
         const p0x = Array.isArray(poly[0]) ? poly[0][0] : poly[0].x;
         const p0y = Array.isArray(poly[0]) ? poly[0][1] : poly[0].y;
@@ -279,6 +246,9 @@ window.drawCameraOverlay = function(ctx, camName, width, height) {
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
+        
+        // Reset shadow for next draws (though we set it every time anyway)
+        ctx.shadowBlur = 0;
     }
     
     // Sort object IDs so drawing order is stable to prevent z-fighting / flashing
