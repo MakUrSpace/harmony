@@ -23,6 +23,11 @@
             <a href="/harmony/control" class="btn btn-secondary btn-sm me-2">&larr; Back to Session List</a>
             <a href="/harmony/canvas_data/{{ viewId }}" class="btn btn-info btn-sm me-4" target="_blank">View JSON Data</a>
             
+            <form hx-post="/harmony/control/{{ viewId }}/clone" hx-swap="none" class="d-flex align-items-center m-0 p-0 me-3">
+                <input type="text" name="new_view_id" class="form-control form-control-sm me-1" placeholder="New Session Name" style="max-width: 150px;" required>
+                <button type="submit" class="btn btn-sm btn-primary text-nowrap" onclick="setTimeout(() => { window.location.href='/harmony/control'; }, 300);">Clone Session</button>
+            </form>
+            
             <form hx-post="/harmony/save" hx-swap="none" class="d-flex align-items-center m-0 p-0 me-3">
                 <input type="text" name="game_name" class="form-control form-control-sm me-1" value="Harmony" style="max-width: 120px;" required>
                 <button type="submit" class="btn btn-sm btn-success" onclick="setTimeout(() => alert('Game Saved!'), 200);">Save Game</button>
@@ -85,7 +90,10 @@
                             {% else %}
                             {% for obj in objects %}
                             <tr>
-                                <td class="oid-col">{{ obj.oid }}</td>
+                                <td class="oid-col">
+                                    {{ obj.oid }}
+                                    <button type="button" class="btn btn-sm btn-outline-secondary ms-2" onclick="renameObject('{{ obj.oid }}')">Rename</button>
+                                </td>
                                 <td>{% match object_groups.get(obj.oid) %}{% when Some with (group) %}{{ group }}{% when None %}<span class="text-muted">None</span>{% endmatch %}</td>
                                 <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_moveable" {% if config.moveable_objects.contains(obj.oid) %}checked{% endif %}></td>
                             </tr>
@@ -101,6 +109,25 @@
             </div>
         </form>
     </div>
+    <script>
+        function renameObject(oid) {
+            var newName = prompt("Enter new name for object " + oid + ":", oid);
+            if (newName !== null && newName.trim() !== "" && newName !== oid) {
+                var fd = new FormData();
+                fd.append('new_oid', newName.trim());
+                fetch('/harmony/objects/' + encodeURIComponent(oid) + '/rename', { 
+                    method: 'POST', 
+                    body: fd 
+                }).then(function(resp) {
+                    if(resp.ok) {
+                        window.location.reload();
+                    } else {
+                        resp.text().then(t => alert("Error: " + t));
+                    }
+                });
+            }
+        }
+    </script>
 </body>
 
 </html>

@@ -1019,16 +1019,16 @@ function gameWorldClick(camNum) {
         const camField = document.getElementById(`selectedCamera`);
         camField.value = 'All';
 
-        let html = `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; height: 100%;">`;
+        let html = `<div style="display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(0, 1fr); gap: 10px; width: 100%; height: 70vh; max-height: 70vh;">`;
         const allCams = window.harmonyCanvasData && window.harmonyCanvasData.cameras ? window.harmonyCanvasData.cameras : ["VirtualMap"];
         for(let i=0; i < allCams.length; i++) {
             let cName = allCams[i];
             if (!cName || cName === "No Camera") continue;
             let safeName = cName.replace(/[^a-zA-Z0-9_-]/g, '_');
             let encodedCName = encodeURIComponent(cName);
-            html += `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 20px; overflow: hidden;" class="border border-3 border-info">
-                        <div style="position: relative; display: inline-block; max-width: 100%; max-height: 100%;">
-                            <img id="GameWorld_${safeName}" class="img-responsive" src="/harmony/camWithChanges/${encodedCName}/${view_id}" style="max-width: 100%; max-height: 100%; width: auto; height: auto; display: block;">
+            html += `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 20px; overflow: hidden; min-width: 0; min-height: 0;" class="border border-3 border-info">
+                        <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
+                            <img id="GameWorld_${safeName}" class="img-responsive" src="/harmony/camWithChanges/${encodedCName}/${view_id}" style="max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; object-fit: contain;">
                             <canvas id="GameWorldOverlay_${safeName}" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>
                         </div>
                      </div>`;

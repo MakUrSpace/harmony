@@ -341,8 +341,8 @@
                 var errEl = document.getElementById('renameModalError');
                 if (!newName || !_oid) return;
                 var fd = new FormData();
-                fd.append('objectName', newName);
-                fetch('/harmony/objects/' + encodeURIComponent(_oid), { method: 'POST', body: fd })
+                fd.append('new_oid', newName);
+                fetch('/harmony/objects/' + encodeURIComponent(_oid) + '/rename', { method: 'POST', body: fd })
                     .then(function (resp) {
                         if (resp.ok) {
                             _modal.hide();

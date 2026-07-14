@@ -47,10 +47,16 @@
                     {% endfor %}
                     {% endif %}
                 </ul>
-                <div class="mt-3">
-                    <a href="/harmony" class="btn btn-success" target="_blank">Open New Harmony Session</a>
-                    <a href="/harmony/control" class="btn btn-secondary">Refresh List</a>
-                    <button type="button" class="btn btn-warning float-end" hx-post="/harmony/clear_all_published_selections" hx-swap="none" onclick="alert('Cleared all published selections globally!')">Clear ALL Global Broadcasts</button>
+                <div class="mt-3 d-flex align-items-center flex-wrap gap-2">
+                    <form method="GET" action="/harmony" target="_blank" class="d-flex align-items-center m-0">
+                        <input type="hidden" name="new_session" value="true">
+                        <input type="text" name="viewId" class="form-control me-2" placeholder="Session Name (optional)" style="max-width: 200px;">
+                        <button type="submit" class="btn btn-success text-nowrap">Open New Harmony Session</button>
+                    </form>
+                    <a href="/harmony/control" class="btn btn-secondary text-nowrap">Refresh List</a>
+                    <div class="ms-auto">
+                        <button type="button" class="btn btn-warning text-nowrap" hx-post="/harmony/clear_all_published_selections" hx-swap="none" onclick="alert('Cleared all published selections globally!')">Clear ALL Global Broadcasts</button>
+                    </div>
                 </div>
             </div>
 
@@ -77,7 +83,10 @@
                                 {% else %}
                                 {% for obj in objects %}
                                 <tr>
-                                    <td class="oid-col">{{ obj.oid }}</td>
+                                    <td class="oid-col">
+                                        {{ obj.oid }}
+                                        <button type="button" class="btn btn-sm btn-outline-secondary ms-2" onclick="renameObject('{{ obj.oid }}')">Rename</button>
+                                    </td>
                                     <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_terrain" {% if global.terrain.contains(obj.oid) %}checked{% endif %}></td>
                                     <td><input type="checkbox" class="form-check-input" name="{{ obj.oid }}_structure" {% if global.structures.contains(obj.oid) %}checked{% endif %}></td>
                                     <td>
@@ -97,6 +106,25 @@
 
         </div>
     </div>
+    <script>
+        function renameObject(oid) {
+            var newName = prompt("Enter new name for object " + oid + ":", oid);
+            if (newName !== null && newName.trim() !== "" && newName !== oid) {
+                var fd = new FormData();
+                fd.append('new_oid', newName.trim());
+                fetch('/harmony/objects/' + encodeURIComponent(oid) + '/rename', { 
+                    method: 'POST', 
+                    body: fd 
+                }).then(function(resp) {
+                    if(resp.ok) {
+                        window.location.reload();
+                    } else {
+                        resp.text().then(t => alert("Error: " + t));
+                    }
+                });
+            }
+        }
+    </script>
 </body>
 
 </html>

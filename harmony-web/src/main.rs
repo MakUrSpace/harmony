@@ -666,6 +666,7 @@ async fn main() {
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
         .route("/harmony/select_pixel", post(select_pixel))
+        .route("/harmony/cycle_object", post(cycle_object))
         .route("/harmony/clear_selection", post(clear_selection))
         .route("/harmony/camWithChanges/:cam_name/:view_id", get(cam_with_changes_feed))
         .route("/video_feed/:cam_name", get(raw_video_feed))
@@ -686,6 +687,7 @@ async fn main() {
         .route("/harmony/control", get(session_list))
         .route("/harmony/control/:view_id", get(session_control_panel))
         .route("/harmony/control/:view_id/update", post(update_session_config))
+        .route("/harmony/control/:view_id/clone", post(clone_session))
         .route("/harmony/control/world/update", post(update_world_config))
         .route("/harmony/publish_selection", post(publish_selection))
         .route("/harmony/clear_published_selection", post(clear_published_selection))
@@ -726,6 +728,7 @@ async fn main() {
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
         .route("/harmony/select_pixel", post(select_pixel))
+        .route("/harmony/cycle_object", post(cycle_object))
         .route("/harmony/clear_selection", post(clear_selection))
         .route("/harmony/objects", get(get_objects))
         .route("/harmony/objects/:oid/snapshot/:cam_name", get(object_snapshot_feed))
@@ -753,6 +756,7 @@ async fn main() {
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
         .route("/harmony/select_pixel", post(select_pixel))
+        .route("/harmony/cycle_object", post(cycle_object))
         .route("/harmony/clear_selection", post(clear_selection))
         .route("/harmony/objects", get(get_objects))
         .route("/harmony/objects/:oid/snapshot/:cam_name", get(object_snapshot_feed))
@@ -780,6 +784,7 @@ async fn main() {
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
         .route("/harmony/select_pixel", post(select_pixel))
+        .route("/harmony/cycle_object", post(cycle_object))
         .route("/harmony/clear_selection", post(clear_selection))
         .route("/harmony/objects", get(get_objects))
         .route("/harmony/objects/:oid/snapshot/:cam_name", get(object_snapshot_feed))
@@ -1209,6 +1214,7 @@ pub struct HarmonyQuery {
     #[serde(rename = "viewId")]
     view_id: Option<String>,
     mode: Option<String>,
+    new_session: Option<String>,
 }
 
 #[derive(Template)]
@@ -1272,8 +1278,12 @@ async fn build_harmony_context(
     query: &HarmonyQuery,
     jar: &CookieJar,
 ) -> (String, String, String, String, String) {
-    let mut view_id = query.view_id.clone().or_else(|| {
-        jar.get("session_view_id").map(|c| c.value().to_string())
+    let mut view_id = query.view_id.clone().filter(|s| !s.trim().is_empty()).or_else(|| {
+        if query.new_session.as_deref() == Some("true") {
+            None
+        } else {
+            jar.get("session_view_id").map(|c| c.value().to_string())
+        }
     }).map(|s| s.trim().to_lowercase());
 
     if let Some(vid) = &view_id {
@@ -1913,8 +1923,39 @@ pub fn render_interactor(session: &SessionConfig, machine: &harmony_core::machin
     }
     
     interactor_html.push_str("</ul>");
-    interactor_html.push_str(&format!("<p class='mb-1'>Object: {}</p>", 
-        session.selected_oid.as_deref().unwrap_or("None")));
+    let mut objects_at_first_cell = Vec::new();
+    if let Some(first_cell) = session.selection.first_cell {
+        for (oid, obj) in &machine.memory {
+            if obj.constituent_axials.contains(&first_cell) {
+                objects_at_first_cell.push(oid.clone());
+            }
+        }
+        objects_at_first_cell.sort();
+    }
+    
+    if objects_at_first_cell.len() > 1 {
+        let current_idx = session.selected_oid.as_ref()
+            .and_then(|oid| objects_at_first_cell.iter().position(|id| id == oid))
+            .unwrap_or(0);
+        interactor_html.push_str(&format!(
+            "<div class='d-flex align-items-center mb-1'>
+                <p class='mb-0 me-2'>Object: {} ({}/{})</p>
+                <form hx-post='/harmony/cycle_object' hx-target='#interactor' class='m-0 p-0'>
+                    <input type='hidden' name='viewId' value='{}'>
+                    <input type='hidden' name='isAdmin' value='{}'>
+                    <button type='submit' class='btn btn-sm btn-outline-secondary py-0 px-2' title='Cycle to next object in this cell'>Cycle</button>
+                </form>
+            </div>",
+            session.selected_oid.as_deref().unwrap_or("None"),
+            current_idx + 1,
+            objects_at_first_cell.len(),
+            view_id,
+            if is_admin { "true" } else { "false" }
+        ));
+    } else {
+        interactor_html.push_str(&format!("<p class='mb-1'>Object: {}</p>", 
+            session.selected_oid.as_deref().unwrap_or("None")));
+    }
         
     if let Some(_first_cell) = session.selection.first_cell {
         if let Some(oid) = &session.selected_oid {
@@ -2002,6 +2043,51 @@ async fn clear_selection(
         session.selected_oid = None;
     }
     axum::response::Html("".to_string())
+}
+
+#[derive(serde::Deserialize)]
+struct CycleObjectPayload {
+    viewId: String,
+    isAdmin: Option<String>,
+}
+
+async fn cycle_object(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Form(payload): axum::extract::Form<CycleObjectPayload>,
+) -> impl IntoResponse {
+    let view_id_lower = payload.viewId.trim().to_lowercase();
+    tracing::info!("Route hit: /harmony/cycle_object by view_id {}", view_id_lower);
+    
+    let is_admin = payload.isAdmin.as_deref() == Some("true");
+    
+    let html = {
+        let machine = state.machine.lock().await;
+        let mut sessions = state.sessions.lock().await;
+        let session = sessions.entry(view_id_lower.clone()).or_insert_with(SessionConfig::default);
+        
+        if let Some(first_cell) = session.selection.first_cell {
+            let mut objects_at_cell = Vec::new();
+            for (oid, obj) in &machine.memory {
+                if obj.constituent_axials.contains(&first_cell) {
+                    objects_at_cell.push(oid.clone());
+                }
+            }
+            objects_at_cell.sort();
+            
+            if !objects_at_cell.is_empty() {
+                let current_idx = session.selected_oid.as_ref()
+                    .and_then(|oid| objects_at_cell.iter().position(|id| id == oid))
+                    .unwrap_or(objects_at_cell.len() - 1);
+                    
+                let next_idx = (current_idx + 1) % objects_at_cell.len();
+                session.selected_oid = Some(objects_at_cell[next_idx].clone());
+            }
+        }
+        
+        let global = state.global_config.lock().await;
+        render_interactor(&session, &machine, &global, &payload.viewId, is_admin)
+    };
+    axum::response::Html(html)
 }
 
 
@@ -2817,6 +2903,35 @@ async fn session_list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match template.render() {
         Ok(html) => axum::response::Html(html).into_response(),
         Err(err) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Template error: {}", err)).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CloneSessionRequest {
+    new_view_id: String,
+}
+
+async fn clone_session(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(view_id): axum::extract::Path<String>,
+    axum::extract::Form(payload): axum::extract::Form<CloneSessionRequest>,
+) -> impl IntoResponse {
+    let old_id = view_id.trim().to_lowercase();
+    let new_id = payload.new_view_id.trim().to_lowercase();
+    if new_id.is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST, "New session name cannot be empty").into_response();
+    }
+    
+    let mut sessions = state.sessions.lock().await;
+    if let Some(old_config) = sessions.get(&old_id) {
+        let mut new_config = old_config.clone();
+        new_config.selection = CellSelection::default();
+        new_config.selected_oid = None;
+        new_config.published_selection = None;
+        sessions.insert(new_id, new_config);
+        (axum::http::StatusCode::OK, "Cloned").into_response()
+    } else {
+        (axum::http::StatusCode::NOT_FOUND, "Original session not found").into_response()
     }
 }
 

@@ -1395,7 +1395,7 @@ with open(f"{os.path.dirname(__file__)}/harmony_templates/TrackedObjectRow.html"
     _TRACKED_OBJECT_ROW_TEMPLATE = f.read()
 
 
-def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
+def captureToChangeRow(capture, color=None, border_class="", is_moveable=False, viewId=None):
     cm = _get_cm()
     moveDistance = cm.cc.trackedObjectLastDistance(capture)
     try:
@@ -1407,6 +1407,7 @@ def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
     state_key = (
         capture.oid,
         color,
+        border_class,
         tuple(
             (camName, tuple(change.clipBox) if getattr(change, "clipBox", None) is not None else None)
             for camName, change in capture.changeSet.items()
@@ -1448,6 +1449,7 @@ def captureToChangeRow(capture, color=None, is_moveable=False, viewId=None):
     changeRow = (
         _TRACKED_OBJECT_ROW_TEMPLATE.replace("{objectName}", capture.oid)
         .replace("{safeObjectName}", safe_name)
+        .replace("{borderType}", border_class)
         .replace(
             "{realCenter}",
             ", ".join([f"{dim:6.0f}" for dim in cm.cc.changeSetToAxialCoord(capture)]),
@@ -1478,9 +1480,19 @@ def buildObjectTable(viewId=None, is_admin=False):
             ("terrain", session.terrain),
         ]
 
+        GROUP_BORDER_CLASSES = {
+            "moveable": "border-primary border-2",
+            "allies": "border-success border-2",
+            "enemies": "border-danger border-2",
+            "targetable": "border-warning border-2",
+            "terrain": "border-secondary border-2",
+            "selectable": "border-info border-2",
+        }
+
         for group_name, oids in groups:
             group_rows = []
             color = GROUP_COLORS.get(group_name)
+            border_class = GROUP_BORDER_CLASSES.get(group_name, "")
             is_moveable_group = (group_name == "moveable") or is_admin
             for oid in oids:
                 if oid not in seen_oids:
@@ -1489,7 +1501,8 @@ def buildObjectTable(viewId=None, is_admin=False):
                             group_rows.append(
                                 captureToChangeRow(
                                     capture,
-                                    color,
+                                    color=color,
+                                    border_class=border_class,
                                     is_moveable=is_moveable_group,
                                     viewId=viewId,
                                 )
@@ -1515,7 +1528,8 @@ def buildObjectTable(viewId=None, is_admin=False):
             selectable_rows.append(
                 captureToChangeRow(
                     capture,
-                    selectable_color,
+                    color=selectable_color,
+                    border_class="border-info border-2",
                     is_moveable=is_admin,
                     viewId=viewId,
                 )
