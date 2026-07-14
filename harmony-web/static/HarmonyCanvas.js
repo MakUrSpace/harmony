@@ -1027,8 +1027,8 @@ function gameWorldClick(camNum) {
             let safeName = cName.replace(/[^a-zA-Z0-9_-]/g, '_');
             let encodedCName = encodeURIComponent(cName);
             html += `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 20px; overflow: hidden; min-width: 0; min-height: 0;" class="border border-3 border-info">
-                        <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
-                            <img id="GameWorld_${safeName}" class="img-responsive" src="/harmony/camWithChanges/${encodedCName}/${view_id}" style="max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; object-fit: contain;">
+                        <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; min-width: 0; min-height: 0;">
+                            <img id="GameWorld_${safeName}" class="img-responsive" src="/harmony/camWithChanges/${encodedCName}/${view_id}" style="width: 100%; height: 100%; display: block; object-fit: contain;">
                             <canvas id="GameWorldOverlay_${safeName}" style="position:absolute; left:0; top:0; pointer-events:auto; display: block;"></canvas>
                         </div>
                      </div>`;
