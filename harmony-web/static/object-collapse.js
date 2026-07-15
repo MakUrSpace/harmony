@@ -11,7 +11,7 @@ if (!window.objectCollapseStateTracked) {
         }
     });
 
-    document.body.addEventListener('htmx:beforeSwap', function(evt) {
+    document.addEventListener('htmx:beforeSwap', function(evt) {
         if ((evt.detail.target.id === 'objectFilterRetriever' || evt.detail.target.id === 'objectTable') && window.expandedObjectGroups) {
             let html = evt.detail.serverResponse;
             window.expandedObjectGroups.forEach(id => {
