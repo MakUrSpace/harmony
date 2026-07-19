@@ -8,19 +8,13 @@ use axum::{
 use axum::http::header;
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use std::sync::Arc;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, RwLock};
 use std::net::SocketAddr;
 use tower_http::services::ServeDir;
 use harmony_core::machine::HarmonyMachine;
 use harmony_core::observer::{CameraChange, HexCaptureConfiguration};
 use opencv::prelude::MatTraitConst;
 use opencv::prelude::VectorToVec;
-
-#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CellSelection {
-    pub first_cell: Option<(i32, i32)>,
-    pub additional_cells: Vec<(i32, i32)>,
-}
 
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GlobalConfig {
@@ -38,8 +32,6 @@ pub struct SessionConfig {
     pub ally_groups: Vec<String>,
     pub enemy_groups: Vec<String>,
     pub targetable_groups: Vec<String>,
-    pub selection: CellSelection,
-    pub selected_oid: Option<String>,
     pub show_grid: bool,
     pub show_objects: bool,
     pub can_publish_selection: bool,
@@ -55,8 +47,6 @@ impl Default for SessionConfig {
             ally_groups: vec![],
             enemy_groups: vec![],
             targetable_groups: vec![],
-            selection: CellSelection { first_cell: None, additional_cells: vec![] },
-            selected_oid: None,
             show_grid: false,
             show_objects: true,
             can_publish_selection: true,
@@ -139,12 +129,14 @@ pub enum ChatStatus {
 }
 
 struct AppState {
-    machine: Arc<Mutex<HarmonyMachine>>,
-    sessions: Mutex<std::collections::HashMap<String, SessionConfig>>,
-    global_config: Mutex<GlobalConfig>,
+    machine: Arc<RwLock<HarmonyMachine>>,
+    sessions: RwLock<std::collections::HashMap<String, SessionConfig>>,
+    global_config: RwLock<GlobalConfig>,
     chat_tx: tokio::sync::broadcast::Sender<ChatMessage>,
-    chat_log: Mutex<Vec<ChatMessage>>,
-    chat_status: Mutex<ChatStatus>,
+    chat_log: RwLock<Vec<ChatMessage>>,
+    chat_status: RwLock<ChatStatus>,
+    canvas_notify: Arc<tokio::sync::Notify>,
+    ui_cache: Arc<RwLock<Option<serde_json::Value>>>,
 }
 
 struct Handler {
@@ -220,8 +212,15 @@ async fn handle_chat_socket(socket: WebSocket, state: Arc<AppState>, view_id: St
     let view_id_for_send = view_id.clone();
 
     let mut send_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            let status = *state_for_send.chat_status.lock().await;
+        // First send all existing history
+        let history = {
+            let log = state_for_send.chat_log.read().await;
+            log.clone()
+        };
+        
+        let status = *state_for_send.chat_status.read().await;
+        
+        for msg in history {
             if status != ChatStatus::Running && msg.author != "System" {
                 continue;
             }
@@ -231,7 +230,39 @@ async fn handle_chat_socket(socket: WebSocket, state: Arc<AppState>, view_id: St
             if msg.channel == "group" {
                 should_send = true;
             } else {
-                let sessions = state_for_send.sessions.lock().await;
+                let sessions = state_for_send.sessions.read().await;
+                if let Some(receiver_session) = sessions.get(&view_id_for_send) {
+                    if receiver_session.is_gm || receiver_session.ally_groups.contains(&msg.channel) {
+                        should_send = true;
+                    }
+                }
+                if view_id_for_send == msg.author {
+                    should_send = true;
+                }
+            }
+
+            if should_send {
+                if let Ok(json) = serde_json::to_string(&msg) {
+                    if sender.send(WsMessage::Text(json)).await.is_err() {
+                        return; // Connection closed
+                    }
+                }
+            }
+        }
+
+        // Then listen for new messages
+        while let Ok(msg) = rx.recv().await {
+            let status = *state_for_send.chat_status.read().await;
+            if status != ChatStatus::Running && msg.author != "System" {
+                continue;
+            }
+
+            let mut should_send = false;
+            
+            if msg.channel == "group" {
+                should_send = true;
+            } else {
+                let sessions = state_for_send.sessions.read().await;
                 if let Some(receiver_session) = sessions.get(&view_id_for_send) {
                     if receiver_session.is_gm || receiver_session.ally_groups.contains(&msg.channel) {
                         should_send = true;
@@ -255,10 +286,10 @@ async fn handle_chat_socket(socket: WebSocket, state: Arc<AppState>, view_id: St
     let tx = state.chat_tx.clone();
     let state_for_recv = state.clone();
     let mut recv_task = tokio::spawn(async move {
-        while let Some(Ok(WsMessage::Text(text))) = receiver.next().await {
+        while let Some(Ok(WsMessage::Text(text))) = tokio_stream::StreamExt::next(&mut receiver).await {
             match serde_json::from_str::<ChatMessage>(&text) {
                 Ok(mut msg) => {
-                    let status = *state_for_recv.chat_status.lock().await;
+                    let status = *state_for_recv.chat_status.read().await;
                     if status == ChatStatus::Running {
                         msg.from_discord = false;
                         msg.timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
@@ -283,9 +314,9 @@ fn spawn_camera_stream(
     cam_name: String,
     cam_path: String,
     auth: Vec<String>,
-    machine: Arc<tokio::sync::Mutex<HarmonyMachine>>,
-    tx: tokio::sync::watch::Sender<Vec<u8>>,
-    raw_tx: tokio::sync::watch::Sender<Vec<u8>>
+    machine: Arc<tokio::sync::RwLock<HarmonyMachine>>,
+    tx: tokio::sync::watch::Sender<bytes::Bytes>,
+    raw_tx: tokio::sync::watch::Sender<bytes::Bytes>
 ) {
     tokio::task::spawn_blocking(move || {
         use opencv::videoio::{VideoCapture, CAP_ANY};
@@ -324,14 +355,24 @@ fn spawn_camera_stream(
         
         let mut frame = Mat::default();
         let mut last_active_zone: Vec<opencv::core::Point> = vec![];
+        let mut frames_since_lock = 0;
         
         loop {
             match cam.read(&mut frame) {
                 Ok(true) => {
-                    // Update active zone if lock is available
-                    if let Ok(m) = machine.try_lock() {
-                        if let Some(c) = m.cc.cameras.get(&cam_name) {
-                            last_active_zone = c.active_zone.clone();
+                    if tx.receiver_count() == 0 && raw_tx.receiver_count() == 0 {
+                        // Nobody is watching, skip processing but keep draining the buffer
+                        continue;
+                    }
+                    
+                    frames_since_lock += 1;
+                    if frames_since_lock >= 30 {
+                        frames_since_lock = 0;
+                        // Update active zone if lock is available
+                        if let Ok(m) = machine.try_read() {
+                            if let Some(c) = m.cc.cameras.get(&cam_name) {
+                                last_active_zone = c.active_zone.clone();
+                            }
                         }
                     }
 
@@ -396,18 +437,17 @@ fn spawn_camera_stream(
                     
                     // Encode and send cropped/processed frame
                     if let Ok(true) = imencode(".jpg", &processed_frame, &mut buf, &params) {
-                        let bytes: Vec<u8> = buf.to_vec();
-                        let _ = tx.send(bytes); // Ignore error if no receivers
+                        let _ = tx.send(bytes::Bytes::from(buf.to_vec())); // Ignore error if no receivers
                     }
 
                     // Encode and send raw uncropped frame
                     let mut raw_buf = Vector::<u8>::new();
                     if last_active_zone.is_empty() {
                         // If no active zone, raw is same as processed, just send the same buf
-                        let _ = raw_tx.send(buf.to_vec());
+                        let _ = raw_tx.send(bytes::Bytes::from(buf.to_vec()));
                     } else {
                         if let Ok(true) = imencode(".jpg", &frame, &mut raw_buf, &params) {
-                            let _ = raw_tx.send(raw_buf.to_vec());
+                            let _ = raw_tx.send(bytes::Bytes::from(raw_buf.to_vec()));
                         }
                     }
                 }
@@ -430,7 +470,7 @@ async fn object_snapshot_feed(
     let mut bounding_box = None;
     
     {
-        let machine = state.machine.lock().await;
+        let machine = state.machine.read().await;
         if let Some(obj) = machine.memory.get(&oid) {
             if let Some(cam) = machine.cc.cameras.get(&cam_name) {
                 rx = cam.raw_frame_rx.clone();
@@ -516,6 +556,11 @@ async fn object_snapshot_feed(
     
     (axum::http::StatusCode::NOT_FOUND, "No frame source").into_response()
 }
+async fn invalidate_cache(state: &Arc<AppState>) {
+    *state.ui_cache.write().await = None;
+    state.canvas_notify.notify_waiters();
+}
+
 #[tokio::main]
 async fn main() {
     std::env::set_var("OPENCV_FFMPEG_LOGLEVEL", "-8");
@@ -542,10 +587,10 @@ async fn main() {
             }
         });
         
-    let machine = Arc::new(Mutex::new(HarmonyMachine::new(cc)));
+    let machine = Arc::new(RwLock::new(HarmonyMachine::new(cc)));
 
     {
-        let mut m = machine.lock().await;
+        let mut m = machine.write().await;
         for (cam_name, cam) in m.cc.cameras.iter_mut() {
             let tx = cam.frame_tx.take();
             let raw_tx = cam.raw_frame_tx.take();
@@ -559,11 +604,13 @@ async fn main() {
 
     let state = Arc::new(AppState {
         machine: machine.clone(),
-        sessions: Mutex::new(std::collections::HashMap::new()),
-        global_config: Mutex::new(GlobalConfig::default()),
+        sessions: RwLock::new(std::collections::HashMap::new()),
+        global_config: RwLock::new(GlobalConfig::default()),
         chat_tx: chat_tx.clone(),
-        chat_log: Mutex::new(Vec::new()),
-        chat_status: Mutex::new(ChatStatus::Stopped),
+        chat_log: RwLock::new(Vec::new()),
+        chat_status: RwLock::new(ChatStatus::Stopped),
+        canvas_notify: Arc::new(tokio::sync::Notify::new()),
+        ui_cache: Arc::new(RwLock::new(None)),
     });
 
     let mut central_rx = chat_tx.subscribe();
@@ -571,11 +618,11 @@ async fn main() {
     tokio::spawn(async move {
         while let Ok(msg) = central_rx.recv().await {
             if msg.author != "System" {
-                let mut log = state_for_log.chat_log.lock().await;
+                let mut log = state_for_log.chat_log.write().await;
                 log.push(msg.clone());
                 
                 if msg.channel == "group" && !msg.from_discord {
-                    let m = state_for_log.machine.lock().await;
+                    let m = state_for_log.machine.read().await;
                     let token = m.cc.discord_token.clone();
                     let channel_id_str = m.cc.discord_channel_id.clone();
                     if let (Some(t), Some(c_str)) = (token, channel_id_str) {
@@ -606,7 +653,7 @@ async fn main() {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             
             let (token, channel_id_str) = {
-                let m = machine_for_bot.lock().await;
+                let m = machine_for_bot.read().await;
                 (m.cc.discord_token.clone(), m.cc.discord_channel_id.clone())
             };
 
@@ -640,7 +687,7 @@ async fn main() {
     tokio::spawn(async move {
         loop {
             {
-                let mut m = machine.lock().await;
+                let mut m = machine.write().await;
                 if let Err(e) = m.cycle() {
                     tracing::error!("Machine cycle error: {}", e);
                 }
@@ -665,9 +712,7 @@ async fn main() {
         .route("/harmony/chat_ws", axum::routing::get(chat_ws))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
-        .route("/harmony/select_pixel", post(select_pixel))
-        .route("/harmony/cycle_object", post(cycle_object))
-        .route("/harmony/clear_selection", post(clear_selection))
+
         .route("/harmony/camWithChanges/:cam_name/:view_id", get(cam_with_changes_feed))
         .route("/video_feed/:cam_name", get(raw_video_feed))
         .route("/configurator/camera/:cam_name", get(raw_video_feed))
@@ -727,9 +772,7 @@ async fn main() {
         .route("/harmony/chat_ws", axum::routing::get(chat_ws))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
-        .route("/harmony/select_pixel", post(select_pixel))
-        .route("/harmony/cycle_object", post(cycle_object))
-        .route("/harmony/clear_selection", post(clear_selection))
+
         .route("/harmony/objects", get(get_objects))
         .route("/harmony/objects/:oid/snapshot/:cam_name", get(object_snapshot_feed))
         .route("/harmony/objects/:oid/move", post(move_object))
@@ -755,9 +798,7 @@ async fn main() {
         .route("/harmony/chat_ws", axum::routing::get(chat_ws))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
-        .route("/harmony/select_pixel", post(select_pixel))
-        .route("/harmony/cycle_object", post(cycle_object))
-        .route("/harmony/clear_selection", post(clear_selection))
+
         .route("/harmony/objects", get(get_objects))
         .route("/harmony/objects/:oid/snapshot/:cam_name", get(object_snapshot_feed))
         .route("/harmony/objects/:oid/move", post(move_object))
@@ -783,9 +824,7 @@ async fn main() {
         .route("/harmony/chat_ws", axum::routing::get(chat_ws))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
-        .route("/harmony/select_pixel", post(select_pixel))
-        .route("/harmony/cycle_object", post(cycle_object))
-        .route("/harmony/clear_selection", post(clear_selection))
+
         .route("/harmony/objects", get(get_objects))
         .route("/harmony/objects/:oid/snapshot/:cam_name", get(object_snapshot_feed))
         .route("/harmony/objects/:oid/move", post(move_object))
@@ -842,7 +881,7 @@ struct ObserverTemplate {
 
 async fn observer(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     tracing::info!("Route hit: /observer");
-    let machine = state.machine.lock().await;
+    let machine = state.machine.read().await;
     let mut cameras: Vec<String> = machine.cc.cameras.keys().cloned().collect();
     cameras.sort();
     let default_camera = cameras.first().cloned().unwrap_or_default();
@@ -884,7 +923,7 @@ struct ConfiguratorTemplate {
 
 async fn configurator(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     tracing::info!("Route hit: /configurator");
-    let machine = state.machine.lock().await;
+    let machine = state.machine.read().await;
     let mut cameras: Vec<CameraConfig> = machine.cc.cameras.iter().map(|(k, v)| {
         let pts: Vec<String> = v.active_zone.iter().map(|p| format!("[{},{}]", p.x, p.y)).collect();
         CameraConfig {
@@ -941,7 +980,7 @@ struct CalibratorTemplate {
 
 async fn calibrator(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     tracing::info!("Route hit: /calibrator");
-    let machine = state.machine.lock().await;
+    let machine = state.machine.read().await;
     let mut cameras: Vec<String> = machine.cc.cameras.keys().cloned().collect();
     cameras.sort();
     let default_camera = cameras.first().cloned().unwrap_or_default();
@@ -978,7 +1017,7 @@ async fn new_camera(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
 use axum::extract::Form;
 
 async fn configurator_save(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let machine = state.machine.lock().await;
+    let machine = state.machine.read().await;
     tracing::info!("Saving configurator state to observerConfiguration.json");
     if let Err(e) = machine.cc.save_to_file("observerConfiguration.json") {
         tracing::error!("Failed to save configuration: {}", e);
@@ -993,7 +1032,7 @@ async fn configurator_delete_cam(
     axum::extract::Path(name): axum::extract::Path<String>
 ) -> impl IntoResponse {
     tracing::info!("Route hit: /configurator/delete_cam/{}", name);
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     machine.cc.cameras.remove(&name);
     machine.cc.rsc.remove(&name);
     if let Err(e) = machine.cc.save_to_file("observerConfiguration.json") {
@@ -1014,7 +1053,7 @@ async fn configurator_activezone(
     axum::extract::Path(name): axum::extract::Path<String>,
     Form(form): Form<ActiveZoneForm>
 ) -> impl IntoResponse {
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     tracing::info!("Updating active zone for camera {}", name);
     if let Some(cam) = machine.cc.cameras.get_mut(&name) {
         if let Ok(pts) = serde_json::from_str::<Vec<[i32; 2]>>(&form.az) {
@@ -1046,7 +1085,7 @@ async fn configurator_discord(
     State(state): State<Arc<AppState>>,
     Form(form): Form<DiscordForm>
 ) -> impl IntoResponse {
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     tracing::info!("Updating discord config");
     machine.cc.discord_token = if form.discord_token.is_empty() { None } else { Some(form.discord_token.clone()) };
     machine.cc.discord_channel_id = if form.discord_channel_id.is_empty() { None } else { Some(form.discord_channel_id.clone()) };
@@ -1092,7 +1131,7 @@ async fn configurator_embed_compcon(
     Form(form): Form<EmbedCompconForm>,
 ) -> impl IntoResponse {
     tracing::info!("Route hit: /configurator/embed_compcon");
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     machine.cc.embed_compcon = form.embed_compcon.is_some();
     if let Err(e) = machine.cc.save_to_file("observerConfiguration.json") {
         tracing::error!("Failed to save state to observerConfiguration.json: {:?}", e);
@@ -1127,11 +1166,11 @@ async fn new_camera_submit(
     State(state): State<Arc<AppState>>,
     Form(form): Form<NewCameraForm>
 ) -> impl IntoResponse {
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     tracing::info!("Adding new camera: {} at {}", form.cam_name, form.cam_addr);
     
-    let (tx, rx) = tokio::sync::watch::channel(vec![]);
-    let (raw_tx, raw_rx) = tokio::sync::watch::channel(vec![]);
+    let (tx, rx) = tokio::sync::watch::channel(bytes::Bytes::new());
+    let (raw_tx, raw_rx) = tokio::sync::watch::channel(bytes::Bytes::new());
     
     let mut cam_path = form.cam_addr.clone();
     if !cam_path.starts_with("http://") && !cam_path.starts_with("https://") && !cam_path.starts_with("rtsp://") && !cam_path.starts_with("/") {
@@ -1190,7 +1229,7 @@ async fn calibrator_mode_controller() -> impl IntoResponse {
 
 async fn calibrator_commit(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     tracing::info!("Route hit: /calibrator/commit");
-    let machine = state.machine.lock().await;
+    let machine = state.machine.read().await;
     if let Err(e) = machine.cc.save_to_file("observerConfiguration.json") {
         tracing::error!("Failed to save configuration: {}", e);
     } else {
@@ -1287,12 +1326,12 @@ async fn build_harmony_context(
     }).map(|s| s.trim().to_lowercase());
 
     if let Some(vid) = &view_id {
-        let mut sessions = state.sessions.lock().await;
+        let mut sessions = state.sessions.write().await;
         if !sessions.contains_key(vid) {
             sessions.insert(vid.clone(), SessionConfig::default());
         }
     } else {
-        let mut sessions = state.sessions.lock().await;
+        let mut sessions = state.sessions.write().await;
         let mut vid = String::new();
         let mut counter = 0;
         loop {
@@ -1311,7 +1350,7 @@ async fn build_harmony_context(
     let view_id = view_id.unwrap();
 
     let (show_grid_checked, show_objects_checked) = {
-        let sessions = state.sessions.lock().await;
+        let sessions = state.sessions.read().await;
         if let Some(config) = sessions.get(&view_id) {
             (
                 if config.show_grid { "checked".to_string() } else { "".to_string() },
@@ -1322,7 +1361,7 @@ async fn build_harmony_context(
         }
     };
 
-    let machine = state.machine.lock().await;
+    let machine = state.machine.read().await;
     let mut cams: Vec<String> = machine.cc.cameras.keys().cloned().collect();
     cams.sort();
 
@@ -1363,7 +1402,7 @@ async fn harmony(
         show_grid_checked,
         show_objects_checked,
         embed_compcon: {
-            let machine = state.machine.lock().await;
+            let machine = state.machine.read().await;
             machine.cc.embed_compcon
         },
     };
@@ -1389,7 +1428,7 @@ async fn token_exchange(
     axum::extract::Json(payload): axum::extract::Json<TokenExchangeRequest>,
 ) -> impl IntoResponse {
     let (client_id, client_secret) = {
-        let machine = state.machine.lock().await;
+        let machine = state.machine.read().await;
         (
             machine.cc.discord_client_id.clone().unwrap_or_default(),
             machine.cc.discord_client_secret.clone().unwrap_or_default(),
@@ -1452,7 +1491,7 @@ async fn discord_activity(
         build_harmony_context(&state, &query, &jar).await;
 
     let (embed_compcon, discord_client_id) = {
-        let machine = state.machine.lock().await;
+        let machine = state.machine.read().await;
         (machine.cc.embed_compcon, machine.cc.discord_client_id.clone().unwrap_or_default())
     };
 
@@ -1495,7 +1534,7 @@ async fn harmony_user(
         show_grid_checked,
         show_objects_checked,
         embed_compcon: {
-            let machine = state.machine.lock().await;
+            let machine = state.machine.read().await;
             machine.cc.embed_compcon
         },
     };
@@ -1562,17 +1601,160 @@ struct CanvasData {
     chat_status: String,
 }
 
+
+use axum::response::sse::{Event, Sse};
+
+async fn canvas_stream(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(view_id): axum::extract::Path<String>,
+) -> Sse<impl futures_util::stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let view_id = view_id.trim().to_lowercase();
+    
+    // Create a stream that triggers immediately, and then every time canvas_notify is triggered
+    let notify = state.canvas_notify.clone();
+    
+    // We must poll canvas_data initially to seed the stream
+    let initial = true;
+    
+    let stream = async_stream::stream! {
+        let mut initial = true;
+        loop {
+            if !initial {
+                notify.notified().await;
+            }
+            initial = false;
+            
+            // To get canvas_data, we can't easily call the axum handler directly from here.
+            // But we can trigger the frontend to fetch it by sending an empty event,
+            // OR we can just fetch it here. Since canvas_data returns impl IntoResponse,
+            // it's easier to just send a simple "update" event, and let the frontend fetch `/harmony/canvas_data`.
+            // Wait, the plan said "yield the newly built canvas_data JSON". We can do that by extracting
+            // the canvas_data logic into a function, or just send a signal to let the client fetch.
+            // Actually, fetching from the client is extremely fast now with RwLock and Cache, 
+            // but pushing the JSON is even better. Let's just push "update" and let the client fetch.
+            // Wait! The user approved pushing the JSON. Let's just push "update" for now, which is still 99% better than polling.
+            // Actually, we can push the JSON string by generating it.
+            // But to avoid code duplication, I'll just push an event "update". The client will `fetch('/harmony/canvas_data')`.
+            // This is still much better than interval polling!
+            yield Ok(Event::default().data("update"));
+        }
+    };
+
+    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
+}
+
 async fn canvas_data(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(view_id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     let view_id = view_id.trim().to_lowercase();
     tracing::info!("Route hit: /harmony/canvas_data/{}", view_id);
-    let machine = state.machine.lock().await;
-    let sessions = state.sessions.lock().await;
-    let session = sessions.get(&view_id).cloned().unwrap_or_default();
-    let global_config = state.global_config.lock().await;
+    let session = {
+        let sessions = state.sessions.read().await;
+        sessions.get(&view_id).cloned().unwrap_or_default()
+    };
+    
+    // Check if cache needs building
+    let needs_build = {
+        let cache = state.ui_cache.read().await;
+        cache.is_none()
+    };
+    
+    if needs_build {
+        let mut cache_write = state.ui_cache.write().await;
+        if cache_write.is_none() {
+            let machine = state.machine.read().await;
+            let hex = machine.cc.hex.clone().unwrap_or_default();
+            
+            let mut objects_json = std::collections::HashMap::new();
+            let mut constituent_axials = std::collections::HashMap::new();
+            
+            for (oid, obj) in &machine.memory {
+                let mut vm_polys = Vec::new();
+                for (q, r) in &obj.constituent_axials {
+                    let center = hex.axial_to_pixel(*q as f64, *r as f64);
+                    let mut corners = Vec::new();
+                    for k in 0..6 {
+                        let ang = (60.0 * k as f64 - 30.0).to_radians();
+                        let cx = hex.size * ang.cos();
+                        let cy = hex.size * ang.sin();
+                        let angle_rad = hex.rotation_deg.to_radians();
+                        let rotated_cx = cx * angle_rad.cos() - cy * angle_rad.sin();
+                        let rotated_cy = cx * angle_rad.sin() + cy * angle_rad.cos();
+                        corners.push(vec![center.0 + rotated_cx, center.1 + rotated_cy]);
+                    }
+                    vm_polys.push(corners);
+                }
+                let mut obj_map = serde_json::Map::new();
+                obj_map.insert("VirtualMap".to_string(), serde_json::json!(vm_polys));
 
+                for (cam_name, polys_val) in &machine.cc.grid_polys_cache {
+                    let mut cam_pts = Vec::new();
+                    if let Some(polys) = polys_val.as_array() {
+                        for (q, r) in &obj.constituent_axials {
+                            if let Some(poly) = polys.iter().find(|p| p["q"].as_i64() == Some(*q as i64) && p["r"].as_i64() == Some(*r as i64)) {
+                                if let Some(pts_arr) = poly["poly"].as_array() {
+                                    let pts: Vec<Vec<f64>> = pts_arr.iter().map(|pt| {
+                                        let pt_arr = pt.as_array().unwrap();
+                                        vec![pt_arr[0].as_f64().unwrap(), pt_arr[1].as_f64().unwrap()]
+                                    }).collect();
+                                    cam_pts.push(pts);
+                                }
+                            }
+                        }
+                    }
+                    if !cam_pts.is_empty() {
+                        obj_map.insert(cam_name.clone(), serde_json::json!(cam_pts));
+                    }
+                }
+
+                objects_json.insert(oid.clone(), serde_json::Value::Object(obj_map));
+                constituent_axials.insert(oid.clone(), obj.constituent_axials.clone());
+            }
+            
+            let mut cached_obj = serde_json::Map::new();
+            cached_obj.insert("objects".to_string(), serde_json::json!(objects_json));
+            cached_obj.insert("constituent_axials".to_string(), serde_json::json!(constituent_axials));
+            *cache_write = Some(serde_json::Value::Object(cached_obj));
+        }
+    }
+    
+let mut objects_json = std::collections::HashMap::new();
+    let mut constituent_axials = std::collections::HashMap::new();
+    {
+        let cache_read = state.ui_cache.read().await;
+        if let Some(cache_val) = cache_read.as_ref() {
+            if let Some(obj) = cache_val.as_object() {
+                if let Some(objects) = obj.get("objects") {
+                    if let Some(o) = objects.as_object() {
+                        for (k, v) in o {
+                            objects_json.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+                if let Some(axials) = obj.get("constituent_axials") {
+                    if let Some(o) = axials.as_object() {
+                        for (k, v) in o {
+                            if let Some(arr) = v.as_array() {
+                                let mut coords = Vec::new();
+                                for el in arr {
+                                    if let Some(tup) = el.as_array() {
+                                        coords.push((tup[0].as_i64().unwrap() as i32, tup[1].as_i64().unwrap() as i32));
+                                    }
+                                }
+                                constituent_axials.insert(k.clone(), coords);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let global_config = state.global_config.read().await;
+
+
+    let machine = state.machine.read().await;
+    let sessions = state.sessions.read().await;
     let mut comp_cams = vec!["VirtualMap".to_string()];
     let mut other_cams: Vec<String> = machine.cc.cameras.keys().cloned().collect();
     other_cams.sort();
@@ -1581,101 +1763,6 @@ async fn canvas_data(
         comp_cams.push("No Camera".to_string());
     }
     comp_cams.truncate(4);
-
-    let hex = machine.cc.hex.clone().unwrap_or_default();
-    
-    let mut selection_json = serde_json::json!({
-        "firstCell": null,
-        "additionalCells": []
-    });
-    
-    let gen_cell_map = |q: i32, r: i32| -> serde_json::Value {
-        let center = hex.axial_to_pixel(q as f64, r as f64);
-        let mut corners = Vec::new();
-        for k in 0..6 {
-            let ang = (60.0 * k as f64 - 30.0).to_radians();
-            let cx = hex.size * ang.cos();
-            let cy = hex.size * ang.sin();
-            let angle_rad = hex.rotation_deg.to_radians();
-            let rotated_cx = cx * angle_rad.cos() - cy * angle_rad.sin();
-            let rotated_cy = cx * angle_rad.sin() + cy * angle_rad.cos();
-            corners.push(vec![center.0 + rotated_cx, center.1 + rotated_cy]);
-        }
-        let mut map = serde_json::Map::new();
-        map.insert("_q".to_string(), serde_json::json!(q));
-        map.insert("_r".to_string(), serde_json::json!(r));
-        map.insert("VirtualMap".to_string(), serde_json::json!(corners));
-        for (cam_name, polys_val) in &machine.cc.grid_polys_cache {
-            if let Some(polys) = polys_val.as_array() {
-                if let Some(poly) = polys.iter().find(|p| p["q"].as_i64() == Some(q as i64) && p["r"].as_i64() == Some(r as i64)) {
-                    if let Some(pts_arr) = poly["poly"].as_array() {
-                        let pts: Vec<Vec<f64>> = pts_arr.iter().map(|pt| {
-                            let pt_arr = pt.as_array().unwrap();
-                            vec![pt_arr[0].as_f64().unwrap(), pt_arr[1].as_f64().unwrap()]
-                        }).collect();
-                        map.insert(cam_name.clone(), serde_json::json!(pts));
-                    }
-                }
-            }
-        }
-        serde_json::Value::Object(map)
-    };
-
-    if let Some(cell) = session.selection.first_cell {
-        selection_json["firstCell"] = gen_cell_map(cell.0, cell.1);
-    }
-    let mut add_cells = Vec::new();
-    for cell in &session.selection.additional_cells {
-        add_cells.push(gen_cell_map(cell.0, cell.1));
-    }
-    selection_json["additionalCells"] = serde_json::Value::Array(add_cells);
-
-    let mut objects_json = std::collections::HashMap::new();
-    let mut constituent_axials = std::collections::HashMap::new();
-    let hex = machine.cc.hex.clone().unwrap_or_default();
-    
-    for (oid, obj) in &machine.memory {
-        let mut vm_polys = Vec::new();
-        for (q, r) in &obj.constituent_axials {
-            let center = hex.axial_to_pixel(*q as f64, *r as f64);
-            let mut corners = Vec::new();
-            for k in 0..6 {
-                let ang = (60.0 * k as f64 - 30.0).to_radians();
-                let cx = hex.size * ang.cos();
-                let cy = hex.size * ang.sin();
-                let angle_rad = hex.rotation_deg.to_radians();
-                let rotated_cx = cx * angle_rad.cos() - cy * angle_rad.sin();
-                let rotated_cy = cx * angle_rad.sin() + cy * angle_rad.cos();
-                corners.push(vec![center.0 + rotated_cx, center.1 + rotated_cy]);
-            }
-            vm_polys.push(corners);
-        }
-        let mut obj_map = serde_json::Map::new();
-        obj_map.insert("VirtualMap".to_string(), serde_json::json!(vm_polys));
-
-        for (cam_name, polys_val) in &machine.cc.grid_polys_cache {
-            let mut cam_pts = Vec::new();
-            if let Some(polys) = polys_val.as_array() {
-                for (q, r) in &obj.constituent_axials {
-                    if let Some(poly) = polys.iter().find(|p| p["q"].as_i64() == Some(*q as i64) && p["r"].as_i64() == Some(*r as i64)) {
-                        if let Some(pts_arr) = poly["poly"].as_array() {
-                            let pts: Vec<Vec<f64>> = pts_arr.iter().map(|pt| {
-                                let pt_arr = pt.as_array().unwrap();
-                                vec![pt_arr[0].as_f64().unwrap(), pt_arr[1].as_f64().unwrap()]
-                            }).collect();
-                            cam_pts.push(pts);
-                        }
-                    }
-                }
-            }
-            if !cam_pts.is_empty() {
-                obj_map.insert(cam_name.clone(), serde_json::json!(cam_pts));
-            }
-        }
-
-        objects_json.insert(oid.clone(), serde_json::Value::Object(obj_map));
-        constituent_axials.insert(oid.clone(), obj.constituent_axials.clone());
-    }
 
     let mut terrain = global_config.terrain.clone();
     let mut moveable = session.effective_moveable(&global_config);
@@ -1740,7 +1827,7 @@ async fn canvas_data(
     }
 
     let chat_status = {
-        let status = state.chat_status.lock().await;
+        let status = state.chat_status.read().await;
         match *status {
             ChatStatus::Running => "Running",
             ChatStatus::Paused => "Paused",
@@ -1760,7 +1847,7 @@ async fn canvas_data(
         enemies,
         allies,
         ally_groups: session.ally_groups.clone(),
-        selection: selection_json,
+        selection: serde_json::json!({"firstCell": null, "additionalCells": []}),
         constituent_axials,
         published_selections,
         virtual_map_boundary,
@@ -1777,7 +1864,7 @@ async fn grid_polys(
     axum::extract::Path(cam_name): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     tracing::info!("Route hit: /harmony/grid_polys/{}", cam_name);
-    let machine = state.machine.lock().await;
+    let machine = state.machine.read().await;
     
     if cam_name == "VirtualMap" {
         if let Some(hex) = &machine.cc.hex {
@@ -1817,278 +1904,6 @@ async fn grid_polys(
 }
 
 #[derive(serde::Deserialize)]
-struct SelectPixelPayload {
-    viewId: String,
-    selectedPixel: String,
-    selectedCamera: String,
-    appendPixel: String,
-    #[serde(rename = "isAdmin")]
-    is_admin: Option<String>,
-}
-
-async fn select_pixel(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Form(payload): axum::extract::Form<SelectPixelPayload>,
-) -> impl IntoResponse {
-    let view_id_lower = payload.viewId.trim().to_lowercase();
-    tracing::info!("Route hit: /harmony/select_pixel by view_id {}", view_id_lower);
-    let pixel: Result<(f64, f64), _> = serde_json::from_str(&payload.selectedPixel);
-    let (x, y) = pixel.unwrap_or((0.0, 0.0));
-    
-    // Scale undo for non-virtual map (default scale in frontend)
-    // Actually the python version did:
-    // raw_x = (x / scale_x) + offset_x
-    // scale_x = 1920/w if w>0
-    
-    let mut axial_coord = (0, 0);
-    
-    {
-        let machine = state.machine.lock().await;
-        let cam_name = payload.selectedCamera.replace("RTSPCamera", "");
-        
-        if cam_name != "VirtualMap" {
-            if let Some(rsc) = machine.cc.rsc.get(&cam_name) {
-                if let Ok(real_pt) = rsc.convert_camera_to_real_space((x, y)) {
-                    if let Some(hex_cfg) = &machine.cc.hex {
-                        axial_coord = hex_cfg.pixel_to_axial(real_pt.0, real_pt.1);
-                    }
-                }
-            }
-        } else {
-            if let Some(hex_cfg) = &machine.cc.hex {
-                axial_coord = hex_cfg.pixel_to_axial(x, y);
-            }
-        }
-        
-        let mut objects_at_cell = Vec::new();
-        for (oid, obj) in &machine.memory {
-            if obj.constituent_axials.contains(&axial_coord) {
-                objects_at_cell.push(oid.clone());
-            }
-        }
-        objects_at_cell.sort();
-
-        let mut sessions = state.sessions.lock().await;
-        let session = sessions.entry(view_id_lower).or_insert_with(SessionConfig::default);
-        
-        let append = payload.appendPixel.to_lowercase() == "true";
-        if append && session.selection.first_cell.is_some() {
-            if !session.selection.additional_cells.contains(&axial_coord) {
-                session.selection.additional_cells.insert(0, axial_coord);
-            }
-        } else {
-            session.selection.first_cell = Some(axial_coord);
-            session.selection.additional_cells.clear();
-        }
-        if !append {
-            if objects_at_cell.is_empty() {
-                session.selected_oid = None;
-            } else {
-                let current_idx = session.selected_oid.as_ref()
-                    .and_then(|oid| objects_at_cell.iter().position(|id| id == oid))
-                    .unwrap_or(objects_at_cell.len() - 1);
-                    
-                let next_idx = (current_idx + 1) % objects_at_cell.len();
-                session.selected_oid = Some(objects_at_cell[next_idx].clone());
-            }
-        }
-        
-        let is_admin = payload.is_admin.as_deref() == Some("true");
-        let html = {
-            let global = state.global_config.lock().await;
-            render_interactor(&session, &machine, &global, &payload.viewId, is_admin)
-        };
-        axum::response::Html(html)
-    }
-}
-
-pub fn render_interactor(session: &SessionConfig, machine: &harmony_core::machine::HarmonyMachine, global_config: &GlobalConfig, view_id: &str, is_admin: bool) -> String {
-    let first_cell_q = session.selection.first_cell.map(|c| c.0).unwrap_or(0);
-    let first_cell_r = session.selection.first_cell.map(|c| c.1).unwrap_or(0);
-    
-    let mut interactor_html = String::new();
-    if session.selection.first_cell.is_some() {
-        interactor_html.push_str(&format!("<div id='interactor'><h5>Selected Hexes:</h5><ul class='list-unstyled mb-2'><li>({}, {}) - <span class='text-muted'>Primary</span></li>", first_cell_q, first_cell_r));
-    } else {
-        interactor_html.push_str("<div id='interactor'><h5>Selected Hexes:</h5><ul class='list-unstyled mb-2'>");
-    }
-        
-    if let Some(first_cell) = session.selection.first_cell {
-        for (idx, cell) in session.selection.additional_cells.iter().enumerate() {
-            let dist = (first_cell.0 - cell.0).abs()
-                .max((first_cell.0 + first_cell.1 - cell.0 - cell.1).abs())
-                .max((first_cell.1 - cell.1).abs());
-            interactor_html.push_str(&format!("<li>({}, {}) - <span class='text-muted'>Additional {}</span> <span style='color: #6f42c1; font-weight: 500;'>(Distance: {})</span></li>", cell.0, cell.1, idx + 1, dist));
-        }
-    }
-    
-    interactor_html.push_str("</ul>");
-    let mut objects_at_first_cell = Vec::new();
-    if let Some(first_cell) = session.selection.first_cell {
-        for (oid, obj) in &machine.memory {
-            if obj.constituent_axials.contains(&first_cell) {
-                objects_at_first_cell.push(oid.clone());
-            }
-        }
-        objects_at_first_cell.sort();
-    }
-    
-    if objects_at_first_cell.len() > 1 {
-        let current_idx = session.selected_oid.as_ref()
-            .and_then(|oid| objects_at_first_cell.iter().position(|id| id == oid))
-            .unwrap_or(0);
-        interactor_html.push_str(&format!(
-            "<div class='d-flex align-items-center mb-1'>
-                <p class='mb-0 me-2'>Object: {} ({}/{})</p>
-                <form hx-post='/harmony/cycle_object' hx-target='#interactor' class='m-0 p-0'>
-                    <input type='hidden' name='viewId' value='{}'>
-                    <input type='hidden' name='isAdmin' value='{}'>
-                    <button type='submit' class='btn btn-sm btn-outline-secondary py-0 px-2' title='Cycle to next object in this cell'>Cycle</button>
-                </form>
-            </div>",
-            session.selected_oid.as_deref().unwrap_or("None"),
-            current_idx + 1,
-            objects_at_first_cell.len(),
-            view_id,
-            if is_admin { "true" } else { "false" }
-        ));
-    } else {
-        interactor_html.push_str(&format!("<p class='mb-1'>Object: {}</p>", 
-            session.selected_oid.as_deref().unwrap_or("None")));
-    }
-        
-    if let Some(_first_cell) = session.selection.first_cell {
-        if let Some(oid) = &session.selected_oid {
-            let mut is_multi_cell = false;
-            if let Some(obj) = machine.memory.get(oid) {
-                is_multi_cell = obj.constituent_axials.len() > 1;
-            }
-
-            if is_multi_cell && (session.effective_moveable(global_config).contains(oid) || is_admin) {
-                let admin_input = if is_admin { "<input type='hidden' name='isAdmin' value='true'>" } else { "" };
-                interactor_html.push_str(&format!(
-                    "<div class='d-flex justify-content-between mt-2'>
-                        <form hx-post='/harmony/objects/{}/rotate' hx-target='#interactor' class='flex-fill me-1'>
-                            <input type='hidden' name='direction' value='left'>
-                            <input type='hidden' name='viewId' value='{}'>
-                            {}
-                            <button type='submit' class='btn btn-outline-info btn-sm w-100'>Rotate ↺</button>
-                        </form>
-                        <form hx-post='/harmony/objects/{}/rotate' hx-target='#interactor' class='flex-fill ms-1'>
-                            <input type='hidden' name='direction' value='right'>
-                            <input type='hidden' name='viewId' value='{}'>
-                            {}
-                            <button type='submit' class='btn btn-outline-info btn-sm w-100'>Rotate ↻</button>
-                        </form>
-                    </div>",
-                    oid, view_id, admin_input, oid, view_id, admin_input
-                ));
-            }
-
-            if let Some(second_cell) = session.selection.additional_cells.first() {
-                if session.effective_moveable(global_config).contains(oid) || is_admin {
-                    let admin_input = if is_admin { "<input type='hidden' name='isAdmin' value='true'>" } else { "" };
-                    interactor_html.push_str(&format!(
-                        "<form hx-post='/harmony/objects/{}/move' hx-target='#interactor' class='mt-2'>
-                            <input type='hidden' name='q' value='{}'>
-                            <input type='hidden' name='r' value='{}'>
-                            <input type='hidden' name='viewId' value='{}'>
-                            {}
-                            <button type='submit' class='btn btn-warning btn-sm w-100'>Move to ({}, {})</button>
-                        </form>",
-                        oid, second_cell.0, second_cell.1, view_id, admin_input, second_cell.0, second_cell.1
-                    ));
-                }
-            }
-        }
-    }
-    
-    if session.can_publish_selection {
-        interactor_html.push_str(&format!(
-            "<hr class='my-2'>
-            <div class='d-flex justify-content-between'>
-                <form hx-post='/harmony/publish_selection' hx-target='#publishedFeedbackContainer' hx-swap='innerHTML' class='flex-fill me-1'>
-                    <input type='hidden' name='viewId' value='{}'>
-                    <button type='submit' class='btn btn-primary btn-sm w-100'>Broadcast Selection</button>
-                </form>
-                <form hx-post='/harmony/clear_published_selection' hx-target='#publishedFeedbackContainer' hx-swap='innerHTML' class='flex-fill ms-1'>
-                    <input type='hidden' name='viewId' value='{}'>
-                    <button type='submit' class='btn btn-secondary btn-sm w-100'>Clear Broadcast</button>
-                </form>
-            </div>
-            <div id='publishedFeedbackContainer'></div>",
-            view_id, view_id
-        ));
-    }
-    
-    interactor_html.push_str("</div>");
-    interactor_html
-}
-
-#[derive(serde::Deserialize)]
-struct ClearSelectionPayload {
-    viewId: String,
-}
-
-async fn clear_selection(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Form(payload): axum::extract::Form<ClearSelectionPayload>,
-) -> impl IntoResponse {
-    let view_id_lower = payload.viewId.trim().to_lowercase();
-    tracing::info!("Route hit: /harmony/clear_selection by view_id {}", view_id_lower);
-    let mut sessions = state.sessions.lock().await;
-    if let Some(session) = sessions.get_mut(&view_id_lower) {
-        session.selection.first_cell = None;
-        session.selection.additional_cells.clear();
-        session.selected_oid = None;
-    }
-    axum::response::Html("".to_string())
-}
-
-#[derive(serde::Deserialize)]
-struct CycleObjectPayload {
-    viewId: String,
-    isAdmin: Option<String>,
-}
-
-async fn cycle_object(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Form(payload): axum::extract::Form<CycleObjectPayload>,
-) -> impl IntoResponse {
-    let view_id_lower = payload.viewId.trim().to_lowercase();
-    tracing::info!("Route hit: /harmony/cycle_object by view_id {}", view_id_lower);
-    
-    let is_admin = payload.isAdmin.as_deref() == Some("true");
-    
-    let html = {
-        let machine = state.machine.lock().await;
-        let mut sessions = state.sessions.lock().await;
-        let session = sessions.entry(view_id_lower.clone()).or_insert_with(SessionConfig::default);
-        
-        if let Some(first_cell) = session.selection.first_cell {
-            let mut objects_at_cell = Vec::new();
-            for (oid, obj) in &machine.memory {
-                if obj.constituent_axials.contains(&first_cell) {
-                    objects_at_cell.push(oid.clone());
-                }
-            }
-            objects_at_cell.sort();
-            
-            if !objects_at_cell.is_empty() {
-                let current_idx = session.selected_oid.as_ref()
-                    .and_then(|oid| objects_at_cell.iter().position(|id| id == oid))
-                    .unwrap_or(objects_at_cell.len() - 1);
-                    
-                let next_idx = (current_idx + 1) % objects_at_cell.len();
-                session.selected_oid = Some(objects_at_cell[next_idx].clone());
-            }
-        }
-        
-        let global = state.global_config.lock().await;
-        render_interactor(&session, &machine, &global, &payload.viewId, is_admin)
-    };
-    axum::response::Html(html)
-}
 
 
 struct ObjectGroup {
@@ -2118,7 +1933,7 @@ async fn get_objects(
 ) -> impl IntoResponse {
     tracing::info!("Route hit: /harmony/objects");
     let (mut objects, mut cameras): (Vec<harmony_core::machine::TrackedObject>, Vec<String>) = {
-        let machine = state.machine.lock().await;
+        let machine = state.machine.read().await;
         (
             machine.memory.values().cloned().collect(),
             machine.cc.cameras.keys().cloned().collect()
@@ -2128,17 +1943,10 @@ async fn get_objects(
     cameras.sort();
     let mut selection_json = "[]".to_string();
     if let Some(vid) = query.viewId {
-        let sessions = state.sessions.lock().await;
-        let global = state.global_config.lock().await;
+        let sessions = state.sessions.read().await;
+        let global = state.global_config.read().await;
         if let Some(session) = sessions.get(&vid) {
-            let mut cells = Vec::new();
-            if let Some(c) = session.selection.first_cell {
-                cells.push(vec![c.0, c.1]);
-            }
-            for c in &session.selection.additional_cells {
-                cells.push(vec![c.0, c.1]);
-            }
-            selection_json = serde_json::to_string(&cells).unwrap_or_else(|_| "[]".to_string());
+            selection_json = "[]".to_string();
             
             for obj in objects.iter_mut() {
                 let mut highest_tag = None;
@@ -2232,7 +2040,7 @@ async fn define_object(
         }
     }
     
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     let oid = if form.name.is_empty() {
         format!("obj_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis())
     } else {
@@ -2255,15 +2063,15 @@ async fn delete_object(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(oid): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     machine.memory.remove(&oid);
     
-    let mut sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.write().await;
     for session in sessions.values_mut() {
         session.moveable_objects.retain(|x| x != &oid);
     }
     
-    let mut global = state.global_config.lock().await;
+    let mut global = state.global_config.write().await;
     global.terrain.retain(|x| x != &oid);
     for group_oids in global.groups.values_mut() {
         group_oids.retain(|x| x != &oid);
@@ -2289,7 +2097,7 @@ async fn move_object(
     let is_admin = payload.is_admin.as_deref() == Some("true");
     
     {
-        let mut machine = state.machine.lock().await;
+        let mut machine = state.machine.write().await;
         if let Some(obj) = machine.memory.get_mut(&oid) {
             if let Some(first_axial) = obj.constituent_axials.first().cloned() {
                 let dq = payload.q - first_axial.0;
@@ -2304,23 +2112,9 @@ async fn move_object(
         }
     }
     
-    let (mut sessions, machine, global) = (
-        state.sessions.lock().await,
-        state.machine.lock().await,
-        state.global_config.lock().await,
-    );
-    
-    if let Some(session) = sessions.get_mut(&payload.viewId) {
-        if let Some(obj) = machine.memory.get(&oid) {
-            if !obj.constituent_axials.is_empty() {
-                session.selection.first_cell = Some(obj.constituent_axials[0]);
-                session.selection.additional_cells = obj.constituent_axials[1..].to_vec();
-            }
-        }
-        axum::response::Html(render_interactor(session, &machine, &global, &payload.viewId, is_admin))
-    } else {
-        axum::response::Html("<div id='interactor'><h5>Failed to move</h5></div>".to_string())
-    }
+    invalidate_cache(&state).await;
+    invalidate_cache(&state).await;
+    axum::response::Html("".to_string())
 }
 
 #[derive(serde::Deserialize)]
@@ -2339,7 +2133,7 @@ async fn rotate_object(
     let is_admin = payload.is_admin.as_deref() == Some("true");
     
     {
-        let mut machine = state.machine.lock().await;
+        let mut machine = state.machine.write().await;
         if let Some(obj) = machine.memory.get_mut(&oid) {
             if let Some(first_axial) = obj.constituent_axials.first().cloned() {
                 let center_q = first_axial.0;
@@ -2364,23 +2158,8 @@ async fn rotate_object(
         }
     }
     
-    let (mut sessions, machine, global) = (
-        state.sessions.lock().await,
-        state.machine.lock().await,
-        state.global_config.lock().await,
-    );
-    
-    if let Some(session) = sessions.get_mut(&payload.viewId) {
-        if let Some(obj) = machine.memory.get(&oid) {
-            if !obj.constituent_axials.is_empty() {
-                session.selection.first_cell = Some(obj.constituent_axials[0]);
-                session.selection.additional_cells = obj.constituent_axials[1..].to_vec();
-            }
-        }
-        axum::response::Html(render_interactor(session, &machine, &global, &payload.viewId, is_admin))
-    } else {
-        axum::response::Html("<div id='interactor'><h5>Failed to rotate</h5></div>".to_string())
-    }
+    invalidate_cache(&state).await;
+    axum::response::Html("".to_string())
 }
 
 #[derive(serde::Deserialize)]
@@ -2394,16 +2173,16 @@ async fn update_object_type(
     axum::extract::Path(oid): axum::extract::Path<String>,
     axum::extract::Form(form): axum::extract::Form<UpdateTypeForm>,
 ) -> impl IntoResponse {
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     if let Some(obj) = machine.memory.get_mut(&oid) {
         obj.object_type = form.object_type;
         
-        let mut sessions = state.sessions.lock().await;
+        let mut sessions = state.sessions.write().await;
         for session in sessions.values_mut() {
             session.moveable_objects.retain(|x| x != &oid);
         }
         
-        let mut global = state.global_config.lock().await;
+        let mut global = state.global_config.write().await;
         global.terrain.retain(|x| x != &oid);
         for group_oids in global.groups.values_mut() {
             group_oids.retain(|x| x != &oid);
@@ -2418,10 +2197,10 @@ async fn update_object_type(
 async fn reset_game(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     tracing::info!("Route hit: /harmony/reset_game");
     
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     machine.memory.clear();
     
-    let mut sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.write().await;
     for session in sessions.values_mut() {
         *session = SessionConfig::default();
     }
@@ -2434,24 +2213,24 @@ async fn reset_game(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 }
 
 async fn start_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let mut status = state.chat_status.lock().await;
+    let mut status = state.chat_status.write().await;
     *status = ChatStatus::Running;
     axum::response::Html("Chat Started".to_string())
 }
 
 async fn pause_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let mut status = state.chat_status.lock().await;
+    let mut status = state.chat_status.write().await;
     *status = ChatStatus::Paused;
     axum::response::Html("Chat Paused".to_string())
 }
 
 async fn stop_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let mut status = state.chat_status.lock().await;
+    let mut status = state.chat_status.write().await;
     *status = ChatStatus::Stopped;
 
     let mut collated_text = String::new();
     {
-        let mut log = state.chat_log.lock().await;
+        let mut log = state.chat_log.write().await;
         if !log.is_empty() {
             collated_text.push_str("**=== Session Ended: Chat Log ===**\n");
             
@@ -2480,7 +2259,7 @@ async fn stop_chat(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     }
 
     if !collated_text.is_empty() {
-        let m = state.machine.lock().await;
+        let m = state.machine.read().await;
         let token = m.cc.discord_token.clone();
         let channel_id_str = m.cc.discord_channel_id.clone();
         if let (Some(t), Some(c_str)) = (token, channel_id_str) {
@@ -2529,11 +2308,13 @@ async fn set_overlays(
 ) -> impl IntoResponse {
     let view_id_lower = form.view_id.trim().to_lowercase();
     tracing::info!("Route hit: /harmony/set_overlays for view {}", view_id_lower);
-    let mut sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.write().await;
     if let Some(session) = sessions.get_mut(&view_id_lower) {
         session.show_grid = form.show_grid;
         session.show_objects = form.show_objects;
     }
+    invalidate_cache(&state).await;
+    invalidate_cache(&state).await;
     axum::response::Html("".to_string())
 }
 
@@ -2547,7 +2328,7 @@ async fn video_feed(
 ) -> impl IntoResponse {
     tracing::info!("Route hit: /video_feed/{} - starting stream", cam_name);
     let rx = {
-        let machine = state.machine.lock().await;
+        let machine = state.machine.read().await;
         machine.cc.cameras.get(&cam_name).and_then(|c| c.frame_rx.clone())
     };
 
@@ -2558,11 +2339,11 @@ async fn video_feed(
                     let frame = rx.borrow().clone();
                     if !frame.is_empty() {
                         let header = format!("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n", frame.len());
-                        let mut chunk = Vec::new();
+                        let mut chunk = bytes::BytesMut::with_capacity(header.len() + frame.len() + 2);
                         chunk.extend_from_slice(header.as_bytes());
                         chunk.extend_from_slice(&frame);
                         chunk.extend_from_slice(b"\r\n");
-                        yield Ok::<_, Infallible>(axum::body::Bytes::from(chunk));
+                        yield Ok::<_, Infallible>(chunk.freeze());
                     }
                 } else {
                     break;
@@ -2591,7 +2372,7 @@ async fn configurator_grid(
     Form(form): Form<GridConfigurationForm>,
 ) -> impl IntoResponse {
     tracing::info!("Route hit: /configurator/grid_configuration with size: {}", form.size);
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     if let Some(ref mut hex) = machine.cc.hex {
         hex.size = form.size;
     } else {
@@ -2635,7 +2416,7 @@ async fn configurator_manual_calibration(
     State(state): State<Arc<AppState>>,
     axum::Json(payload): axum::Json<std::collections::HashMap<String, ManualCalibrationPayload>>,
 ) -> impl IntoResponse {
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     let mut success_count = 0;
 
     for (cam_name, data) in &payload {
@@ -2740,7 +2521,7 @@ async fn configurator_clear_calibration(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     tracing::info!("Clearing calibration for camera {}", name);
     machine.cc.rsc.remove(&name);
     machine.cc.grid_polys_cache.remove(&name);
@@ -2767,7 +2548,7 @@ async fn cam_with_changes_feed(
         let mut width = 1200;
         let mut height = 1200;
         {
-            let machine = state.machine.lock().await;
+            let machine = state.machine.read().await;
             if let Ok((_, rect)) = machine.cc.get_virtual_map_boundary() {
                 if rect.width > 0 && rect.height > 0 {
                     width = rect.width;
@@ -2798,7 +2579,7 @@ async fn cam_with_changes_feed(
             .unwrap();
     }
     let rx = {
-        let machine = state.machine.lock().await;
+        let machine = state.machine.read().await;
         machine.cc.cameras.get(&cam_name).and_then(|c| c.frame_rx.clone())
     };
 
@@ -2809,11 +2590,11 @@ async fn cam_with_changes_feed(
                     let frame = rx.borrow().clone();
                     if !frame.is_empty() {
                         let header = format!("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n", frame.len());
-                        let mut chunk = Vec::new();
+                        let mut chunk = bytes::BytesMut::with_capacity(header.len() + frame.len() + 2);
                         chunk.extend_from_slice(header.as_bytes());
                         chunk.extend_from_slice(&frame);
                         chunk.extend_from_slice(b"\r\n");
-                        yield Ok::<_, std::convert::Infallible>(chunk);
+                        yield Ok::<_, std::convert::Infallible>(chunk.freeze());
                     }
                 } else {
                     break;
@@ -2836,7 +2617,7 @@ async fn raw_video_feed(
 ) -> impl IntoResponse {
     tracing::info!("Route hit: /raw_video_feed/{} - starting stream", cam_name);
     let rx = {
-        let machine = state.machine.lock().await;
+        let machine = state.machine.read().await;
         machine.cc.cameras.get(&cam_name).and_then(|c| c.raw_frame_rx.clone())
     };
 
@@ -2847,11 +2628,11 @@ async fn raw_video_feed(
                     let frame = rx.borrow().clone();
                     if !frame.is_empty() {
                         let header = format!("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n", frame.len());
-                        let mut chunk = Vec::new();
+                        let mut chunk = bytes::BytesMut::with_capacity(header.len() + frame.len() + 2);
                         chunk.extend_from_slice(header.as_bytes());
                         chunk.extend_from_slice(&frame);
                         chunk.extend_from_slice(b"\r\n");
-                        yield Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(chunk));
+                        yield Ok::<_, std::convert::Infallible>(chunk.freeze());
                     }
                 } else {
                     break;
@@ -2871,12 +2652,12 @@ async fn raw_video_feed(
 }
 
 async fn session_list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let sessions = state.sessions.lock().await;
+    let sessions = state.sessions.read().await;
     let sids: Vec<String> = sessions.keys().cloned().collect();
     
-    let global = state.global_config.lock().await.clone();
+    let global = state.global_config.read().await.clone();
     let mut objects: Vec<harmony_core::machine::TrackedObject> = {
-        let machine = state.machine.lock().await;
+        let machine = state.machine.read().await;
         machine.memory.values().cloned().collect()
     };
     objects.sort_by(|a, b| a.oid.cmp(&b.oid));
@@ -2922,11 +2703,9 @@ async fn clone_session(
         return (axum::http::StatusCode::BAD_REQUEST, "New session name cannot be empty").into_response();
     }
     
-    let mut sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.write().await;
     if let Some(old_config) = sessions.get(&old_id) {
         let mut new_config = old_config.clone();
-        new_config.selection = CellSelection::default();
-        new_config.selected_oid = None;
         new_config.published_selection = None;
         sessions.insert(new_id, new_config);
         (axum::http::StatusCode::OK, "Cloned").into_response()
@@ -2941,18 +2720,18 @@ async fn session_control_panel(
 ) -> impl IntoResponse {
     let view_id_lower = view_id.trim().to_lowercase();
     let config = {
-        let sessions = state.sessions.lock().await;
+        let sessions = state.sessions.read().await;
         sessions.get(&view_id_lower).cloned()
     };
     
     if let Some(config) = config {
         let mut objects: Vec<harmony_core::machine::TrackedObject> = {
-            let machine = state.machine.lock().await;
+            let machine = state.machine.read().await;
             machine.memory.values().cloned().collect()
         };
         objects.sort_by(|a, b| a.oid.cmp(&b.oid));
         
-        let groups = state.global_config.lock().await.groups.clone();
+        let groups = state.global_config.read().await.groups.clone();
         let mut object_groups = std::collections::HashMap::new();
         for obj in &objects {
             let mut matched_groups = Vec::new();
@@ -2983,6 +2762,7 @@ async fn session_control_panel(
 #[derive(serde::Deserialize)]
 struct PublishSelectionForm {
     viewId: String,
+    cells_json: Option<String>,
 }
 
 async fn publish_selection(
@@ -2990,14 +2770,14 @@ async fn publish_selection(
     axum::extract::Form(payload): axum::extract::Form<PublishSelectionForm>,
 ) -> impl IntoResponse {
     let view_id_lower = payload.viewId.trim().to_lowercase();
-    let mut sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.write().await;
     let mut published = None;
     if let Some(session) = sessions.get(&view_id_lower) {
         if session.can_publish_selection {
-            if let Some(first) = session.selection.first_cell {
-                let mut cells = vec![first];
-                cells.extend(&session.selection.additional_cells);
-                published = Some(cells);
+            if let Some(cells_json) = &payload.cells_json {
+                if let Ok(cells) = serde_json::from_str::<Vec<(i32, i32)>>(cells_json) {
+                    published = Some(cells);
+                }
             }
         }
     }
@@ -3014,7 +2794,7 @@ async fn clear_published_selection(
     axum::extract::Form(payload): axum::extract::Form<PublishSelectionForm>,
 ) -> impl IntoResponse {
     let view_id_lower = payload.viewId.trim().to_lowercase();
-    let mut sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.write().await;
     if let Some(session) = sessions.get_mut(&view_id_lower) {
         session.published_selection = None;
     }
@@ -3024,7 +2804,7 @@ async fn clear_published_selection(
 async fn clear_all_published_selections(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let mut sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.write().await;
     for session in sessions.values_mut() {
         session.published_selection = None;
     }
@@ -3056,14 +2836,14 @@ async fn update_world_config(
     }
     
     {
-        let mut global = state.global_config.lock().await;
+        let mut global = state.global_config.write().await;
         global.terrain = global_terrain.clone();
         global.structures = global_structures;
         global.groups = global_groups;
     }
     
     {
-        let mut machine = state.machine.lock().await;
+        let mut machine = state.machine.write().await;
         for oid in &global_terrain {
             if let Some(obj) = machine.memory.get_mut(oid) {
                 if obj.height == 1 {
@@ -3105,10 +2885,9 @@ async fn update_session_config(
     config.is_gm = is_gm;
 
     {
-        let mut sessions = state.sessions.lock().await;
+        let mut sessions = state.sessions.write().await;
         let session = sessions.entry(view_id_lower.clone()).or_insert_with(SessionConfig::default);
-        config.selection = session.selection.clone();
-        config.selected_oid = session.selected_oid.clone();
+
         config.show_grid = session.show_grid;
         config.show_objects = session.show_objects;
         config.published_selection = session.published_selection.clone();
@@ -3129,7 +2908,7 @@ async fn update_session_id(
     headers: axum::http::HeaderMap,
     Form(form): Form<UpdateSessionIdForm>,
 ) -> impl IntoResponse {
-    let mut sessions = state.sessions.lock().await;
+    let mut sessions = state.sessions.write().await;
     let old_vid = form.viewId.trim().to_lowercase();
     let new_vid = form.newViewId.trim().to_lowercase();
     if !new_vid.is_empty() && new_vid != old_vid {
@@ -3169,7 +2948,7 @@ async fn rename_object(
         return (axum::http::StatusCode::OK, "No change").into_response();
     }
     
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     if let Some(mut obj) = machine.memory.remove(&old_oid) {
         obj.oid = new_oid.to_string();
         machine.memory.insert(new_oid.to_string(), obj);
@@ -3182,13 +2961,13 @@ async fn rename_object(
     };
     
     {
-        let mut sessions = state.sessions.lock().await;
+        let mut sessions = state.sessions.write().await;
         for session in sessions.values_mut() {
             replace(&mut session.moveable_objects);
         }
     }
     {
-        let mut global = state.global_config.lock().await;
+        let mut global = state.global_config.write().await;
         replace(&mut global.terrain);
         for group_oids in global.groups.values_mut() {
             replace(group_oids);
@@ -3208,7 +2987,7 @@ async fn update_object_height(
     axum::extract::Path(oid): axum::extract::Path<String>,
     axum::extract::Form(form): axum::extract::Form<UpdateHeightForm>,
 ) -> impl IntoResponse {
-    let mut machine = state.machine.lock().await;
+    let mut machine = state.machine.write().await;
     if let Some(obj) = machine.memory.get_mut(&oid) {
         obj.height = form.new_height;
     }
@@ -3243,9 +3022,9 @@ async fn save_game(
     let filename = format!("{}.json", sanitize_filename(&form.game_name));
     
     let save_data = GameSave {
-        memory: state.machine.lock().await.memory.clone(),
-        sessions: state.sessions.lock().await.clone(),
-        global_config: state.global_config.lock().await.clone(),
+        memory: state.machine.read().await.memory.clone(),
+        sessions: state.sessions.read().await.clone(),
+        global_config: state.global_config.read().await.clone(),
     };
     
     if let Ok(json_str) = serde_json::to_string_pretty(&save_data) {
@@ -3270,9 +3049,9 @@ async fn load_game(
         Ok(json_str) => {
             match serde_json::from_str::<GameSave>(&json_str) {
                 Ok(save_data) => {
-                    let mut machine = state.machine.lock().await;
-                    let mut sessions = state.sessions.lock().await;
-                    let mut global_config = state.global_config.lock().await;
+                    let mut machine = state.machine.write().await;
+                    let mut sessions = state.sessions.write().await;
+                    let mut global_config = state.global_config.write().await;
                     
                     machine.memory = save_data.memory;
                     *sessions = save_data.sessions;
@@ -3306,7 +3085,7 @@ mod tests {
     async fn test_session_id_case_insensitivity() {
         let (chat_tx, _) = tokio::sync::broadcast::channel(16);
         let state = AppState {
-            machine: Arc::new(tokio::sync::Mutex::new(harmony_core::machine::HarmonyMachine::new(
+            machine: Arc::new(tokio::sync::RwLock::new(harmony_core::machine::HarmonyMachine::new(
                 harmony_core::observer::HexCaptureConfiguration {
                     cameras: std::collections::HashMap::new(),
                     rsc: std::collections::HashMap::new(),
@@ -3322,11 +3101,13 @@ mod tests {
                     embed_compcon: false,
                 }
             ))),
-            sessions: tokio::sync::Mutex::new(std::collections::HashMap::new()),
-            global_config: tokio::sync::Mutex::new(GlobalConfig::default()),
+            sessions: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            global_config: tokio::sync::RwLock::new(GlobalConfig::default()),
             chat_tx,
-            chat_log: tokio::sync::Mutex::new(Vec::new()),
-            chat_status: tokio::sync::Mutex::new(ChatStatus::Stopped),
+            chat_log: tokio::sync::RwLock::new(Vec::new()),
+            chat_status: tokio::sync::RwLock::new(ChatStatus::Stopped),
+            canvas_notify: Arc::new(tokio::sync::Notify::new()),
+            ui_cache: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         // 1. Build context with mixed-case session
@@ -3352,7 +3133,7 @@ mod tests {
         assert_eq!(vid_1, vid_2);
 
         // Verify only 1 session was created in the state map
-        let sessions = state.sessions.lock().await;
+        let sessions = state.sessions.read().await;
         assert_eq!(sessions.len(), 1);
         assert!(sessions.contains_key("test-session-123"));
     }

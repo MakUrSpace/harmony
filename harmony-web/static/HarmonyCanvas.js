@@ -884,54 +884,9 @@ async function handlePixelSelection(event, camNameOverride) {
         console.error('Client cell selection error:', err);
     }
 
-    const selectPixelForm = document.getElementById(`selectPixelForm`);
-    const viewIdVal = document.getElementById(`viewId`) ? document.getElementById(`viewId`).value : "";
-
-    // Temporarily set the selectedCamera form field to the clicked camera (fallback only)
-    const selectedCameraInput = document.getElementById('selectedCamera');
-    
-    // Use HTMX api if available, otherwise fallback to requestSubmit
-    if (typeof htmx !== 'undefined') {
-        queuedClicks++;
-            const values = {
-                viewId: viewIdVal,
-                selectedPixel: JSON.stringify([~~final_x, ~~final_y]),
-                selectedCamera: finalCamName,
-                appendPixel: isAppend ? "true" : "false"
-            };
-            const isAdminInput = document.querySelector('input[name="isAdmin"]');
-            if (isAdminInput) {
-                values.isAdmin = isAdminInput.value;
-            }
-            
-            htmx.ajax('POST', selectPixelForm.getAttribute('hx-post'), {
-                target: '#interactor',
-                source: '#selectPixelForm',
-                values: values
-            });
-    } else {
-        pixelField.value = JSON.stringify([~~final_x, ~~final_y]);
-        selectedCameraInput.value = finalCamName;
-        selectPixelForm.requestSubmit();
+    if (window.renderInteractor) {
+        window.renderInteractor();
     }
-
-    // Restore if needed
-    if (camNameOverride) {
-        selectedCameraInput.value = 'All';
-    } else if (camName === 'All') {
-        selectedCameraInput.value = 'All';
-    }
-}
-
-document.addEventListener('htmx:afterRequest', function(evt) {
-    if (evt.detail.elt.id === 'selectPixelForm') {
-        if (queuedClicks > 0) queuedClicks--;
-        if (queuedClicks === 0 && queuedSyncCanvas) {
-            queuedSyncCanvas = false;
-            syncCanvasData(document.getElementById("viewId") ? document.getElementById("viewId").value : null);
-        }
-    }
-});
 
 function pointInPolygon(point, vs) {
     var x = point[0], y = point[1];
@@ -1284,3 +1239,165 @@ function updateToolParams() {
 function hexDistance(q1, r1, q2, r2) {
     return (Math.abs(q1 - q2) + Math.abs(q1 + r1 - q2 - r2) + Math.abs(r1 - r2)) / 2;
 }
+
+window.renderInteractor = function() {
+    let interactor = document.getElementById('interactor');
+    if (!interactor) return;
+    
+    let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : window.harmonyCanvasData;
+    let sel = editorData.selection || {};
+    let firstCell = sel.firstCell;
+    let html = '';
+    
+    if (firstCell) {
+        html += `<h5>Selected Hexes:</h5><ul class='list-unstyled mb-2'>`;
+        html += `<li>(${firstCell._q}, ${firstCell._r}) - <span class='text-muted'>Primary</span></li>`;
+    } else {
+        html += `<h5>Selected Hexes:</h5><ul class='list-unstyled mb-2'>`;
+    }
+    
+    if (firstCell && sel.additionalCells) {
+        sel.additionalCells.forEach((cell, idx) => {
+            let dist = Math.max(
+                Math.abs(firstCell._q - cell._q),
+                Math.abs(firstCell._q + firstCell._r - cell._q - cell._r),
+                Math.abs(firstCell._r - cell._r)
+            );
+            html += `<li>(${cell._q}, ${cell._r}) - <span class='text-muted'>Additional ${idx + 1}</span> <span style='color: #6f42c1; font-weight: 500;'>(Distance: ${dist})</span></li>`;
+        });
+    }
+    html += `</ul>`;
+    
+    let objectsAtFirstCell = [];
+    if (firstCell) {
+        let axials = editorData.constituent_axials || {};
+        for (let oid in axials) {
+            let contains = axials[oid].some(c => c[0] === firstCell._q && c[1] === firstCell._r);
+            if (contains) objectsAtFirstCell.push(oid);
+        }
+        objectsAtFirstCell.sort();
+    }
+    
+    let selectedOid = window.selectedOid || null;
+    if (objectsAtFirstCell.length > 0) {
+        if (!selectedOid || !objectsAtFirstCell.includes(selectedOid)) {
+            selectedOid = objectsAtFirstCell[0];
+            window.selectedOid = selectedOid;
+        }
+    } else {
+        selectedOid = null;
+        window.selectedOid = null;
+    }
+    
+    // Cycle button
+    if (objectsAtFirstCell.length > 1) {
+        let currentIdx = objectsAtFirstCell.indexOf(selectedOid);
+        html += `<div class='d-flex align-items-center mb-1'>
+            <p class='mb-0 me-2'>Object: ${selectedOid} (${currentIdx + 1}/${objectsAtFirstCell.length})</p>
+            <button class='btn btn-sm btn-outline-secondary py-0 px-2' title='Cycle to next object in this cell' onclick='cycleSelectedObject()'>Cycle</button>
+        </div>`;
+    } else {
+        html += `<p class='mb-1'>Object: ${selectedOid || "None"}</p>`;
+    }
+    
+    // Actions
+    let viewIdVal = document.getElementById(`viewId`) ? document.getElementById(`viewId`).value : "";
+    let isAdminInput = document.querySelector('input[name="isAdmin"]');
+    let isAdmin = isAdminInput && isAdminInput.value === "true";
+    let adminInputHtml = isAdmin ? "<input type='hidden' name='isAdmin' value='true'>" : "";
+    
+    if (firstCell && selectedOid) {
+        let axials = editorData.constituent_axials || {};
+        let objAxials = axials[selectedOid] || [];
+        let isMultiCell = objAxials.length > 1;
+        
+        let moveable = editorData.moveable || [];
+        let isMoveable = moveable.includes(selectedOid) || isAdmin;
+        
+        if (isMultiCell && isMoveable) {
+            html += `<div class='d-flex justify-content-between mt-2'>
+                <form hx-post='/harmony/objects/${selectedOid}/rotate' hx-swap='none' class='flex-fill me-1' onsubmit='setTimeout(window.renderInteractor, 300)'>
+                    <input type='hidden' name='direction' value='left'>
+                    <input type='hidden' name='viewId' value='${viewIdVal}'>
+                    ${adminInputHtml}
+                    <button type='submit' class='btn btn-outline-info btn-sm w-100'>Rotate ↺</button>
+                </form>
+                <form hx-post='/harmony/objects/${selectedOid}/rotate' hx-swap='none' class='flex-fill ms-1' onsubmit='setTimeout(window.renderInteractor, 300)'>
+                    <input type='hidden' name='direction' value='right'>
+                    <input type='hidden' name='viewId' value='${viewIdVal}'>
+                    ${adminInputHtml}
+                    <button type='submit' class='btn btn-outline-info btn-sm w-100'>Rotate ↻</button>
+                </form>
+            </div>`;
+        }
+        
+        if (sel.additionalCells && sel.additionalCells.length > 0 && isMoveable) {
+            let secondCell = sel.additionalCells[0];
+            html += `<form hx-post='/harmony/objects/${selectedOid}/move' hx-swap='none' class='mt-2' onsubmit='setTimeout(window.renderInteractor, 300)'>
+                <input type='hidden' name='q' value='${secondCell._q}'>
+                <input type='hidden' name='r' value='${secondCell._r}'>
+                <input type='hidden' name='viewId' value='${viewIdVal}'>
+                ${adminInputHtml}
+                <button type='submit' class='btn btn-warning btn-sm w-100'>Move to (${secondCell._q}, ${secondCell._r})</button>
+            </form>`;
+        }
+    }
+    
+    // Publish Broadcast
+    let isUserUI = window.location.pathname.includes("user");
+    if (!isUserUI) {
+        html += `<hr class='my-2'>
+        <div class='d-flex justify-content-between'>
+            <form id='publishForm' hx-post='/harmony/publish_selection' hx-target='#publishedFeedbackContainer' hx-swap='innerHTML' class='flex-fill me-1' onsubmit='appendCellsToPublish(event)'>
+                <input type='hidden' name='viewId' value='${viewIdVal}'>
+                <input type='hidden' name='cells_json' id='publishCellsJson' value=''>
+                <button type='submit' class='btn btn-primary btn-sm w-100'>Broadcast Selection</button>
+            </form>
+            <form hx-post='/harmony/clear_published_selection' hx-target='#publishedFeedbackContainer' hx-swap='innerHTML' class='flex-fill ms-1'>
+                <input type='hidden' name='viewId' value='${viewIdVal}'>
+                <button type='submit' class='btn btn-secondary btn-sm w-100'>Clear Broadcast</button>
+            </form>
+        </div>
+        <div id='publishedFeedbackContainer'></div>`;
+    }
+    
+    interactor.innerHTML = html;
+    
+    if (typeof htmx !== 'undefined') {
+        htmx.process(interactor);
+    }
+};
+
+window.cycleSelectedObject = function() {
+    let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : window.harmonyCanvasData;
+    let sel = editorData.selection || {};
+    let firstCell = sel.firstCell;
+    if (!firstCell) return;
+    
+    let objectsAtFirstCell = [];
+    let axials = editorData.constituent_axials || {};
+    for (let oid in axials) {
+        let contains = axials[oid].some(c => c[0] === firstCell._q && c[1] === firstCell._r);
+        if (contains) objectsAtFirstCell.push(oid);
+    }
+    objectsAtFirstCell.sort();
+    
+    if (objectsAtFirstCell.length > 1) {
+        let currentIdx = objectsAtFirstCell.indexOf(window.selectedOid);
+        let nextIdx = (currentIdx + 1) % objectsAtFirstCell.length;
+        window.selectedOid = objectsAtFirstCell[nextIdx];
+        window.renderInteractor();
+    }
+};
+
+window.appendCellsToPublish = function(event) {
+    let editorData = window.harmonyEditor ? window.harmonyEditor.getData() : window.harmonyCanvasData;
+    let sel = editorData.selection || {};
+    let cells = [];
+    if (sel.firstCell) cells.push([sel.firstCell._q, sel.firstCell._r]);
+    if (sel.additionalCells) {
+        sel.additionalCells.forEach(c => cells.push([c._q, c._r]));
+    }
+    let input = document.getElementById('publishCellsJson');
+    if (input) input.value = JSON.stringify(cells);
+};

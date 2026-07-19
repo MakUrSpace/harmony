@@ -115,7 +115,14 @@ window.addEventListener('load', function() {
         initHarmonyCanvas();
         let viewIdInput = document.getElementById('viewId');
         if (viewIdInput) {
-            setInterval(function () { syncCanvasData(viewIdInput.value); }, 1000);
+            let viewId = viewIdInput.value;
+            syncCanvasData(viewId);
+            let sse = new EventSource('/harmony/canvas_stream/' + viewId);
+            sse.onmessage = function(event) {
+                if (event.data === "update") {
+                    syncCanvasData(viewId);
+                }
+            };
         }
     }
 });

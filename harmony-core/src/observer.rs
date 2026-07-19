@@ -10,10 +10,10 @@ pub struct Camera {
     pub auth: Vec<String>,
     pub image_buffer: Vec<Mat>,
     pub reference_frame: Option<Mat>,
-    pub frame_rx: Option<tokio::sync::watch::Receiver<Vec<u8>>>,
-    pub frame_tx: Option<tokio::sync::watch::Sender<Vec<u8>>>,
-    pub raw_frame_rx: Option<tokio::sync::watch::Receiver<Vec<u8>>>,
-    pub raw_frame_tx: Option<tokio::sync::watch::Sender<Vec<u8>>>,
+    pub frame_rx: Option<tokio::sync::watch::Receiver<bytes::Bytes>>,
+    pub frame_tx: Option<tokio::sync::watch::Sender<bytes::Bytes>>,
+    pub raw_frame_rx: Option<tokio::sync::watch::Receiver<bytes::Bytes>>,
+    pub raw_frame_tx: Option<tokio::sync::watch::Sender<bytes::Bytes>>,
 }
 
 
@@ -455,8 +455,8 @@ impl HexCaptureConfiguration {
                                 }
                             }
                             
-                            let (tx, rx) = tokio::sync::watch::channel(vec![]);
-                            let (raw_tx, raw_rx) = tokio::sync::watch::channel(vec![]);
+                            let (tx, rx) = tokio::sync::watch::channel(bytes::Bytes::new());
+                            let (raw_tx, raw_rx) = tokio::sync::watch::channel(bytes::Bytes::new());
                             let cam = Camera {
                                 name: k.clone(),
                                 cam_path: cam_path.clone(),

@@ -647,6 +647,7 @@ dependencies = [
 name = "harmony-core"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "ndarray",
  "opencv",
  "serde",

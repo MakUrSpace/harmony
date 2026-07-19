@@ -126,11 +126,12 @@ async function initializeBoard(data) {
                     params.append('x', q);
                     params.append('y', r);
 
-                    fetch('/harmony/select_pixel', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                        body: params.toString()
-                    });
+                    // Local selection
+                    if (window.harmonyCanvasData) {
+                        let polyObj = { _q: q, _r: r };
+                        let sel = { firstCell: polyObj, additionalCells: [] };
+                        window.harmonyCanvasData.selection = sel;
+                    }
                 };
                 
                 virtualBoard.appendChild(cylinder);
@@ -317,6 +318,11 @@ function createCameras(cameras) {
 }
 
 window.onload = () => {
-    setInterval(fetchCanvasData, POLL_INTERVAL);
     fetchCanvasData();
+    let sse = new EventSource('/harmony/canvas_stream/' + VIEW_ID);
+    sse.onmessage = function(event) {
+        if (event.data === "update") {
+            fetchCanvasData();
+        }
+    };
 };

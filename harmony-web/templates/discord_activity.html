@@ -70,7 +70,7 @@
                     <span id="GameWorldHeaderText">Game World View -- {{ default_camera }}</span>
                     <button type="button" class="btn btn-sm btn-outline-info" style="position: absolute; right: 0; bottom: 10px;" id="expandViewerBtn">⤢ Expand</button>
                 </h3>
-                <form id="selectPixelForm" hx-post="{{ harmony_url }}select_pixel" hx-target="#interactor" hx-sync="this:queue all">
+                <form id="selectPixelForm">
                     <input type="hidden" name="selectedCamera" id="selectedCamera" value="{{ default_camera }}">
                     <input type="hidden" name="selectedPixel" id="selectedPixel" value="">
                     <input type="hidden" name="appendPixel" id="appendPixel" value="false">
