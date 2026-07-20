@@ -110,8 +110,10 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Ensure canvas initializes after all scripts and images are fully loaded
-window.addEventListener('load', function() {
+function startup() {
+    console.log("startup() called in discord_ui_events.js");
     if (typeof initHarmonyCanvas === 'function') {
+        console.log("Calling initHarmonyCanvas()...");
         initHarmonyCanvas();
         let viewIdInput = document.getElementById('viewId');
         if (viewIdInput) {
@@ -125,7 +127,13 @@ window.addEventListener('load', function() {
             };
         }
     }
-});
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    startup();
+} else {
+    document.addEventListener('DOMContentLoaded', startup);
+}
 
 window.syncChatTabs = function() {
     let cd = window.harmonyCanvasData;

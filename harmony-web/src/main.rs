@@ -709,7 +709,9 @@ async fn main() {
     let admin_app = Router::new()
         .route("/", get(|| async { axum::response::Redirect::to("/harmony") }))
         .route("/harmony", get(harmony))
+        .route("/harmony/", get(harmony))
         .route("/harmony/chat_ws", axum::routing::get(chat_ws))
+        .route("/harmony/canvas_stream/:view_id", get(canvas_stream))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
 
@@ -769,7 +771,9 @@ async fn main() {
     let user_app = Router::new()
         .route("/", get(harmony_user))
         .route("/harmony_user", get(harmony_user))
+        .route("/harmony_user/", get(harmony_user))
         .route("/harmony/chat_ws", axum::routing::get(chat_ws))
+        .route("/harmony/canvas_stream/:view_id", get(canvas_stream))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
 
@@ -796,6 +800,7 @@ async fn main() {
         .route("/", get(discord_activity))
         .route("/api/discord/token-exchange", post(token_exchange))
         .route("/harmony/chat_ws", axum::routing::get(chat_ws))
+        .route("/harmony/canvas_stream/:view_id", get(canvas_stream))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
 
@@ -821,7 +826,9 @@ async fn main() {
     let vr_app = Router::new()
         .route("/", get(harmony_vr))
         .route("/harmony_vr", get(harmony_vr))
+        .route("/harmony_vr/", get(harmony_vr))
         .route("/harmony/chat_ws", axum::routing::get(chat_ws))
+        .route("/harmony/canvas_stream/:view_id", get(canvas_stream))
         .route("/harmony/canvas_data/:view_id", get(canvas_data))
         .route("/harmony/grid_polys/:cam_name", get(grid_polys))
 
@@ -3137,6 +3144,53 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert!(sessions.contains_key("test-session-123"));
     }
+
+    #[test]
+    fn test_session_config_effective_moveable() {
+        let global = GlobalConfig {
+            terrain: vec![],
+            structures: vec![],
+            groups: {
+                let mut map = std::collections::HashMap::new();
+                map.insert("group1".to_string(), vec!["obj1".to_string(), "obj2".to_string()]);
+                map
+            },
+        };
+
+        let session = SessionConfig {
+            moveable_objects: vec!["obj3".to_string()],
+            moveable_groups: vec!["group1".to_string()],
+            ..Default::default()
+        };
+
+        let effective = session.effective_moveable(&global);
+        assert_eq!(effective.len(), 3);
+        assert!(effective.contains(&"obj1".to_string()));
+        assert!(effective.contains(&"obj2".to_string()));
+        assert!(effective.contains(&"obj3".to_string()));
+    }
+
+    #[test]
+    fn test_session_config_effective_allies() {
+        let global = GlobalConfig {
+            terrain: vec![],
+            structures: vec![],
+            groups: {
+                let mut map = std::collections::HashMap::new();
+                map.insert("groupA".to_string(), vec!["ally1".to_string()]);
+                map
+            },
+        };
+
+        let session = SessionConfig {
+            ally_groups: vec!["groupA".to_string()],
+            ..Default::default()
+        };
+
+        let effective = session.effective_allies(&global);
+        assert_eq!(effective.len(), 1);
+        assert!(effective.contains(&"ally1".to_string()));
+    }
 }
 
 
@@ -3187,3 +3241,4 @@ async fn proxy_request(url: &str) -> axum::response::Response {
         }
     }
 }
+

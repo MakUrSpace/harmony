@@ -13,7 +13,6 @@
       systems = [ "x86_64-linux" "aarch64-linux" ];
       perSystem = { config, self', inputs', pkgs, system, ... }: 
       with pkgs;
-      with python3Packages;
       let 
         craneLib = crane.mkLib pkgs;
         harmony-rs = craneLib.buildPackage {
@@ -46,81 +45,13 @@
               --set HARMONY_STATIC_DIR $out/share/harmony-web/static
           '';
         };
-
-        opencv-contrib-python = buildPythonPackage rec {
-          pname = "opencv-contrib-python";
-          version = "4.12.0.88";
-          pyproject = true;
-          build-system = [ setuptools ];
-          build-inputs = [ scikit-learn ];
-          src = pkgs.fetchPypi {
-            inherit pname version;
-            sha256 = "sha256-Dx4igjqs4JBnuaDo4rS6bXoe8IgH1s6+oxXzEz9Bmg4=";
-          };
-        };
-
-        ipynb = buildPythonPackage rec {
-          pname = "ipynb";
-          version = "0.5.1";
-          pyproject = true;
-          build-system = [ setuptools ];
-          src = pkgs.fetchPypi {
-            inherit pname version;
-            sha256 = "sha256-jYNMd3yjiFKJk4cozDgvCByGpY6Slh6G8KumDJaTjOU=";
-          };
-        };
-
-	harmony-deps = [
-          jupyterlab
-          requests
-          flask
-          gunicorn
-          ipynb
-          ipynbname
-          nest-asyncio
-          opencv4
-          imutils
-          matplotlib
-          uvicorn
-          fastapi
-          jinja2
-          python-multipart
-          graphviz
-          pyzbar
-          aiohttp 
-          hypercorn
-        ];
-
-	harmony = buildPythonPackage {
-          pname = "harmony";
-          version = "0.0.1";
-          src = ./.;
-          pyproject = true;
-          build-system = [ setuptools setuptools-scm ];
-          propagatedBuildInputs = harmony-deps;
-        };
-
-    	harmony-dev-env = python.withPackages (ps: with ps; harmony-deps ++ [ pytest pytest-cov pytest-playwright ]);
+        
+        test-env = pkgs.python3.withPackages (ps: with ps; [ pytest pytest-playwright requests numpy ]);
       in {
-        packages.default = harmony;
-        packages.harmony = harmony;
+        packages.default = harmony-rs;
         packages.harmony-rs = harmony-rs;
-        packages.jupyter = writeShellApplication {
-          name = "jupyter";
-          runtimeInputs = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm ];
-          text = ''
-            #!/usr/bin/env bash
-            # Run from whatever dir `nix run` is invoked in.
-            # If your code lives in ./src, expose it to Python:
-            export PYTHONPATH="$PWD:${PYTHONPATH:-}"
-  
-            echo "Starting Jupyter Lab in $PWD"
-            echo "PYTHONPATH=$PYTHONPATH"
-  
-            exec jupyter lab --notebook-dir="." --ip=0.0.0.0 --no-browser --NotebookApp.token="harmony"
-          '';
-        };
         packages.register-ngrok = writeShellApplication {
+
           name = "register-ngrok";
           runtimeInputs = [ ngrok ];
           text = ''
@@ -195,7 +126,7 @@
 
         packages.tests = writeShellApplication {
           name = "run-tests";
-          runtimeInputs = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver ];
+          runtimeInputs = [ test-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver pkgs.cargo pkgs.rustc pkgs.pkg-config pkgs.openssl pkgs.opencv4 pkgs.clang pkgs.rustPlatform.bindgenHook ];
           text = ''
             export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -207,8 +138,13 @@
             fi
 
             EXIT_CODE=0
-            echo "--- Running Python tests (pytest) ---"
-            if ! pytest tests/ --cov=harmony --cov=observer --cov-report=term-missing "$@"; then
+            echo "--- Running Rust tests (cargo test) ---"
+            if ! nix develop . -c cargo test --workspace; then
+              EXIT_CODE=1
+            fi
+
+            echo "--- Running UI Python E2E tests (pytest) ---"
+            if ! pytest tests/test_ui_playwright.py; then
               EXIT_CODE=1
             fi
 
@@ -224,21 +160,20 @@
         packages.test = self'.packages.tests;
         formatter = pkgs.writeShellApplication {
           name = "nix-fmt";
-          runtimeInputs = [ pkgs.treefmt pkgs.ruff ];
+          runtimeInputs = [ pkgs.treefmt ];
           text = ''
             exec treefmt "$@"
           '';
         };
         devShells.default = pkgs.mkShell {
           name = "harmonyShell";
-          packages = [ harmony-dev-env pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver pkgs.treefmt pkgs.ruff pkgs.rustc pkgs.cargo pkgs.pkg-config pkgs.openssl pkgs.opencv4 pkgs.clang pkgs.rustPlatform.bindgenHook ];
+          packages = [ pkgs.nodejs_20 pkgs.nodePackages.npm pkgs.playwright-driver pkgs.treefmt pkgs.rustc pkgs.cargo pkgs.pkg-config pkgs.openssl pkgs.opencv4 pkgs.clang pkgs.rustPlatform.bindgenHook ];
           shellHook = ''
             export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
             PROJECT_NAME="$(basename "$PWD")"
             export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
-            export PYTHONPATH="$PWD/harmony:$PWD/observer:${PYTHONPATH:-}"
             export PS1="\[\e[1;36m\][$PROJECT_NAME]\[\e[0m\] \w \$ "
           '';
         };

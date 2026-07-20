@@ -721,8 +721,8 @@ async function handlePixelSelection(event, camNameOverride) {
     const cw = imgElem.clientWidth
     const ch = imgElem.clientHeight
 
-    var natural_width = imgElem.naturalWidth || 1920;
-    var natural_height = imgElem.naturalHeight || 1080;
+    var natural_width = imgElem.naturalWidth || 0;
+    var natural_height = imgElem.naturalHeight || 0;
     
     if (natural_width === 0 || natural_height === 0) {
         if (camName === "VirtualMap") {
@@ -887,6 +887,7 @@ async function handlePixelSelection(event, camNameOverride) {
     if (window.renderInteractor) {
         window.renderInteractor();
     }
+}
 
 function pointInPolygon(point, vs) {
     var x = point[0], y = point[1];
@@ -927,11 +928,15 @@ function fetchGridPolys(camName, force = false) {
 
 // Initialization function to be called from the HTML
 function initHarmonyCanvas() {
+    console.log("initHarmonyCanvas() started...");
     // Initialization logic
+    let camInput = document.getElementById('selectedCamera');
+    let camName = camInput ? camInput.value : 'Default';
+    console.log("Camera name:", camName);
     const canvasData = {
         objects: {},
         moveable: [],
-        cameraName: document.getElementById('selectedCamera').value
+        cameraName: camName
     };
 
     var editor = null;
@@ -950,6 +955,7 @@ function initHarmonyCanvas() {
     // 'gameWorldClick' needs to update 'canvasData.cameraName'.
     // So let's attach it to the window or return it.
     window.harmonyCanvasData = canvasData;
+    console.log("window.harmonyCanvasData is set!");
     
     fetchGridPolys(canvasData.cameraName);
 }

@@ -380,6 +380,25 @@ pub struct HexCaptureConfiguration {
     pub embed_compcon: bool,
 }
 
+impl Default for HexCaptureConfiguration {
+    fn default() -> Self {
+        Self {
+            cameras: HashMap::new(),
+            rsc: HashMap::new(),
+            hex: Some(HexGridConfiguration::default()),
+            show_grid: true,
+            show_objects: true,
+            grid_polys_cache: HashMap::new(),
+            calibration_plan: serde_json::json!({}),
+            discord_token: None,
+            discord_channel_id: None,
+            discord_client_id: None,
+            discord_client_secret: None,
+            embed_compcon: false,
+        }
+    }
+}
+
 impl HexCaptureConfiguration {
     pub fn load_from_file(path: &str) -> opencv::Result<Self> {
         let mut cameras = HashMap::new();

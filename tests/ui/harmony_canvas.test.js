@@ -3,7 +3,7 @@ import { JSDOM } from 'jsdom';
 import fs from 'fs';
 import path from 'path';
 
-const scriptPath = path.resolve(__dirname, '../../harmony/harmony_templates/HarmonyCanvas.js');
+const scriptPath = path.resolve(__dirname, '../../harmony-web/static/HarmonyCanvas.js');
 const scriptContent = fs.readFileSync(scriptPath, 'utf8');
 
 describe('HarmonyCanvas.js Unit Tests', () => {
