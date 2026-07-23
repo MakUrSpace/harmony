@@ -18,9 +18,9 @@ Once installed and configured, note your camera's IP address and authentication 
 
 ### Run Harmony
 
-`nix run --impure "github:makurspace/harmony#harmony" --refresh`
+`nix run "github:makurspace/harmony" --refresh`
 
-Harmony will be available at [http://localhost:7000](http://localhost:7000).
+Harmony will be available at [http://localhost:7000](http://localhost:7000). (Note: By default, the Rust server will bind to port 7000).
 
 #### Configure Cameras
 
@@ -84,20 +84,19 @@ You can execute the above commands with a locally cloned repo by replacing `gith
 
 ### devShell
 
-Harmony provides a nix devShell for development. The devShell provides an environment with all dependencies to execute Harmony and the shell's PYTHONPATH updated to use the application code directly (bypassing the Nix package).
+Harmony provides a nix devShell for development. The devShell provides an environment with all dependencies to compile and execute Harmony (including OpenCV and Rust toolchains).
 
 1. Start the devShell with: `nix develop`
-1. Start harmony: `python harmony/harmonyServer.py`
+2. Run the application: `cargo run --bin harmony-web`
+3. Run the test suite: `nix run .#tests`
 
-### [Jupyter](https://jupyter.org/)
-
-Harmony provides a Jupyter development environment. This can started with `nix run .#jupyter`, which will start a Jupyter server at [https://localhost:8888](https://localhost:8888) with the token phrase "harmony".
+For a deeper understanding of the system's architecture, including its components, OpenCV integration, and multi-port ngrok configuration, please refer to [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Harmony is built on:
+* [Rust](https://www.rust-lang.org/)
+* [Axum](https://github.com/tokio-rs/axum)
 * [htmx](https://htmx.org/)
-* [flask](https://flask.palletsprojects.com/en/stable/)
-* [python 3](https://www.python.org/)
-* [SQLite](https://docs.python.org/3/library/sqlite3.html)
+* [SQLite](https://www.sqlite.org/)
 * [OpenCV](https://opencv.org/)
 * [nix](https://nixos.org/guides/how-nix-works/)
 

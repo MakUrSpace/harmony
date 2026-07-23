@@ -1,4 +1,0 @@
-[run]
-omit =
-    harmony/BMMachine.py
-    harmony/userServer.py
